@@ -3,6 +3,7 @@ import {
   ALL_COMPOUNDS,
   COMPOUNDS,
   ENGINE,
+  FAULTS,
   FUEL_MAX,
   PACE,
   type CarState,
@@ -172,6 +173,7 @@ export class Hud {
         <div class="wlabel" style="font-size:12px;color:var(--muted)"></div>
         <div class="wear"><i></i></div>
         <div class="flabel" style="font-size:12px;color:var(--muted);margin:-4px 0 6px"></div>
+        <div class="faultlabel"></div>
         <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
           ${(["push", "normal", "conserve"] as PaceMode[]).map((m) => `<button data-pace="${m}">${PACE[m].label}</button>`).join("")}
         </div></div>
@@ -450,6 +452,8 @@ export class Hud {
       const fl2 = card.querySelector<HTMLElement>(".flabel")!;
       fl2.textContent = `Combustível pra ${fuelLaps.toFixed(1)} voltas (${c.fuel.toFixed(0)} kg) · faltam ${left.toFixed(1)}${short ? "" : " ✓ chega"}`;
       fl2.style.color = short && fuelLaps < 3 ? "var(--soft)" : short ? "var(--warn)" : "var(--muted)";
+      const fault = c.fault && !c.retired ? FAULTS[c.fault] : null;
+      card.querySelector(".faultlabel")!.textContent = fault ? `⚠ ${fault.label} (+${c.faultPen.toFixed(1)}s/volta) · ${fault.fix}` : "";
       card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) => {
         b.classList.toggle("on", b.dataset.pace === c.pace);
         b.disabled = !!c.engineSave && b.dataset.pace === "push";

@@ -132,6 +132,17 @@ export type Command =
   | { type: "engineSave"; carId: string; on: boolean }
   | { type: "order"; carId: string; mode: TeamOrder };
 
+export type FaultKind = "puncture" | "gearbox" | "brakes" | "power" | "hydraulics";
+
+/** problemas mecânicos que podem aparecer do nada */
+export const FAULTS: Record<FaultKind, { label: string; pen: number; weight: number; radio: string; fix: string }> = {
+  puncture: { label: "Pneu furado", pen: 14, weight: 0.35, radio: "Furou o pneu! Tô me arrastando, preciso do box!", fix: "troca no box (qualquer pneu)" },
+  gearbox: { label: "Câmbio com problema", pen: 0.9, weight: 0.2, radio: "O câmbio tá pulando marcha!", fix: "não tem conserto na corrida; pode quebrar" },
+  brakes: { label: "Freio fraco", pen: 0.5, weight: 0.15, radio: "Pedal de freio tá longo, vou ter que frear antes.", fix: "não tem conserto; erra mais nas freadas" },
+  power: { label: "Perda de potência", pen: 1.2, weight: 0.15, radio: "Tô perdendo potência na reta!", fix: "não tem conserto na corrida" },
+  hydraulics: { label: "Pressão hidráulica caindo", pen: 0.7, weight: 0.15, radio: "Luz da hidráulica acesa no painel!", fix: "não tem conserto; pode parar o carro" },
+};
+
 /** ordem de equipe: deixar o companheiro passar, manter posições ou livre */
 export type TeamOrder = "none" | "letPass" | "hold";
 
@@ -182,6 +193,9 @@ export interface CarState {
   offTrack: number;
   offSide: number;
   offFate: "rejoin" | "stuck";
+  /** problema mecânico no momento (furo, câmbio...) e quanto custa por volta */
+  fault: FaultKind | null;
+  faultPen: number;
   /** dano por peça (segundos por volta perdidos); conserta no box */
   dmg: { fw: number; suspF: number; rw: number; suspR: number };
   /** quais peças danificadas trocar na próxima parada */

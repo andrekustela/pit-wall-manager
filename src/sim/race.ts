@@ -5,6 +5,7 @@ import { BOX_SHIFT, PIT_MERGE, TRACK_WIDTH, Track, getTrack } from "./track";
 import { BASE_SLACK, aiTuning, carProfile, clampTuning, lapNoiseSd, makeConditions, wetSkillFactor, type Conditions } from "./tuning";
 import {
   COMPOUNDS,
+  FAULTS,
   DRY,
   ENGINE,
   FUEL_MAX,
@@ -22,6 +23,7 @@ import {
   type Compound,
   type Driver,
   type RaceEvent,
+  type FaultKind,
   type Team,
   type TeamOrder,
   type Tuning,
@@ -65,6 +67,8 @@ const MANDATORY_PENALTY = 30;
 const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
 /** chance de passar reto (por segundo, numa curva), com ritmo normal */
 const OFF_RATE = 1.1e-4;
+/** chance de um problema mecânico aparecer (por carro por segundo): ~4% por corrida */
+const FAULT_RATE = 2.8e-5;
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
 const CAR_L = 4.4;
@@ -84,7 +88,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "offTrack", "offSide", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -137,7 +141,7 @@ export class Race {
   telemetry: Record<string, LapRec[]> = {};
   private teleState: Record<string, { c: Compound; stops: number }> = {};
   /** contadores (pra balancear e pro resumo) */
-  stats = { attempts: 0, aborts: 0, noSide: 0, overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0, offs: 0 };
+  stats = { attempts: 0, aborts: 0, noSide: 0, overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0, offs: 0, faults: 0 };
 
   private rng: Rng;
   private wearScale: number;
@@ -218,6 +222,8 @@ export class Race {
         offTrack: 0,
         offSide: 1,
         offFate: "rejoin",
+        fault: null,
+        faultPen: 0,
         spin: 0,
         damage: 0,
         dmg: { ...NO_DAMAGE },
@@ -501,6 +507,7 @@ export class Race {
         if (c.pit === "none" && c.spin <= 0 && c.offTrack <= 0) {
           this.maybeIncident(c, dt);
           this.maybeOffTrack(c, dt);
+          this.maybeFault(c, dt);
         }
         if (c.retired) continue;
         if (c.isHuman) {
@@ -601,6 +608,7 @@ export class Race {
     rate *= 1 + 4 * this.wet * (isWetTyre(c.compound) ? 0.4 : 1.5);
     if (c.wear > 0.8) rate *= 2;
     if (c.damage > 1) rate *= 1.5;
+    if (c.fault === "brakes") rate *= 3;
     if (c.lap <= 0) rate *= 2;
     if (c.overtaking) rate *= 1.6; // mergulhando na briga
     if (!this.rng.chance(rate * dt)) return;
@@ -622,6 +630,45 @@ export class Race {
       this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, team, "damage");
     } else {
       this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off");
+    }
+  }
+
+  /** problema mecânico do nada (motor gasto e zebra ajudam) */
+  private maybeFault(c: CarState, dt: number) {
+    if (this.checkered || c.finished || c.fault) return;
+    let rate = FAULT_RATE;
+    if (c.engineHealth < 0.5) rate *= 1.5;
+    if (c.pace === "push") rate *= 1.3;
+    if (!this.rng.chance(rate * dt)) return;
+    const kinds = Object.keys(FAULTS) as FaultKind[];
+    let r = this.rng.next() * kinds.reduce((a, k) => a + FAULTS[k].weight, 0);
+    const kind = kinds.find((k) => (r -= FAULTS[k].weight) <= 0) ?? "puncture";
+    this.setFault(c, kind);
+  }
+
+  private setFault(c: CarState, kind: FaultKind) {
+    const f = FAULTS[kind];
+    c.fault = kind;
+    c.faultPen = kind === "puncture" ? f.pen : f.pen * this.rng.range(0.7, 1.3);
+    this.stats.faults++;
+    const team = c.isHuman ? c.team.id : undefined;
+    this.log(`Rádio ${c.driver.short}: "${f.radio}"`, c.isHuman, team, "fault");
+    if (!c.isHuman && (c.position <= 6 || this.rng.chance(0.3))) this.log(`${c.driver.name} com problema: ${f.label.toLowerCase()}.`, false, undefined, "fault");
+    // perda de potência às vezes é elétrica e para o carro na hora
+    if (kind === "power" && this.rng.chance(0.15)) this.retire(c, "Elétrica");
+  }
+
+  /** a cada volta, problema grave pode virar abandono */
+  private faultLap(c: CarState) {
+    if (!c.fault || c.retired || c.finished) return;
+    if (c.fault === "gearbox" && this.rng.chance(0.08)) this.retire(c, "Câmbio");
+    else if (c.fault === "hydraulics" && this.rng.chance(0.15)) this.retire(c, "Hidráulica");
+    else if (c.fault === "puncture" && c.pit === "none" && this.rng.chance(0.12)) {
+      // rodou com o pneu furado e estragou a suspensão
+      const dmg = this.rng.range(0.6, 1.6);
+      c.dmg = { ...c.dmg, suspR: c.dmg.suspR + dmg };
+      c.damage += dmg;
+      this.log(`${c.driver.name}: o pneu furado destruiu a suspensão traseira! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, c.isHuman ? c.team.id : undefined, "damage");
     }
   }
 
@@ -676,7 +723,7 @@ export class Race {
     const cold = c.tyreLaps === 0 && c.pitStops > 0 ? 1.0 : 0;
     return (
       c.team.carPace + c.driver.skill + spec.offset + wetPenalty(c.compound, this.wet) * wetSkillFactor(c.driver) + wearPen + fuel +
-      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage +
+      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage + c.faultPen +
       (c.engineSave ? ENGINE_SAVE.offset : 0) + Math.max(0, 0.6 - c.engineHealth) * 1.2
     );
   }
@@ -975,6 +1022,8 @@ export class Race {
     if (r < 0.6) {
       this.stats.touches++;
       this.log(`Toque entre ${a.driver.short} e ${b.driver.short}! Seguem na pista.`, !!team, team, "touch");
+      // roda encostou na asa do outro: furo
+      if (!victim.fault && this.rng.chance(0.18)) this.setFault(victim, "puncture");
     } else if (r < 0.8) {
       // qual peça quebrou
       const pr = this.rng.next();
@@ -1066,6 +1115,10 @@ export class Race {
         this.log(`${c.driver.short}: trocado (${fixedParts.map((p) => p.label.toLowerCase()).join(", ")}).`, c.isHuman, c.team.id, "info");
       }
     }
+    if (c.fault === "puncture") {
+      c.fault = null;
+      c.faultPen = 0;
+    }
     c.compound = next;
     c.wear = 0;
     c.tyreLaps = 0;
@@ -1103,7 +1156,11 @@ export class Race {
         ? `${c.driver.name} bateu! Está fora da corrida.`
         : reason === "Motor"
           ? `${c.driver.name}: o motor quebrou! Fumaça e abandono.`
-          : `${c.driver.name} ficou sem combustível! Abandono.`;
+          : reason === "Sem combustível"
+            ? `${c.driver.name} ficou sem combustível! Abandono.`
+            : reason === "Preso na brita" || reason === "Bateu no muro"
+              ? `${c.driver.name} ${reason === "Preso na brita" ? "ficou preso na brita" : "bateu no muro"}! Abandono.`
+              : `${c.driver.name} abandona: ${reason.toLowerCase()}.`;
     this.log(msg, true, c.isHuman ? c.team.id : undefined, reason === "Acidente" ? "crash" : "out");
   }
 
@@ -1132,6 +1189,7 @@ export class Race {
     }
     ts.c = c.compound;
     ts.stops = c.pitStops;
+    if (c.lap >= 1) this.faultLap(c);
     c.lapStartTime = crossT;
     c.lapNoise = this.rng.gauss(lapNoiseSd(c.driver));
 
@@ -1356,7 +1414,7 @@ export class Race {
     const planDue = best === "dry" && nextPlanned !== undefined && c.lap + 1 >= nextPlanned && (lapsLeft > 3 || needsRule);
     const lastChance = needsRule && lapsLeft <= 2;
     const lowFuel = fuelLaps < 1.6 && fuelLaps < this.lapsLeft(c);
-    const damaged = c.damage > 0.5 && lapsLeft > 3;
+    const damaged = (c.damage > 0.5 && lapsLeft > 3) || (c.fault === "puncture" && lapsLeft >= 1);
     // safety car = parada mais barata; engenheiro esperto aproveita
     const scChance =
       this.sc.active && q > 0.35 && lapsLeft > 3 && best === "dry" &&
