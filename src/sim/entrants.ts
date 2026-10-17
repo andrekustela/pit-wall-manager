@@ -1,6 +1,7 @@
 // Monta as equipes/pilotos de um fim de semana (nomes personalizados,
 // modo "carros iguais") e sorteia os engenheiros da IA.
 import { DRIVERS, TEAMS } from "./data";
+import { profileOf, toDriver, type Lineup } from "./drivers";
 import { Rng } from "./rng";
 import type { Driver, Team } from "./types";
 
@@ -14,6 +15,8 @@ export interface EntrantOptions {
   equalCars?: boolean;
   /** nome personalizado das equipes humanas */
   teamNames?: Record<string, string>;
+  /** pilotos sorteados de cada equipe (sem isso, usa a escalação fixa antiga) */
+  lineup?: Lineup;
 }
 
 /** no modo igual todo mundo tem carro e piloto equivalentes */
@@ -25,6 +28,11 @@ export function buildEntrants(opts: EntrantOptions): { teams: Team[]; drivers: D
     name: opts.teamNames?.[t.id]?.trim() || t.name,
     carPace: opts.equalCars ? 0 : t.carPace,
   }));
+  if (opts.lineup) {
+    // pilotos da base: no modo "carros iguais" só o carro é igual; o piloto faz a diferença
+    const drivers = TEAMS.flatMap((t) => (opts.lineup![t.id] ?? []).map((id) => toDriver(profileOf(id)!, t.id)));
+    return { teams, drivers };
+  }
   const drivers = DRIVERS.map((d) => (opts.equalCars ? { ...d, skill: EQUAL_SKILL, tyreCare: 1 } : { ...d }));
   return { teams, drivers };
 }

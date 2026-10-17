@@ -25,12 +25,12 @@ export function resultsTable(race: Race, myTeamId: string): string {
         <td>${c.pitStops}</td>
         <td>${c.usedCompounds.map((t) => tyreIcon(t)).join(" ")}</td>
         <td class="num">${c.bestLap ? fmtLap(c.bestLap) : "--"}${fl?.carId === c.id ? " ⏱" : ""}</td>
-        <td style="color:var(--muted)">${c.tuning.fw}/${c.tuning.rw}/${c.tuning.h}</td>
+        <td style="color:var(--muted)" title="Asa diant. / asa tras. / altura / susp. diant. / susp. tras.">${c.tuning.fw}/${c.tuning.rw}/${c.tuning.h}/${c.tuning.sf}/${c.tuning.sr}</td>
       </tr>`;
     })
     .join("");
   return `<table class="results">
-    <tr><th>POS</th><th>PILOTO</th><th>EQUIPE · ENGENHEIRO</th><th>TEMPO</th><th>PARADAS</th><th>PNEUS</th><th>MELHOR VOLTA</th><th>ACERTO D/T/A</th></tr>
+    <tr><th>POS</th><th>PILOTO</th><th>EQUIPE · ENGENHEIRO</th><th>TEMPO</th><th>PARADAS</th><th>PNEUS</th><th>MELHOR VOLTA</th><th>ACERTO</th></tr>
     ${rows}
   </table>`;
 }

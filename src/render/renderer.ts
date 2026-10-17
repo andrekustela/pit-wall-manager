@@ -215,9 +215,9 @@ export class Renderer {
     const o = this.octx;
     const viewX = cx - W / m / 2, viewY = cy - H / m / 2;
     o.setTransform(1, 0, 0, 1, 0, 0);
-    // câmera rápida (8x/16x): tiles mais leves (LOD)
-    const lod = speed >= 8 ? 0.25 : speed >= 4 ? 0.5 : 1;
-    this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, lod);
+    // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
+    void speed;
+    this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, 1);
     o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = "medium";

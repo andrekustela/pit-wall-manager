@@ -71,6 +71,7 @@ const CONTENT: Record<Tab, string> = {
       <li><b>Espaço</b>: pausar / continuar (só o host, no online)</li>
       <li><b>1 a 5</b>: velocidade 1x, 2x, 4x, 8x, 16x</li>
       <li><b>Tab</b>: alternar a câmera entre seus dois pilotos</li>
+      <li><b>F</b> ou botão ⛶: tela cheia</li>
       <li><b>M</b>: minimizar / expandir o painel dos seus pilotos (pra ver mais pista)</li>
       <li><b>+ / −</b> ou roda do mouse: zoom</li>
       <li><b>?</b> (botão no canto): esta ajuda · <b>🔊</b>: liga/desliga o som</li>
@@ -84,10 +85,17 @@ export class HelpWidget {
   constructor(private currentTab: () => Tab) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
+    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
     this.el.querySelector("[data-help]")!.addEventListener("click", () => this.open(this.currentTab()));
     this.el.querySelector("[data-mute]")!.addEventListener("click", () => sound.toggleMute());
+    this.el.querySelector("[data-full]")!.addEventListener("click", () => toggleFullscreen());
+    document.addEventListener("keydown", (e) => {
+      if ((e.key === "f" || e.key === "F") && !(e.target as HTMLElement)?.closest("input, textarea")) toggleFullscreen();
+    });
+    document.addEventListener("fullscreenchange", () => {
+      this.el.querySelector("[data-full]")!.textContent = document.fullscreenElement ? "🗗" : "⛶";
+    });
     const vol = this.el.querySelector<HTMLInputElement>(".vol")!;
     vol.value = String(Math.round(sound.volume * 100));
     vol.addEventListener("input", () => sound.setVolume(Number(vol.value) / 100));
@@ -152,4 +160,9 @@ export function reportFrame(now: number) {
     since = 0;
     frames = 0;
   }, 1000);
+}
+
+export function toggleFullscreen() {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void document.documentElement.requestFullscreen?.().catch(() => {});
 }

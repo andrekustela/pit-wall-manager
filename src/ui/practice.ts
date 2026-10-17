@@ -1,13 +1,15 @@
 import type { Connection } from "../net/connection";
 import type { LobbyState, ServerMsg } from "../net/protocol";
-import { DRIVERS } from "../sim/data";
+import { TEAMS } from "../sim/data";
+import { toDriver } from "../sim/drivers";
+import { showDriverCards } from "./driverCard";
 import { fmtLap } from "../sim/race";
 import { CIRCUITS, getTrack } from "../sim/track";
 import { carProfile, type QualiLap } from "../sim/tuning";
 import { COMPOUNDS, DEFAULT_TUNING, type Tuning } from "../sim/types";
-import { PRACTICE_LAPS } from "../sim/weekend";
+import { PRACTICE_LAPS, weekendConditions } from "../sim/weekend";
 import { forecastText } from "../sim/weather";
-import { backButtonHtml, bindBackButton, champLabel, drawTrackThumb, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, drawTrackThumb, esc, natBadge, teamDrivers, teamName, tipButton, tyreIcon, updateWaitBar, wetIcon, wetLabel } from "./common";
 
 type PracticeMsg = Extract<ServerMsg, { t: "practice" }>;
 
@@ -21,10 +23,12 @@ interface CarPanel {
   el: HTMLElement;
 }
 
-const LABELS: [keyof Tuning, string, string, string][] = [
-  ["fw", "Asa dianteira", "pouca", "muita"],
-  ["rw", "Asa traseira", "pouca", "muita"],
-  ["h", "Altura do carro", "baixo", "alto"],
+const LABELS: [keyof Tuning, string, string, string, string][] = [
+  ["fw", "Asa dianteira", "pouca", "muita", "Mais asa na frente = a frente gruda mais nas curvas. Se o piloto diz que o carro sai de frente (subesterço), aumente. Também ajuda no equilíbrio com a asa traseira."],
+  ["rw", "Asa traseira", "pouca", "muita", "É a maior asa do carro: mais asa = muito mais rápido nas curvas, mas mais lento nas retas (arrasto). Pista travada pede muita asa; pista de retão, pouca. Se a traseira escapa (sobresterço), aumente."],
+  ["h", "Altura do carro", "baixo", "alto", "Carro baixo gruda mais no chão (mais aderência). Mas se a pista for ondulada e o carro estiver baixo demais, ele bate no chão e perde muito. Procure o mais baixo possível sem o piloto reclamar de batida."],
+  ["sf", "Suspensão dianteira", "macia", "dura", "Dura demais o carro pula nas zebras e ondulações; macia demais ele balança e demora a reagir. Suspensão dianteira mais dura que a traseira deixa o carro sair mais de frente."],
+  ["sr", "Suspensão traseira", "macia", "dura", "Mesma ideia da dianteira. Traseira mais dura que a dianteira deixa a traseira mais solta (sobresterço). Pista ondulada costuma pedir suspensão mais macia."],
 ];
 
 export class PracticeScreen {
@@ -39,18 +43,7 @@ export class PracticeScreen {
       <div class="screen"><div class="wrap" style="max-width:1100px">
         <h1 class="title">TREINO <span>LIVRE</span></h1>
         <p class="sub">${esc(champLabel(lobby))}${esc(track.name)} · ${esc(teamName(lobby, me.teamId!))} · Cada piloto tem ${PRACTICE_LAPS} voltas de teste. Ninguém mais vê seus tempos.</p>
-        <div class="cols" style="margin-bottom:12px">
-          <div class="box"><h3>CONDIÇÕES</h3>
-            <div>Treino: <b>${wetLabel(w.practiceWet)}</b></div>
-            <div>Classificação: <b>${wetLabel(w.qualiWet)}</b> (previsão)</div>
-            <div>Corrida: ${esc(forecastText(w))}</div>
-          </div>
-          <div class="box"><h3>COMO FUNCIONA</h3>
-            <div class="hint" style="margin:0">Mais asa = mais rápido nas curvas, mais lento nas retas. Asa dianteira x traseira = equilíbrio.
-            Carro baixo = mais aderência, mas bate no chão se a pista for ondulada. Ouça o piloto depois de cada volta.
-            A volta escolhida é o acerto usado na classificação e na corrida (parque fechado).</div>
-          </div>
-        </div>
+        ${this.conditionsHtml(w)}
         <div class="cols" id="p-cars"></div>
         <div class="row-btns" style="margin-top:20px">
           <button class="go" id="p-ready" style="margin:0">PRONTO PARA A CLASSIFICAÇÃO ▶</button>
@@ -59,22 +52,25 @@ export class PracticeScreen {
       </div></div>`;
 
     const wrap = root.querySelector("#p-cars")!;
-    for (const d of DRIVERS.filter((x) => x.teamId === me.teamId)) {
+    const myTeam = TEAMS.find((t) => t.id === me.teamId)!;
+    for (const d of teamDrivers(lobby, me.teamId!)) {
       const el = document.createElement("div");
       el.className = "box";
       wrap.appendChild(el);
       const panel: CarPanel = { id: d.id, tuning: { ...DEFAULT_TUNING }, laps: [], chosen: null, pending: null, animating: false, el };
       this.panels.push(panel);
       el.innerHTML = `
-        <h3>${esc(d.name.toUpperCase())}</h3>
+        <h3 style="display:flex;justify-content:space-between;align-items:center"><span>${natBadge(d)} ${esc(d.name.toUpperCase())} · ${esc(d.style)}</span>
+          <button class="linkbtn" data-ficha>ver ficha</button></h3>
         ${LABELS.map(
-          ([k, label, lo, hi]) => `<div class="tune"><span>${label}</span><input type="range" min="1" max="11" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
+          ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
             <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
         ).join("")}
         <canvas class="lapcanvas"></canvas>
         <div class="radio" data-radio>Rádio: "Pronto pra sair, é só mandar."</div>
         <button class="btn primary" data-go style="width:100%;margin-top:10px"></button>
-        <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th>D/T/A</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;
+        <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th title="Asa dianteira / traseira / altura / suspensão diant. e tras.">ACERTO</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;
+      el.querySelector("[data-ficha]")!.addEventListener("click", () => showDriverCards([d], teamName(lobby, myTeam.id), myTeam.color));
       el.querySelectorAll<HTMLInputElement>("input[type=range]").forEach((inp) =>
         inp.addEventListener("input", () => {
           const k = inp.dataset.k as keyof Tuning;
@@ -95,6 +91,23 @@ export class PracticeScreen {
       this.renderReady();
     });
     this.renderReady();
+  }
+
+  /** faixa de condições: ícone + % de chuva; clique mostra os detalhes */
+  private conditionsHtml(w: NonNullable<LobbyState["weekend"]>): string {
+    const f = w.forecast;
+    const chance = f ? f.chance : 0;
+    const raceIcon = !f ? "☀" : chance >= 70 ? "🌧" : "🌦";
+    const notes = weekendConditions(w).notes;
+    const item = (icon: string, title: string, sub: string, tip: string) =>
+      `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
+    return `<div class="conds" style="margin-bottom:12px">
+      ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
+      ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
+      ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
+      ${item("🏁", "Pista", notes.length ? `${notes.length} aviso(s)` : "normal", notes.length ? `Neste fim de semana: ${notes.join("; ")}. Isso muda o acerto ideal.` : "Condições normais de pista neste fim de semana.")}
+      ${item("?", "Como funciona", "acerto", "Ajuste o carro e dê voltas de teste. Depois de cada volta o piloto diz no rádio o que está errado (piloto com bom feedback é mais preciso). O acerto ideal muda com a pista, as condições do fim de semana e o gosto de cada piloto. A volta marcada em USAR é a que vai pra classificação e pra corrida.")}
+    </div>`;
   }
 
   private renderReady() {
@@ -154,7 +167,7 @@ export class PracticeScreen {
         .map(
           (l, i) => `<tr class="${i === bestIdx ? "best" : ""} ${i === p.chosen ? "sel" : ""}">
           <td>${i + 1}</td><td class="t">${fmtLap(l.time)}</td><td>${l.topSpeed}</td>
-          <td>${l.tuning.fw}/${l.tuning.rw}/${l.tuning.h} ${tyreIcon(l.tyre, COMPOUNDS[l.tyre].label)}</td>
+          <td title="Asa diant. / asa tras. / altura / susp. diant. / susp. tras.">${l.tuning.fw}/${l.tuning.rw}/${l.tuning.h}/${l.tuning.sf}/${l.tuning.sr} ${tyreIcon(l.tyre, COMPOUNDS[l.tyre].label)}</td>
           <td><input type="radio" name="use-${p.id}" data-use="${i}" ${i === p.chosen ? "checked" : ""} ${this.ready ? "disabled" : ""}></td></tr>`,
         )
         .join("") || `<tr><td colspan="5" class="fb">Nenhuma volta ainda. Sem voltas, vai pra classificação com o acerto atual.</td></tr>`;
@@ -171,7 +184,8 @@ export class PracticeScreen {
   private animate(p: CarPanel, tuning: Tuning, done: () => void) {
     const w = this.lobby.weekend!;
     const track = getTrack(w.trackIndex);
-    const prof = carProfile(track, tuning);
+    const me = this.lobby.players.find((x) => x.id === this.lobby.you)!;
+    const prof = carProfile(track, tuning, weekendConditions(w), toDriver(teamDrivers(this.lobby, me.teamId!).find((x) => x.id === p.id)!, me.teamId!));
     const cum = new Float32Array(track.L + 1);
     for (let i = 0; i < track.L; i++) cum[i + 1] = cum[i] + 1 / prof.v[i];
     const cv = p.el.querySelector<HTMLCanvasElement>("canvas")!;

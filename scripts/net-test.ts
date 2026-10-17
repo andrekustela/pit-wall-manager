@@ -60,9 +60,13 @@ await until(() => b.lobby?.laps === 10 && b.lobby.trackIndex === 1 && b.lobby.eq
 a.send({ t: "startWeekend" });
 await until(() => a.lobby?.phase === "practice" && b.lobby?.phase === "practice", "treino livre");
 
-for (let i = 0; i < 6; i++) a.send({ t: "practiceLap", carId: "mor", tuning: { fw: 9, rw: 8, h: 7 } });
-b.send({ t: "practiceLap", carId: "mor", tuning: { fw: 1, rw: 1, h: 1 } }); // carro dos outros: ignorado
-b.send({ t: "practiceLap", carId: "oka", tuning: { fw: 5, rw: 5, h: 5 } });
+// pilotos sorteados: pega os ids da escalação
+const anaCar = a.lobby!.lineup["vor"][0];
+const betoCar = a.lobby!.lineup["neb"][0];
+const tun = { fw: 80, rw: 70, h: 60, sf: 40, sr: 45 };
+for (let i = 0; i < 6; i++) a.send({ t: "practiceLap", carId: anaCar, tuning: tun });
+b.send({ t: "practiceLap", carId: anaCar, tuning: tun }); // carro dos outros: ignorado
+b.send({ t: "practiceLap", carId: betoCar, tuning: tun });
 await until(() => a.practice === 5 && b.practice === 1, "voltas de treino (limite de 5, só no próprio carro)");
 
 a.send({ t: "ready", ready: true });
@@ -72,13 +76,15 @@ console.log(`   pole: ${a.qualiPole}`);
 a.send({ t: "ready", ready: true });
 b.send({ t: "ready", ready: true });
 await until(() => a.lobby?.phase === "strategy", "estratégia");
-a.send({ t: "setup", setups: { mor: { tyre: "S", fuel: 40, plan: [{ lap: 5, compound: "M", fuel: 50 }] } } });
+a.send({ t: "setup", setups: { [anaCar]: { tyre: "S", fuel: 40, plan: [{ lap: 5, compound: "M", fuel: 50 }] } } });
 a.send({ t: "ready", ready: true });
 b.send({ t: "ready", ready: true });
 await until(() => a.lobby?.phase === "race" && a.snaps > 0 && b.snaps > 0, "corrida começou e snapshots chegam pros dois");
 b.send({ t: "speed", speed: 16 }); // Beto não é host: ignorado
 a.send({ t: "speed", speed: 16 });
-a.send({ t: "cmd", cmd: { type: "pace", carId: "mor", mode: "push" } });
+a.send({ t: "cmd", cmd: { type: "pace", carId: anaCar, mode: "push" } });
+a.send({ t: "cmd", cmd: { type: "repair", carId: anaCar, parts: { fw: false } } });
+a.send({ t: "cmd", cmd: { type: "engineSave", carId: anaCar, on: true } });
 await until(() => a.ended && b.ended, "corrida terminou", 240000);
 await until(() => a.lobby?.phase === "podium", "pódio");
 a.send({ t: "ready", ready: true });

@@ -23,6 +23,8 @@ export interface Driver {
   skill: number;
   /** multiplicador de desgaste (menor = cuida melhor do pneu) */
   tyreCare: number;
+  /** ficha completa (pilotos sorteados da base) */
+  profile?: import("./drivers").DriverProfile;
 }
 
 export interface CompoundSpec {
@@ -73,14 +75,16 @@ export function bestForWet(wet: number): "dry" | "I" | "W" {
 
 // ---------- acerto do carro ----------
 
-/** cada ajuste vai de 1 a 11 cliques */
+/** cada ajuste vai de 0 a 100 */
 export interface Tuning {
   fw: number; // asa dianteira
   rw: number; // asa traseira
-  h: number; // altura (1 = baixo, 11 = alto)
+  h: number; // altura (0 = baixo, 100 = alto)
+  sf: number; // suspensão dianteira (0 = macia, 100 = dura)
+  sr: number; // suspensão traseira
 }
 
-export const DEFAULT_TUNING: Tuning = { fw: 6, rw: 6, h: 6 };
+export const DEFAULT_TUNING: Tuning = { fw: 50, rw: 50, h: 50, sf: 50, sr: 50 };
 
 export interface PlannedStop {
   lap: number; // entra no box no fim dessa volta
@@ -119,7 +123,9 @@ export type Command =
   | { type: "cancelBox"; carId: string }
   | { type: "pace"; carId: string; mode: PaceMode }
   | { type: "engine"; carId: string; mode: EngineMode }
-  | { type: "plan"; carId: string; plan: PlannedStop[] };
+  | { type: "plan"; carId: string; plan: PlannedStop[] }
+  | { type: "repair"; carId: string; parts: Partial<Record<"fw" | "suspF" | "rw" | "suspR", boolean>> }
+  | { type: "engineSave"; carId: string; on: boolean };
 
 export type PitPhase = "none" | "entering" | "stopped" | "leaving" | "parked";
 
@@ -163,7 +169,13 @@ export interface CarState {
   retired: boolean;
   retireReason: string | null;
   /** dano por peça (segundos por volta perdidos); conserta no box */
-  dmg: { fw: number; rw: number; susp: number };
+  dmg: { fw: number; suspF: number; rw: number; suspR: number };
+  /** quais peças danificadas trocar na próxima parada */
+  repair: { fw: boolean; suspF: boolean; rw: boolean; suspR: boolean };
+  /** saúde do motor: 1 novo .. 0 quebra */
+  engineHealth: number;
+  /** poupando o motor (mais lento, desgasta bem menos) */
+  engineSave: boolean;
   /** soma do dano (s por volta) */
   damage: number;
   /** disputa na freada: quem perdeu alivia até esse instante */

@@ -159,7 +159,7 @@ label.fld span { display: block; margin-bottom: 4px; }
 .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: #3a1010; border: 2px solid var(--accent); padding: 8px 14px; z-index: 100; }
 
 /* treino */
-.tune { display: grid; grid-template-columns: 110px 1fr 28px; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.tune { display: grid; grid-template-columns: 170px 1fr 34px; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
 .tune input[type=range] { width: 100%; accent-color: var(--accent); }
 .tune b { text-align: right; font-family: var(--pix); }
 .tune .ends { grid-column: 2; display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: -6px; }
@@ -268,7 +268,7 @@ label.fld span { display: block; margin-bottom: 4px; }
 .teamtoggle { box-shadow: 0 0 0 2px #000; }
 .mini-line { display: none; font-size: 13px; align-items: center; gap: 6px; }
 .team.compact .driver { width: 300px; padding: 6px 8px; }
-.team.compact .driver > *:not(.top):not(.mini-line):not(.boxbtn):not(.carstatus) { display: none !important; }
+.team.compact .driver > *:not(.top):not(.mini-line):not(.boxbtn):not(.statuscol) { display: none !important; }
 .team.compact .driver .top { margin-bottom: 4px; }
 .team.compact .mini-line { display: flex; margin-bottom: 4px; }
 .team.compact .boxbtn { margin-top: 2px; padding: 4px; font-size: 11px; }
@@ -280,9 +280,10 @@ label.fld span { display: block; margin-bottom: 4px; }
 .helpbtns .vol { width: 90px; accent-color: var(--accent); align-self: center; background: #1d2331; padding: 0 6px; height: 34px; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; }
 
 /* painel de estado do carro (lateral do card) */
-.driver { display: grid; grid-template-columns: 92px 1fr; column-gap: 10px; align-items: start; width: 450px; }
-.driver > *:not(.carstatus) { grid-column: 2; }
-.driver .carstatus { grid-column: 1; grid-row: 1 / span 40; width: 92px; height: auto; align-self: start; margin-top: 2px; }
+.driver { display: grid; grid-template-columns: 132px 1fr; column-gap: 10px; align-items: start; width: 500px; }
+.driver > *:not(.statuscol) { grid-column: 2; }
+.driver .statuscol { grid-column: 1; grid-row: 1 / span 40; align-self: start; }
+.driver .carstatus { display: block; width: 92px; height: auto; margin: 2px auto 4px; }
 .carstatus path, .carstatus rect, .carstatus ellipse, .carstatus circle { stroke: #8a93a6; stroke-width: 1.4; }
 .carstatus .thin { stroke-width: 1.3; fill: none !important; }
 .carstatus [data-part="susp"] { stroke-width: 2; }
@@ -294,10 +295,83 @@ label.fld span { display: block; margin-bottom: 4px; }
 .carstatus .tlabel { font: 7px var(--num, monospace); fill: #e9edf5; text-anchor: middle; stroke: none; }
 .carstatus.retired { opacity: .35; }
 .team.compact .driver { grid-template-columns: 34px 1fr; width: 330px; }
-.team.compact .driver .carstatus { width: 34px; display: block !important; }
+.team.compact .driver .carstatus { width: 34px; display: block !important; margin: 0; }
+.team.compact .driver .partslist { display: none; }
 .team.compact .driver .carstatus .tlabel { display: none; }
 @media (max-width: 900px) { .driver { width: auto; } }
 #view-hd { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; display: block; }
 .helpbtns .fps { align-self: center; min-width: 64px; text-align: center; font-family: var(--num); font-size: 18px; background: #1d2331; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; padding: 4px 6px; display: none; }
 .back-btn { margin-left: 4px; }
 .row-btns .go { margin-top: 0; }
+
+/* lista de peças embaixo do desenho */
+.partslist { display: flex; flex-direction: column; gap: 2px; }
+.prow { display: grid; grid-template-columns: 1fr auto 14px; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted); cursor: help; }
+.prow.dim { opacity: .75; }
+.prow .pn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .pchip { font-family: var(--pix); font-size: 8px; padding: 2px 4px; border-radius: 2px; white-space: nowrap; }
+.prow input { width: 13px; height: 13px; margin: 0; accent-color: var(--warn); cursor: pointer; }
+.prow input:disabled { cursor: default; opacity: .35; }
+.phint { font-size: 9.5px; color: var(--muted); opacity: .7; margin-top: 2px; }
+
+/* ficha do piloto */
+.dcard { background: #0d1119; border: 2px solid var(--line); padding: 12px; }
+.dhead { padding-left: 10px; margin-bottom: 10px; }
+.dname { font-size: 18px; font-weight: 700; }
+.dshort { font-family: var(--pix); font-size: 11px; color: var(--muted); margin-left: 6px; }
+.dsub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.dtags { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.dtag { font-family: var(--pix); font-size: 10px; background: #1d2331; border: 1px solid var(--line); padding: 3px 6px; }
+.drating { font-family: var(--num); font-size: 22px; background: var(--accent); color: #fff; padding: 0 8px; }
+.dattrs { display: flex; flex-direction: column; gap: 5px; }
+.dattr { display: grid; grid-template-columns: 130px 1fr 30px; gap: 8px; align-items: center; font-size: 13px; cursor: help; }
+.dbar { height: 8px; background: #000; border: 1px solid var(--line); position: relative; }
+.dbar i { position: absolute; inset: 0 auto 0 0; }
+.dattr b { font-family: var(--num); font-size: 16px; font-weight: 400; text-align: right; }
+.dpref { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.teamcard .drv { font-size: 11px; color: var(--muted); line-height: 1.35; margin-top: 3px; }
+.teamcard .drv b { color: var(--text); font-weight: 600; }
+.linkbtn { background: none; border: none; color: #6ea8ff; text-decoration: underline; font-size: 12px; padding: 0; cursor: pointer; }
+
+/* controles deslizantes (o padrão do navegador ficava quebrado) */
+.tune input[type=range] { -webkit-appearance: none; appearance: none; height: 22px; background: transparent; cursor: pointer; }
+.tune input[type=range]::-webkit-slider-runnable-track { height: 6px; background: linear-gradient(90deg, #2a3242, #4a5262); border: 1px solid #000; border-radius: 3px; }
+.tune input[type=range]::-moz-range-track { height: 6px; background: linear-gradient(90deg, #2a3242, #4a5262); border: 1px solid #000; border-radius: 3px; }
+.tune input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 18px; margin-top: -7px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; box-shadow: 0 0 0 1px #000; }
+.tune input[type=range]::-moz-range-thumb { width: 14px; height: 16px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; }
+.tune input[type=range]:disabled { opacity: .5; cursor: default; }
+.tune b { min-width: 30px; }
+.condbox { font-size: 13px; }
+.qtip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--muted); background: #0d1119; color: var(--muted); font-family: var(--pix); font-size: 10px; padding: 0; margin-left: 6px; vertical-align: middle; cursor: pointer; line-height: 1; }
+.qtip:hover { color: #fff; border-color: #fff; }
+.tipbox { position: absolute; z-index: 300; background: #1d2331; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000, 4px 4px 0 2px rgba(0,0,0,.4); padding: 10px 12px; font-size: 13px; line-height: 1.5; color: var(--text); }
+.conds { display: flex; flex-wrap: wrap; gap: 8px; }
+.cond { display: flex; align-items: center; gap: 8px; background: #0d1119; border: 2px solid var(--line); padding: 6px 10px; cursor: pointer; color: var(--text); font-family: var(--font); font-size: 14px; }
+.cond:hover { border-color: #fff; }
+.cond .ci { font-size: 20px; line-height: 1; }
+.cond small { color: var(--muted); display: block; font-size: 11px; }
+.tune > span { display: flex; align-items: center; }
+
+/* sorteio dos pilotos */
+.flip { perspective: 900px; min-height: 290px; position: relative; }
+.flip > div { position: absolute; inset: 0; backface-visibility: hidden; transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+.flip-back { display: flex; align-items: center; justify-content: center; font-family: var(--pix); font-size: 64px; color: var(--muted); background: #0d1119; border: 2px dashed var(--line); }
+.flip-front { transform: rotateY(180deg); }
+.flip.on .flip-back { transform: rotateY(-180deg); }
+.flip.on .flip-front { transform: rotateY(0); }
+.draft-others { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; }
+.dteam { background: #0d1119; padding: 6px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .3s; }
+.dteam.on { opacity: 1; transform: none; }
+.dteam span { color: var(--muted); }
+.dteam i { font-style: normal; font-family: var(--num); color: var(--text); margin-left: 4px; }
+.natb { display: inline-block; font-family: var(--pix); font-size: 9px; background: #2a3242; color: #e9edf5; padding: 2px 4px; border-radius: 2px; vertical-align: middle; letter-spacing: .05em; }
+/* sorteio: ocupa a tela toda, cartas sem sobrepor */
+.draftbox { width: min(1500px, 100%) !important; max-height: calc(100vh - 24px); }
+.draftgrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.draft-mine { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.flip { display: grid; min-height: 0; perspective: 900px; }
+.flip > div { grid-area: 1 / 1; position: static; }
+.flip-back { min-height: 260px; }
+.draft-others { grid-template-columns: 1fr 1fr !important; }
+.dteam small { color: var(--muted); font-size: 10px; margin-left: 4px; }
+@media (max-width: 1000px) { .draftgrid, .draft-mine, .draft-others { grid-template-columns: 1fr !important; } }

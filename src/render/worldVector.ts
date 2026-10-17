@@ -227,9 +227,11 @@ export class VectorWorld {
     });
     // borracha do traçado
     const rubber = this.chunks(this.line(0, L - 1, (s) => Math.max(-W / 2 + 2.5, Math.min(W / 2 - 2.5, t.curvature[Math.floor(s) % L] * 900)), 2), true);
+    // cor sólida: com transparência, as emendas entre trechos viravam bolinhas escuras
     stroke(rubber, 2.2, (g) => {
-      g.strokeStyle = "rgba(25,25,30,0.22)";
+      g.strokeStyle = "#4a4b50";
       g.lineWidth = 2.2;
+      g.lineCap = "butt";
     });
     // linhas brancas
     for (const side of [-1, 1]) {

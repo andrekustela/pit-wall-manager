@@ -29,6 +29,7 @@ export class LobbyScreen {
           <div class="box" id="l-players" ${lobby.solo ? 'style="display:none"' : ""}></div>
         </div>
         <h2>EQUIPE</h2>
+        <p class="hint" style="margin-top:-4px">Escolha o carro. Os pilotos são sorteados depois, quando o fim de semana começar (de uma base de 100 pilotos, cada um com seu estilo).</p>
         <div class="teams" id="l-teams"></div>
         <h2>PISTA <span id="l-trackhint" style="color:var(--muted)"></span></h2>
         <div class="tracks" id="l-tracks"></div>
@@ -54,6 +55,7 @@ export class LobbyScreen {
       conn.send({ t: "startWeekend" });
     });
     root.querySelector("#l-exit")!.addEventListener("click", onExit);
+
     this.update(lobby);
   }
 
@@ -138,6 +140,7 @@ export class LobbyScreen {
 
     root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? "· no campeonato corre nas 3, nessa ordem" : "";
     root.querySelector("#l-start")!.textContent = lobby.champMode ? "INICIAR CAMPEONATO ▶" : "INICIAR FIM DE SEMANA ▶";
+
     const start = root.querySelector<HTMLButtonElement>("#l-start")!;
     start.style.display = isHost ? "" : "none";
     root.querySelector("#l-hint")!.textContent = isHost

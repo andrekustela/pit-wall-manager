@@ -1,11 +1,12 @@
 import type { Connection } from "../net/connection";
 import type { LobbyState } from "../net/protocol";
-import { DRIVERS, TEAMS } from "../sim/data";
+import { TEAMS } from "../sim/data";
+import { profileOf } from "../sim/drivers";
 import { fmtLap } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
 import type { Compound } from "../sim/types";
 import type { QualiResult } from "../sim/weekend";
-import { backButtonHtml, bindBackButton, champLabel, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, esc, teamOfDriver, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 export class QualiScreen {
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -22,8 +23,8 @@ export class QualiScreen {
         <div class="box" style="padding:0">
           ${results
             .map((r, i) => {
-              const d = DRIVERS.find((x) => x.id === r.carId)!;
-              const t = TEAMS.find((x) => x.id === d.teamId)!;
+              const d = profileOf(r.carId)!;
+              const t = TEAMS.find((x) => x.id === teamOfDriver(lobby, r.carId))!;
               return `<div class="qrow ${i === 0 ? "pole" : ""} ${humans.has(t.id) ? "player" : ""}" data-i="${i}">
                 <span class="p">${i + 1}</span><span style="height:16px;background:${t.color}"></span>
                 <span><b>${esc(d.name)}</b> <span style="color:var(--muted)">${esc(teamName(lobby, t.id))}</span></span>
@@ -43,7 +44,7 @@ export class QualiScreen {
     order.forEach((row, k) => this.timers.push(setTimeout(() => row.classList.add("show"), 250 + k * 220)));
     this.timers.push(
       setTimeout(() => {
-        const d = DRIVERS.find((x) => x.id === results[0].carId)!;
+        const d = profileOf(results[0].carId)!;
         root.querySelector("#q-pole")!.textContent = `POLE POSITION: ${d.name} · ${fmtLap(pole)}`;
       }, 400 + order.length * 220),
     );

@@ -14,6 +14,7 @@ import { PodiumScreen } from "./ui/podium";
 import { PracticeScreen } from "./ui/practice";
 import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
+import { showDraft } from "./ui/draft";
 
 interface Screen {
   update?(lobby: LobbyState): void;
@@ -45,6 +46,7 @@ class App {
   private view: RaceView | null = null;
   private lastRace: Race | null = null;
   private soundEvents = 0;
+  private draftSeen = -1;
 
   helpTab(): HelpTab {
     const p = this.screenPhase;
@@ -138,6 +140,11 @@ class App {
       case "practice":
         this.quali = null;
         this.screen = new PracticeScreen(app, conn, l);
+        // pilotos acabaram de ser sorteados (fim de semana novo ou 1ª etapa do campeonato)
+        if (l.weekend && this.draftSeen !== l.weekend.seed && (!l.champ || l.champ.round === 0)) {
+          this.draftSeen = l.weekend.seed;
+          if (!AUTO) showDraft(l);
+        }
         if (AUTO) conn.send({ t: "ready", ready: true });
         break;
       case "quali":

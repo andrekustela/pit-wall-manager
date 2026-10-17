@@ -2,6 +2,7 @@ import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { getTrack } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
+import { profileOf, type DriverProfile } from "../sim/drivers";
 
 export function esc(s: unknown): string {
   return String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
@@ -123,4 +124,63 @@ export function bindBackButton(root: HTMLElement, send: (msg: { t: "back" }) => 
     if (confirmText && !confirm(confirmText)) return;
     send({ t: "back" });
   });
+}
+
+/** pilotos (perfis) de uma equipe neste jogo */
+export function teamDrivers(lobby: LobbyState, teamId: string): DriverProfile[] {
+  const ids = lobby.weekend?.lineup?.[teamId] ?? lobby.lineup?.[teamId] ?? [];
+  return ids.map((id) => profileOf(id)!).filter(Boolean);
+}
+
+/** equipe de um piloto neste jogo */
+export function teamOfDriver(lobby: LobbyState, driverId: string): string {
+  const lineup = lobby.weekend?.lineup ?? lobby.lineup ?? {};
+  return Object.keys(lineup).find((t) => lineup[t].includes(driverId)) ?? "";
+}
+
+// ---------- dicas "?" (clique mostra um balão com a explicação) ----------
+let tipInstalled = false;
+export function tipButton(text: string, label = "?"): string {
+  installTips();
+  return `<button type="button" class="qtip" data-tip="${esc(text)}">${label}</button>`;
+}
+
+function installTips() {
+  if (tipInstalled) return;
+  tipInstalled = true;
+  document.addEventListener("click", (e) => {
+    const old = document.querySelector(".tipbox");
+    const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-tip]");
+    if (old && (!btn || old.getAttribute("data-for") === btn.dataset.tip)) {
+      old.remove();
+      if (!btn) return;
+      return;
+    }
+    old?.remove();
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const box = document.createElement("div");
+    box.className = "tipbox";
+    box.setAttribute("data-for", btn.dataset.tip!);
+    box.textContent = btn.dataset.tip!;
+    document.body.appendChild(box);
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(320, window.innerWidth - 24);
+    box.style.width = `${w}px`;
+    box.style.left = `${Math.max(12, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2))}px`;
+    box.style.top = `${r.bottom + 8 + window.scrollY}px`;
+  }, true);
+}
+
+/** ícone do clima: ☀ seco, 💧 úmido/molhado, 🌧 encharcado */
+export function wetIcon(w: number): string {
+  return w < 0.05 ? "☀" : w < 0.6 ? "💧" : "🌧";
+}
+
+/** etiqueta do país (o Windows não desenha emoji de bandeira, então vai a sigla) */
+export function natBadge(p: { nat: string; country: string }): string {
+  // emoji de bandeira = 2 "letras regionais"; converte de volta pra sigla (BR, IT...)
+  const code = [...p.nat].map((ch) => String.fromCharCode((ch.codePointAt(0) ?? 0) - 0x1f1e6 + 65)).join("");
+  return `<span class="natb" title="${esc(p.country)}">${esc(code)}</span>`;
 }

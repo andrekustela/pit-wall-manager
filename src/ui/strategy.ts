@@ -1,12 +1,12 @@
 import type { Connection } from "../net/connection";
 import type { LobbyState } from "../net/protocol";
-import { DRIVERS } from "../sim/data";
+
 import { fuelPerLap } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
 import { ALL_COMPOUNDS, COMPOUNDS, DRY, FUEL_MAX, bestForWet, isWetTyre, type CarSetup, type Compound } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import type { QualiResult } from "../sim/weekend";
-import { backButtonHtml, bindBackButton, champLabel, esc, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, esc, teamDrivers, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 /**
  * Na tela o combustível é escolhido em VOLTAS (proporcional ao tamanho da
@@ -58,7 +58,7 @@ export class StrategyScreen {
       </div></div>`;
 
     const wrap = root.querySelector("#s-cars")!;
-    for (const d of DRIVERS.filter((x) => x.teamId === me.teamId)) {
+    for (const d of teamDrivers(lobby, me.teamId!)) {
       const q = quali.findIndex((r) => r.carId === d.id);
       const el = document.createElement("div");
       el.className = "box";

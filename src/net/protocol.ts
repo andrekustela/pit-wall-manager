@@ -25,6 +25,7 @@ export interface WeekendPublic {
   equalCars: boolean;
   teamNames: Record<string, string>;
   engineers: Record<string, Engineer>;
+  lineup?: import("../sim/drivers").Lineup;
   practiceWet: number;
   qualiWet: number;
   startWet: number;
@@ -44,6 +45,8 @@ export interface LobbyState {
   champMode: boolean;
   /** campeonato em andamento (ou o que acabou de terminar) */
   champ: ChampState | null;
+  /** pilotos sorteados de cada equipe */
+  lineup: import("../sim/drivers").Lineup;
   players: LobbyPlayer[];
   weekend: WeekendPublic | null;
 }
@@ -64,6 +67,7 @@ export type ClientMsg =
   | { t: "skip" }
   | { t: "abort" }
   | { t: "back" }
+  | { t: "reroll" }
   | { t: "leave" };
 
 export type ServerMsg =

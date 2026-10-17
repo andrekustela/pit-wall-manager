@@ -1,7 +1,8 @@
 // Sala de jogo: fluxo do fim de semana (lobby -> treino -> classificação ->
 // estratégia -> corrida -> pódio). Não sabe nada de rede: no solo roda no
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
-import { DRIVERS, TEAMS } from "../sim/data";
+import { TEAMS } from "../sim/data";
+import { drawLineup, type Lineup } from "../sim/drivers";
 import { awardPoints, newChampionship, type ChampState } from "../sim/championship";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -57,7 +58,14 @@ export class Room {
   private timer: ReturnType<typeof setInterval> | null = null;
   private nextId = 1;
 
+  /** pilotos sorteados pras equipes (novo a cada jogo; o campeonato mantém) */
+  lineup: Lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+
   constructor(readonly code: string, private send: Send, readonly solo = false) {}
+
+  private teamDrivers(teamId: string | null): string[] {
+    return teamId ? (this.lineup[teamId] ?? []) : [];
+  }
 
   // ---------- jogadores ----------
 
@@ -161,7 +169,7 @@ export class Room {
         break;
       case "setup":
         if (this.phase !== "strategy") return;
-        p.setups = sanitizeSetups(p, msg.setups);
+        p.setups = sanitizeSetups(msg.setups, this.teamDrivers(p.teamId));
         break;
       case "ready":
         if (this.phase === "lobby") return;
@@ -197,6 +205,12 @@ export class Room {
         }
         break;
       }
+      case "reroll":
+        // host sorteia os pilotos de novo (só no lobby)
+        if (!isHost || this.phase !== "lobby") return;
+        this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+        this.broadcastLobby();
+        break;
       case "abort":
         // host encerra o fim de semana/corrida e todo mundo volta pro lobby
         if (!isHost || this.phase === "lobby") return;
@@ -215,7 +229,7 @@ export class Room {
   }
 
   private owns(p: Player, carId: string) {
-    return DRIVERS.some((d) => d.id === carId && d.teamId === p.teamId);
+    return this.teamDrivers(p.teamId).includes(carId);
   }
 
   // ---------- fases ----------
@@ -229,6 +243,8 @@ export class Room {
   private startWeekend() {
     const players = [...this.players.values()];
     const seed = (Math.random() * 2 ** 32) >>> 0;
+    // pilotos sorteados agora (depois da escolha das equipes); no campeonato, só na 1ª etapa
+    if (!this.champ || this.champ.round === 0) this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
     const human: Record<string, string> = {};
     const teamNames: Record<string, string> = {};
     for (const p of players) {
@@ -238,7 +254,7 @@ export class Room {
       p.setups = {};
       p.practiceCount = {};
       p.practiceLaps = {};
-      for (const d of DRIVERS.filter((x) => x.teamId === p.teamId)) p.tunings[d.id] = { ...DEFAULT_TUNING };
+      for (const id of this.teamDrivers(p.teamId)) p.tunings[id] = { ...DEFAULT_TUNING };
     }
     const ch = this.champ;
     // no campeonato os engenheiros da IA são sorteados uma vez só
@@ -252,6 +268,7 @@ export class Room {
       equalCars: this.equalCars,
       teamNames,
       engineers,
+      lineup: this.lineup,
     };
     this.setPhase("practice");
   }
@@ -269,7 +286,9 @@ export class Room {
         ch.round++;
         this.startWeekend(); // próxima etapa
       } else {
+        // jogo novo: pilotos sorteados de novo
         this.champ = null;
+        this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
         this.setPhase("lobby");
       }
     }
@@ -306,6 +325,7 @@ export class Room {
       equalCars: w.equalCars,
       teamNames: w.teamNames,
       engineers: w.engineers,
+      lineup: w.lineup,
     };
     this.race = new Race(opts);
     this.speed = 1;
@@ -368,6 +388,7 @@ export class Room {
       trackIndex: this.trackIndex,
       equalCars: this.equalCars,
       champMode: this.champMode,
+      lineup: this.lineup,
       champ: this.champ,
       weekend,
       players: [...this.players.values()].map((p) => ({
@@ -394,14 +415,14 @@ function clean(s: unknown, max: number): string {
   return String(s ?? "").replace(/[<>]/g, "").trim().slice(0, max);
 }
 
-function sanitizeSetups(p: Player, setups: Record<string, CarSetup>): Record<string, CarSetup> {
+function sanitizeSetups(setups: Record<string, CarSetup>, ids: string[]): Record<string, CarSetup> {
   const out: Record<string, CarSetup> = {};
   const fuel = (x: unknown) => Math.max(0, Math.min(FUEL_MAX, Number(x) || 0));
   const tyre = (x: unknown) => (ALL_COMPOUNDS.includes(x as never) ? (x as CarSetup["tyre"]) : "M");
-  for (const d of DRIVERS.filter((x) => x.teamId === p.teamId)) {
-    const s = setups?.[d.id];
+  for (const id of ids) {
+    const s = setups?.[id];
     if (!s) continue;
-    out[d.id] = {
+    out[id] = {
       tyre: tyre(s.tyre),
       fuel: Math.max(1, fuel(s.fuel)),
       plan: (Array.isArray(s.plan) ? s.plan : []).slice(0, 5).map((st) => ({

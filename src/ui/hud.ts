@@ -13,7 +13,7 @@ import {
   type PlannedStop,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
-import { statusSvg, updateStatus } from "./carStatus";
+import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
 
 export const SPEEDS = [1, 2, 4, 8, 16];
@@ -153,7 +153,7 @@ export class Hud {
       card.style.borderTopColor = c.team.color;
       card.title = "Clique no card pra seguir esse piloto";
       card.innerHTML = `
-        ${statusSvg()}
+        <div class="statuscol">${statusSvg()}${partsListHtml()}</div>
         <div class="top">
           <div class="p"></div>
           <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)}</small></div>
@@ -187,6 +187,7 @@ export class Hud {
         </div>
         <div class="planedit" style="display:none"></div>`;
       const cs = this.cardState.get(c.id)!;
+      bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
       const rearm = () => {
         // se já chamou pro box, atualiza o que vai fazer na parada
         if (c.boxRequest && c.pit !== "stopped" && c.pit !== "leaving")
@@ -195,7 +196,7 @@ export class Hud {
       };
       // clicar em qualquer lugar do card (fora dos botões) segue o piloto
       card.addEventListener("click", (e) => {
-        if ((e.target as HTMLElement).closest("button, input")) return;
+        if ((e.target as HTMLElement).closest("button, input, label")) return;
         this.hooks.setFollow(c.id);
       });
       card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) =>
@@ -403,7 +404,7 @@ export class Hud {
       const cs = this.cardState.get(id)!;
       const idx = order.indexOf(c);
       card.classList.toggle("follow", id === follow);
-      updateStatus(card.querySelector(".carstatus")!, c, race);
+      updateStatus(card.querySelector(".statuscol")!, c, race);
       // chegou a volta da parada planejada: já deixa pneu e combustível do plano escolhidos
       if (c.planDue && !cs.dueApplied) {
         const st = c.plan[c.planIdx];
@@ -439,8 +440,16 @@ export class Hud {
       const fl2 = card.querySelector<HTMLElement>(".flabel")!;
       fl2.textContent = `Combustível pra ${fuelLaps.toFixed(1)} voltas (${c.fuel.toFixed(0)} kg) · faltam ${left.toFixed(1)}${short ? "" : " ✓ chega"}`;
       fl2.style.color = short && fuelLaps < 3 ? "var(--soft)" : short ? "var(--warn)" : "var(--muted)";
-      card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) => b.classList.toggle("on", b.dataset.pace === c.pace));
-      card.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => b.classList.toggle("on", b.dataset.engine === c.engine));
+      card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) => {
+        b.classList.toggle("on", b.dataset.pace === c.pace);
+        b.disabled = !!c.engineSave && b.dataset.pace === "push";
+        b.title = b.disabled ? "Desligado enquanto poupa o motor" : "";
+      });
+      card.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => {
+        b.classList.toggle("on", b.dataset.engine === c.engine);
+        b.disabled = !!c.engineSave && b.dataset.engine === "rich";
+        b.title = b.disabled ? "Desligado enquanto poupa o motor" : "";
+      });
       const next = c.boxRequest ?? cs.next;
       card.querySelectorAll<HTMLButtonElement>("[data-next]").forEach((b) => b.classList.toggle("on", b.dataset.next === next));
       const fuelShown = c.boxRequest ? c.boxFuel : this.fuelFor(c);

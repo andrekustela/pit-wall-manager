@@ -2,7 +2,7 @@ import { TEAMS } from "./data";
 import { buildEntrants, type Engineer } from "./entrants";
 import { Rng } from "./rng";
 import { BOX_SHIFT, PIT_MERGE, TRACK_WIDTH, Track, getTrack } from "./track";
-import { BASE_SLACK, aiTuning, carProfile, clampTuning } from "./tuning";
+import { BASE_SLACK, aiTuning, carProfile, clampTuning, lapNoiseSd, makeConditions, wetSkillFactor, type Conditions } from "./tuning";
 import {
   COMPOUNDS,
   DRY,
@@ -26,6 +26,7 @@ import {
   type Tuning,
 } from "./types";
 import { makeWeather, rainAt, type WeatherPlan } from "./weather";
+import { ENGINE_SAVE, ENGINE_WEAR_PER_LAP, NO_DAMAGE, PARTS, type PartId } from "./parts";
 
 export interface RaceOptions {
   seed: number;
@@ -42,6 +43,7 @@ export interface RaceOptions {
   equalCars?: boolean;
   teamNames?: Record<string, string>;
   engineers?: Record<string, Engineer>;
+  lineup?: import("./drivers").Lineup;
 }
 
 export type RacePhase = "lights" | "racing" | "finished";
@@ -69,7 +71,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "spin", "damage", "dmg", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -103,6 +105,8 @@ export class Race {
   readonly teams: Team[];
   readonly drivers: Driver[];
   readonly engineers: Record<string, Engineer>;
+  /** condições do fim de semana (vento, ondulação, temperatura) */
+  readonly cond: Conditions;
   readonly cars: CarState[] = [];
   readonly events: RaceEvent[] = [];
   time = 0;
@@ -137,6 +141,7 @@ export class Race {
     this.rain = rainAt(this.weather, 0);
     this.lightsTime = 5 + this.rng.range(0.4, 2);
     const { teams, drivers } = buildEntrants(opts);
+    this.cond = makeConditions(opts.seed, this.track);
     this.teams = teams;
     this.drivers = drivers;
     this.engineers = opts.engineers ?? {};
@@ -159,8 +164,8 @@ export class Race {
       const d = drivers.find((x) => x.id === id)!;
       const team = teams.find((t) => t.id === d.teamId)!;
       const isHuman = opts.humanTeams.includes(team.id);
-      const tuning = clampTuning(opts.tunings?.[id] ?? aiTuning(this.track, this.quality(team.id), this.rng));
-      const prof = carProfile(this.track, tuning);
+      const tuning = clampTuning(opts.tunings?.[id] ?? aiTuning(this.track, this.quality(team.id), this.rng, this.cond, d));
+      const prof = carProfile(this.track, tuning, this.cond, d);
       const setup = opts.setups[id];
       const car: CarState = {
         id: d.id,
@@ -196,7 +201,10 @@ export class Race {
         retireReason: null,
         spin: 0,
         damage: 0,
-        dmg: { fw: 0, rw: 0, susp: 0 },
+        dmg: { ...NO_DAMAGE },
+        repair: { fw: true, suspF: true, rw: true, suspR: true },
+        engineHealth: 1,
+        engineSave: false,
         defendTill: 0,
         yieldTill: 0,
         duelAt: 0,
@@ -205,7 +213,7 @@ export class Race {
         penalty: 0,
         targetLap: 0,
         // arrancada: uns largam muito bem, outros patinam
-        launch: this.rng.range(0.55, 1.4),
+        launch: this.rng.range(0.8, 1.16),
         tyreWarn: 0,
         fuelWarn: 0,
         wetWarn: 0,
@@ -248,10 +256,21 @@ export class Race {
         if (car.pit === "none") car.boxRequest = null;
         break;
       case "pace":
-        if (PACE[cmd.mode]) car.pace = cmd.mode;
+        if (PACE[cmd.mode] && !(car.engineSave && cmd.mode === "push")) car.pace = cmd.mode;
         break;
       case "engine":
-        if (ENGINE[cmd.mode]) car.engine = cmd.mode;
+        if (ENGINE[cmd.mode] && !(car.engineSave && cmd.mode === "rich")) car.engine = cmd.mode;
+        break;
+      case "repair":
+        for (const p of PARTS) if (typeof cmd.parts?.[p.id] === "boolean") car.repair = { ...car.repair, [p.id]: cmd.parts[p.id] };
+        break;
+      case "engineSave":
+        car.engineSave = !!cmd.on;
+        // poupando: nada de atacar nem mistura rica
+        if (car.engineSave) {
+          if (car.pace === "push") car.pace = "normal";
+          if (car.engine === "rich") car.engine = "normal";
+        }
         break;
       case "plan": {
         // substitui as paradas que ainda não aconteceram
@@ -441,6 +460,14 @@ export class Race {
           this.retire(c, "Sem combustível");
           continue;
         }
+        // motor: desgasta mais na mistura rica/atacando; quase no fim pode quebrar
+        const engMult = (c.engine === "rich" ? 2.2 : c.engine === "lean" ? 0.6 : 1) * (c.pace === "push" ? 1.3 : 1) * (c.engineSave ? ENGINE_SAVE.wear : 1);
+        c.engineHealth = Math.max(0, c.engineHealth - (ds / L) * ENGINE_WEAR_PER_LAP * this.wearScale * engMult);
+        if (c.engineHealth < 0.3 && !this.checkered && this.rng.chance((0.3 - c.engineHealth) * 0.03 * dt)) {
+          this.retire(c, "Motor");
+          if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.4)) this.deploySafetyCar();
+          continue;
+        }
         // desgaste
         if (c.pit === "none") {
           const spec = COMPOUNDS[c.compound];
@@ -568,8 +595,9 @@ export class Race {
     const fuel = c.fuel * FUEL_WEIGHT;
     const cold = c.tyreLaps === 0 && c.pitStops > 0 ? 1.0 : 0;
     return (
-      c.team.carPace + c.driver.skill + spec.offset + wetPenalty(c.compound, this.wet) + wearPen + fuel +
-      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage
+      c.team.carPace + c.driver.skill + spec.offset + wetPenalty(c.compound, this.wet) * wetSkillFactor(c.driver) + wearPen + fuel +
+      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage +
+      (c.engineSave ? ENGINE_SAVE.offset : 0) + Math.max(0, 0.6 - c.engineHealth) * 1.2
     );
   }
 
@@ -684,7 +712,9 @@ export class Race {
             const turn = Math.sign(this.track.curvature[Math.floor(this.track.wrap(c.s + 100)) % this.track.L]);
             const inside = turn * (c.lateral - o.lateral) > 0 ? 0.15 : -0.1;
             const delta = o.targetLap - c.targetLap;
-            const p = Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside - this.wet * 0.05));
+            // ultrapassador x muralha
+            const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.004;
+            const p = Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside + craft - this.wet * 0.05));
             if (this.rng.chance(p)) {
               o.yieldTill = this.time + 1.6; // segurou a freada e passou
             } else {
@@ -701,7 +731,9 @@ export class Race {
         }
         // "DRS": colado no da frente na reta (a partir da 2ª volta) o carro chega mais rápido
         if (!sc.active && blocker && gap < 30 && c.lap >= 1 && this.track.isStraight(c.s)) myT *= 1.015;
-        if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20) {
+        // na arrancada ninguém troca de fila (senão todo mundo ia pro meio e virava fila indiana);
+        // as brigas começam a partir da primeira curva
+        if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20 && !opening) {
           const slow = blocker.v < myT * 0.7 || blocker.spin > 0 || blocker.retired || blocker.finished;
           const lapping = this.dist(blocker) < this.dist(c) - this.track.L / 2;
           let go = slow || lapping;
@@ -710,8 +742,10 @@ export class Race {
           if (!go && myT > blocker.v * 1.003 && (firstLap || this.track.isStraight(c.s)) && this.dist(c) >= c.nextAttemptS) {
             const delta = blocker.targetLap - c.targetLap;
             // na chuva o spray atrapalha: tenta menos
-            const p = Math.max(0.1, Math.min(0.95, 0.32 + delta * 0.7 + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.3 : 0) - this.wet * 0.06));
-            c.nextAttemptS = this.dist(c) + (firstLap ? 110 : 300);
+            // piloto agressivo tenta muito mais
+            const aggr = ((c.driver.profile?.aggression ?? 55) - 50) * 0.006;
+            const p = Math.max(0.08, Math.min(0.95, 0.32 + delta * 0.7 + aggr + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.08 : 0) - this.wet * 0.06));
+            c.nextAttemptS = this.dist(c) + (firstLap ? 220 : 300);
             go = this.rng.chance(p);
           }
           if (go) {
@@ -723,7 +757,7 @@ export class Race {
               want = side;
               // quem está na frente às vezes fecha a porta (se ainda não emparelharam)
               const q = this.quality(blocker.team.id);
-              if (!slow && !lapping && !blocker.isHuman && gap > CAR_L + 1 && this.rng.chance(0.06 + 0.12 * q)) {
+              if (!slow && !lapping && !blocker.isHuman && gap > CAR_L + 1 && this.rng.chance((0.06 + 0.12 * q) * (0.5 + (blocker.driver.profile?.defending ?? 60) / 100))) {
                 blocker.defendTill = this.time + 2.5;
                 blocker.defendLat = Math.max(-LANE_EDGE, Math.min(LANE_EDGE, side));
               }
@@ -733,7 +767,7 @@ export class Race {
         c.lateralTarget = want;
       }
 
-      if (c.yieldTill > this.time) myT *= 0.9;
+      if (c.yieldTill > this.time) myT *= c.lap <= 0 ? 0.95 : 0.92;
       // ---- não encosta no da frente (mesma faixa) ----
       for (const o of this.cars) {
         if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
@@ -797,15 +831,22 @@ export class Race {
         } else if (sideBySide && this.track.speedAt(a.s) < 62 && !this.sc.active && !a.finished && !b.finished) {
           // lado a lado na curva: risco de toque
           // lado a lado na curva tem risco (bem mais na largada, com todo mundo junto)
-          const opening = a.lap <= 0 && b.lap <= 0 ? 2.5 : 1;
+          const opening = (a.lap <= 0 && b.lap <= 0 ? 1.6 : 1) * this.aggrRisk(a, b);
           if (this.rng.chance(0.008 * opening * (1 + 2 * this.wet) * dt)) this.maybeContact(a, b, rear, 1);
         }
       }
     }
   }
 
+  /** dois agressivos lado a lado = mais chance de toque */
+  private aggrRisk(a: CarState, b: CarState): number {
+    const f = (c: CarState) => 0.6 + ((c.driver.profile?.aggression ?? 55) / 100) * 0.8;
+    return (f(a) + f(b)) / 2;
+  }
+
   private contactCooldown = new Map<string, number>();
   private damageWarned = new Set<string>();
+  private engineWarned = new Set<string>();
 
   private maybeContact(a: CarState, b: CarState, rear: CarState, p: number) {
     if (this.checkered || a.retired || b.retired) return;
@@ -828,13 +869,13 @@ export class Race {
     } else if (r < 0.8) {
       // qual peça quebrou
       const pr = this.rng.next();
-      const part: "fw" | "rw" | "susp" = pr < 0.6 ? "fw" : pr < 0.8 ? "rw" : "susp";
-      const dmg = part === "susp" ? this.rng.range(1, 2) : this.rng.range(0.5, 1.3);
+      const part: PartId = pr < 0.45 ? "fw" : pr < 0.6 ? "rw" : pr < 0.8 ? "suspF" : "suspR";
+      const dmg = part.startsWith("susp") ? this.rng.range(0.7, 2) : this.rng.range(0.4, 1.6);
       victim.dmg = { ...victim.dmg, [part]: victim.dmg[part] + dmg };
       victim.damage += dmg;
       this.stats.damages++;
-      const name = part === "fw" ? "a asa dianteira" : part === "rw" ? "a asa traseira" : "a suspensão";
-      this.log(`${victim.driver.name} danificou ${name} no toque com ${other.driver.short}! (+${dmg.toFixed(1)}s por volta)`, !!team, team, "damage");
+      const name = PARTS.find((x) => x.id === part)!.label.toLowerCase();
+      this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (+${dmg.toFixed(1)}s por volta)`, !!team, team, "damage");
     } else if (r < 0.94) {
       victim.spin = this.rng.range(3, 6);
       this.stats.spins++;
@@ -887,8 +928,9 @@ export class Race {
         const refuel = add > 0.5 ? add / REFUEL_RATE + this.rng.range(0.4, 0.8) : 0;
         const mate = this.cars.find((o) => o !== c && o.team.id === c.team.id && o.pit === "stopped");
         // consertos: asa dianteira (bico), asa traseira e suspensão demoram diferente
-        const nose =
-          (c.dmg.fw > 0 ? this.rng.range(4, 6.5) : 0) + (c.dmg.rw > 0 ? this.rng.range(3, 5) : 0) + (c.dmg.susp > 0 ? this.rng.range(8, 12) : 0);
+        // consertos (só das peças marcadas pra trocar); cada peça demora diferente
+        let nose = 0;
+        for (const part of PARTS) if (c.dmg[part.id] > 0 && c.repair[part.id]) nose += this.rng.range(part.repair[0], part.repair[1]);
         c.pitTimer = Math.max(tyres, refuel) + nose + (mate ? mate.pitTimer + 0.8 : 0);
       }
     } else if (c.pit === "leaving") {
@@ -905,11 +947,15 @@ export class Race {
     const add = Math.max(0, Math.min(c.boxFuel, FUEL_MAX - c.fuel));
     c.fuel += add;
     if (c.damage > 0) {
-      const fixed = [c.dmg.fw > 0 && "asa dianteira", c.dmg.rw > 0 && "asa traseira", c.dmg.susp > 0 && "suspensão"].filter(Boolean).join(", ");
-      c.damage = 0;
-      c.dmg = { fw: 0, rw: 0, susp: 0 };
-      this.damageWarned.delete(c.id);
-      this.log(`${c.driver.short}: consertado (${fixed}).`, c.isHuman, c.team.id, "info");
+      const fixedParts = PARTS.filter((p) => c.dmg[p.id] > 0 && c.repair[p.id]);
+      if (fixedParts.length) {
+        const dmg = { ...c.dmg };
+        for (const p of fixedParts) dmg[p.id] = 0;
+        c.dmg = dmg;
+        c.damage = PARTS.reduce((a, p) => a + dmg[p.id], 0);
+        this.damageWarned.delete(c.id);
+        this.log(`${c.driver.short}: trocado (${fixedParts.map((p) => p.label.toLowerCase()).join(", ")}).`, c.isHuman, c.team.id, "info");
+      }
     }
     c.compound = next;
     c.wear = 0;
@@ -943,7 +989,12 @@ export class Race {
       c.pit = "none";
       c.lateral = 0;
     }
-    const msg = reason === "Acidente" ? `${c.driver.name} bateu! Está fora da corrida.` : `${c.driver.name} ficou sem combustível! Abandono.`;
+    const msg =
+      reason === "Acidente"
+        ? `${c.driver.name} bateu! Está fora da corrida.`
+        : reason === "Motor"
+          ? `${c.driver.name}: o motor quebrou! Fumaça e abandono.`
+          : `${c.driver.name} ficou sem combustível! Abandono.`;
     this.log(msg, true, c.isHuman ? c.team.id : undefined, reason === "Acidente" ? "crash" : "out");
   }
 
@@ -963,7 +1014,7 @@ export class Race {
       }
     }
     c.lapStartTime = crossT;
-    c.lapNoise = this.rng.gauss(0.22);
+    c.lapNoise = this.rng.gauss(lapNoiseSd(c.driver));
 
     const isLeader = c.position === 1 || this.leader() === c;
     if (isLeader && !this.checkered) {
@@ -1043,9 +1094,14 @@ export class Race {
 
   private radio(c: CarState) {
     const say = (txt: string) => this.log(`Rádio ${c.driver.short}: "${txt}"`, true, c.team.id, "radio");
+    if (c.engineHealth < 0.45 && !c.engineSave && !this.engineWarned.has(c.id)) {
+      this.engineWarned.add(c.id);
+      say(`O motor está sofrendo (${Math.round(c.engineHealth * 100)}%). Melhor poupar ou ele pode quebrar.`);
+    }
     if (c.damage > 0 && !this.damageWarned.has(c.id)) {
       this.damageWarned.add(c.id);
-      say(c.dmg.susp > 0 ? `A suspensão está torta, perdendo uns ${c.damage.toFixed(1)}s por volta. Box pra consertar?` : `A asa está quebrada, estou perdendo uns ${c.damage.toFixed(1)}s por volta. Box pra trocar?`);
+      const worst = PARTS.reduce((a, p) => (c.dmg[p.id] > c.dmg[a.id] ? p : a), PARTS[0]);
+      say(`Problema na ${worst.label.toLowerCase()}! Estamos perdendo uns ${c.damage.toFixed(1)}s por volta. Box pra trocar?`);
     }
     if (c.pit === "none" && !c.boxRequest) {
       if (c.wear > 0.85 && c.tyreWarn < 2) {
@@ -1132,6 +1188,7 @@ export class Race {
     // mistura do motor: economiza se não for chegar
     const lapsToEnd = stintEnd - c.lap - this.track.wrap(c.s) / this.track.L;
     c.engine = fuelLaps < lapsToEnd - 0.05 ? "lean" : "normal";
+    c.engineSave = c.engineHealth < 0.38 + 0.15 * q;
 
     if (c.pit !== "none" || c.boxRequest) return;
 
