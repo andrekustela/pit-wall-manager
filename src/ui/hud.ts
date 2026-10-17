@@ -13,6 +13,7 @@ import {
   type PlannedStop,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
+import { statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
 
 export const SPEEDS = [1, 2, 4, 8, 16];
@@ -152,6 +153,7 @@ export class Hud {
       card.style.borderTopColor = c.team.color;
       card.title = "Clique no card pra seguir esse piloto";
       card.innerHTML = `
+        ${statusSvg()}
         <div class="top">
           <div class="p"></div>
           <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)}</small></div>
@@ -401,6 +403,7 @@ export class Hud {
       const cs = this.cardState.get(id)!;
       const idx = order.indexOf(c);
       card.classList.toggle("follow", id === follow);
+      updateStatus(card.querySelector(".carstatus")!, c, race);
       // chegou a volta da parada planejada: já deixa pneu e combustível do plano escolhidos
       if (c.planDue && !cs.dueApplied) {
         const st = c.plan[c.planIdx];
@@ -427,7 +430,8 @@ export class Hud {
       const ruleOk = dryKinds >= 2 || c.usedCompounds.some((x) => x === "I" || x === "W");
       card.querySelector(".wlabel")!.textContent =
         `Pneu ${COMPOUNDS[c.compound].label} · ${c.tyreLaps} ${c.tyreLaps === 1 ? "volta" : "voltas"} · ${Math.round((1 - wearPct) * 100)}% de borracha` +
-        (ruleOk ? "" : " · falta usar o 2º tipo de pneu!");
+        (ruleOk ? "" : " · falta usar o 2º tipo de pneu!") +
+        (c.damage > 0 ? ` · ⚠ dano: +${c.damage.toFixed(1)}s/volta` : "");
       const cons = race.consumption(c);
       const fuelLaps = c.fuel / cons;
       const left = race.lapsLeft(c);

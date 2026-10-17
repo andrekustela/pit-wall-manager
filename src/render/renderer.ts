@@ -1,5 +1,5 @@
 import type { Race } from "../sim/race";
-import { CAR_LEN, CAR_WID, carSprite, safetyCarSprite } from "./sprites";
+import { CAR_LEN_M, carImage } from "./carArt";
 import { buildWorld, type World } from "./worldArt";
 
 interface Disp {
@@ -7,30 +7,43 @@ interface Disp {
   lat: number;
 }
 
-/** Desenha a corrida em baixa resolução, com câmera seguindo um carro. */
+/**
+ * Desenha a corrida em duas camadas:
+ *  - pista em pixel art (canvas de baixa resolução, ampliado sem suavizar)
+ *  - carros, safety car, etiquetas, chuva e luzes numa camada de alta
+ *    resolução por cima (carros em vetor, pré-desenhados por equipe)
+ * A câmera segue um carro; roda do mouse / +/- dão zoom.
+ */
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
+  private overlay: HTMLCanvasElement;
+  private octx: CanvasRenderingContext2D;
   private world: World;
   private cam = { x: 0, y: 0, ready: false };
   private disp = new Map<string, Disp>();
   private scDisp: Disp | null = null;
   private drops: { x: number; y: number; l: number }[] = [];
   private screenPos = new Map<string, { x: number; y: number }>();
+  private dpr = 1;
+  private zoom = 0;
   followId: string;
   pixelScale = 3;
 
   constructor(private canvas: HTMLCanvasElement, private race: Race, followId: string, onPick: (id: string) => void) {
     this.ctx = canvas.getContext("2d")!;
+    this.overlay = document.createElement("canvas");
+    this.overlay.id = "view-hd";
+    canvas.after(this.overlay);
+    this.octx = this.overlay.getContext("2d")!;
     this.world = buildWorld(race.track);
     this.followId = followId;
     this.resize();
     window.addEventListener("resize", this.resize);
     canvas.addEventListener("click", (e) => {
       const r = canvas.getBoundingClientRect();
-      const x = ((e.clientX - r.left) / r.width) * canvas.width;
-      const y = ((e.clientY - r.top) / r.height) * canvas.height;
+      const x = e.clientX - r.left, y = e.clientY - r.top;
       let best: string | null = null;
-      let bestD = 16;
+      let bestD = Math.max(24, CAR_LEN_M * this.m2css() * 0.7);
       for (const [id, p] of this.screenPos) {
         const d = Math.hypot(p.x - x, p.y - y);
         if (d < bestD) {
@@ -40,20 +53,55 @@ export class Renderer {
       }
       if (best) onPick(best);
     });
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        this.setZoom(this.zoom + (e.deltaY < 0 ? 1 : -1));
+      },
+      { passive: false },
+    );
   }
 
   destroy() {
     window.removeEventListener("resize", this.resize);
+    this.overlay.remove();
+  }
+
+  /** zoom em passos inteiros (mantém a pixel art nítida) */
+  setZoom(z: number) {
+    const base = this.baseScale();
+    this.zoom = Math.max(1 - base, Math.min(6, z));
+    this.resize();
+  }
+
+  zoomIn() {
+    this.setZoom(this.zoom + 1);
+  }
+
+  zoomOut() {
+    this.setZoom(this.zoom - 1);
+  }
+
+  private baseScale() {
+    // ~200 m de pista visíveis na largura (carros grandes o bastante pra ver os detalhes)
+    return Math.max(1, Math.round(window.innerWidth / (200 * this.world.ppm)));
+  }
+
+  /** metros -> pixels CSS na tela */
+  private m2css() {
+    return this.world.ppm * this.pixelScale;
   }
 
   private resize = () => {
     const w = window.innerWidth, h = window.innerHeight;
-    // ~280 m de pista visíveis na largura, com escala inteira (pixel art nítida)
-    this.pixelScale = Math.max(1, Math.round(w / (280 * this.world.ppm)));
-    void h;
+    this.pixelScale = Math.max(1, this.baseScale() + this.zoom);
     this.canvas.width = Math.ceil(w / this.pixelScale);
     this.canvas.height = Math.ceil(h / this.pixelScale);
     this.ctx.imageSmoothingEnabled = false;
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.overlay.width = Math.round(w * this.dpr);
+    this.overlay.height = Math.round(h * this.dpr);
   };
 
   /**
@@ -69,12 +117,16 @@ export class Renderer {
       this.disp.set(id, d);
       return d;
     }
-    d.s += v * simDt;
+    // prevê pela velocidade e corrige aos poucos, mas NUNCA anda pra trás
+    // (se a previsão passou do ponto, o carro só "espera" a simulação alcançar)
     let err = s - d.s;
     if (err > L / 2) err -= L;
     if (err < -L / 2) err += L;
     if (Math.abs(err) > 80) d.s = s;
-    else d.s += err * Math.min(1, realDt * 8);
+    else {
+      const step = v * simDt + err * Math.min(1, realDt * 6);
+      d.s += Math.max(0, step);
+    }
     d.s = ((d.s % L) + L) % L;
     d.lat += (lat - d.lat) * Math.min(1, realDt * 10);
     return d;
@@ -91,15 +143,13 @@ export class Renderer {
     const cw = this.canvas.width, ch = this.canvas.height;
     const simDt = race.phase === "racing" ? realDt * speed : 0;
 
-    // posições suavizadas
+    // posições suavizadas (em pixels do mundo)
     const pos = new Map<string, { x: number; y: number; h: number }>();
     for (const c of race.cars) {
       const jump = c.pit === "stopped" || c.pit === "parked";
       const d = this.smooth(c.id, c.s, c.lateral, c.v, simDt, realDt, jump);
       pos.set(c.id, this.px(d.s, d.lat));
     }
-
-    // safety car (posição suavizada) — também pode ser seguido pela câmera
     const scOn = race.sc.active && race.sc.onTrack;
     let scPos: { x: number; y: number; h: number } | null = null;
     if (scOn) {
@@ -122,149 +172,171 @@ export class Renderer {
     const ox = Math.round(this.cam.x - cw / 2);
     const oy = Math.round(this.cam.y - ch / 2);
 
+    // ---- camada 1: pista em pixel art ----
     g.fillStyle = race.track.def.grass[0];
     g.fillRect(0, 0, cw, ch);
     g.drawImage(this.world.canvas, ox, oy, cw, ch, 0, 0, cw, ch);
-
-    // pista molhada escurece tudo um pouco
     if (race.wet > 0.02) {
       g.fillStyle = `rgba(20,40,75,${(race.wet * 0.3).toFixed(3)})`;
       g.fillRect(0, 0, cw, ch);
     }
 
-    // carros
+    // ---- camada 2: alta resolução ----
+    const o = this.octx;
+    const W = window.innerWidth, H = window.innerHeight;
+    o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    o.clearRect(0, 0, W, H);
+    o.imageSmoothingEnabled = true;
+    o.imageSmoothingQuality = "high";
+    const ps = this.pixelScale;
+    const m = this.m2css();
+    const toCss = (p: { x: number; y: number }) => ({ x: (p.x - ox) * ps, y: (p.y - oy) * ps });
+
     this.screenPos.clear();
+    const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
     const sorted = [...race.cars].sort((a, b) => Number(a.id === this.followId) - Number(b.id === this.followId));
     for (const c of sorted) {
       const p = pos.get(c.id)!;
-      const x = p.x - ox, y = p.y - oy;
-      if (x < -20 || y < -20 || x > cw + 20 || y > ch + 20) continue;
+      const { x, y } = toCss(p);
+      const margin = CAR_LEN_M * m;
+      if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
-      if (race.wet > 0.25 && c.v > 25) this.spray(g, x, y, p.h, race.wet);
-      g.save();
-      g.translate(Math.round(x), Math.round(y));
-      // rodada: carro gira
-      g.rotate(p.h + (c.spin > 0 ? c.spin * 2.2 : 0));
-      if (c.retired) g.globalAlpha = 0.65;
-      g.fillStyle = "rgba(0,0,0,0.35)";
-      g.fillRect(-CAR_LEN / 2 + 1, -CAR_WID / 2 + 1, CAR_LEN, CAR_WID);
-      // na chuva a luz vermelha traseira pisca, como na F1
-      const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
-      g.drawImage(carSprite(c.team, rainLight), -CAR_LEN / 2, -CAR_WID / 2);
-      g.restore();
-      if (c.retired) this.smoke(g, x, y);
+      if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
+      this.drawCar(o, x, y, p.h + (c.spin > 0 ? c.spin * 2.2 : 0), carImage(c.team, rainLight), m, c.retired ? 0.6 : 1);
+      if (c.retired) this.smoke(o, x, y, m);
     }
 
-    // safety car
     if (scPos) {
-      const p = scPos;
-      const x = p.x - ox, y = p.y - oy;
+      const { x, y } = toCss(scPos);
       this.screenPos.set("SC", { x, y });
-      g.save();
-      g.translate(Math.round(x), Math.round(y));
-      g.rotate(p.h);
-      g.drawImage(safetyCarSprite(Math.floor(performance.now() / 250) % 2 === 0), -CAR_LEN / 2, -CAR_WID / 2);
-      g.restore();
-      this.label(g, Math.round(x), Math.round(y) - 8, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111");
+      const blink = Math.floor(performance.now() / 250) % 2 === 0;
+      this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
 
-    // etiquetas: carro seguido e carros do jogador (empilha quando se sobrepõem)
+    // etiquetas: carro seguido, carros dos jogadores e safety car (empilham quando se sobrepõem)
     const placed: { x: number; y: number; w: number }[] = [];
+    const lift = Math.max(14, 1.6 * m);
+    if (scPos) {
+      const sp = this.screenPos.get("SC")!;
+      this.label(o, sp.x, sp.y - lift, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111", placed);
+    }
     for (const c of race.cars) {
       const sp = this.screenPos.get(c.id);
       if (!sp) continue;
       const mine = c.isHuman;
       if (!mine && c.id !== this.followId) continue;
       const txt = c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`;
-      this.label(g, Math.round(sp.x), Math.round(sp.y) - 8, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
+      this.label(o, sp.x, sp.y - lift, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
     }
 
-    if (race.rain > 0) this.drawRain(g, cw, ch, realDt, race.rain);
-    if (race.phase === "lights") this.drawLights(g, cw);
+    if (race.rain > 0) this.drawRain(o, W, H, realDt, race.rain);
+    if (race.phase === "lights") this.drawLights(o, W);
+  }
+
+  private drawCar(o: CanvasRenderingContext2D, x: number, y: number, h: number, img: ReturnType<typeof carImage>, m: number, alpha: number) {
+    o.save();
+    o.translate(x, y);
+    o.rotate(h);
+    o.globalAlpha = alpha;
+    o.drawImage(img.canvas, (-img.wM / 2) * m, (-img.hM / 2) * m, img.wM * m, img.hM * m);
+    o.restore();
   }
 
   private smoothSc(s: number, v: number, simDt: number, realDt: number): Disp {
     const L = this.race.track.L;
     const d = this.scDisp!;
-    d.s += v * simDt;
     let err = s - d.s;
     if (err > L / 2) err -= L;
     if (err < -L / 2) err += L;
     if (Math.abs(err) > 80) d.s = s;
-    else d.s += err * Math.min(1, realDt * 8);
+    else d.s += Math.max(0, v * simDt + err * Math.min(1, realDt * 6));
+    d.s = ((d.s % L) + L) % L;
     return d;
   }
 
-  private label(g: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string, placed?: { x: number; y: number; w: number }[]) {
-    g.font = "8px Silkscreen, monospace";
-    g.textAlign = "center";
-    g.textBaseline = "bottom";
-    const w = Math.ceil(g.measureText(text).width) + 4;
+  private label(o: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string, placed: { x: number; y: number; w: number }[]) {
+    o.font = "11px Silkscreen, monospace";
+    o.textAlign = "center";
+    o.textBaseline = "middle";
+    const w = Math.ceil(o.measureText(text).width) + 10;
     const anchor = y;
-    if (placed) {
-      // sobe a etiqueta até não encostar em nenhuma já desenhada
-      const hits = () => placed.some((r) => Math.abs(r.x - x) < (r.w + w) / 2 + 2 && Math.abs(r.y - y) < 11);
-      for (let k = 0; k < 6 && hits(); k++) y -= 11;
-      placed.push({ x, y, w });
-      if (y !== anchor) {
-        g.fillStyle = "rgba(0,0,0,0.6)";
-        g.fillRect(x, y, 1, anchor - y);
-      }
-    }
-    g.fillStyle = bg;
-    g.fillRect(x - w / 2, y - 9, w, 9);
-    g.fillStyle = "#000";
-    g.fillRect(x - 1, y, 2, 2);
-    g.fillStyle = fg;
-    g.fillText(text, x, y);
+    // sobe a etiqueta até não encostar em nenhuma já desenhada
+    const hits = () => placed.some((r) => Math.abs(r.x - x) < (r.w + w) / 2 + 3 && Math.abs(r.y - y) < 17);
+    for (let k = 0; k < 6 && hits(); k++) y -= 17;
+    placed.push({ x, y, w });
+    o.fillStyle = "rgba(0,0,0,0.55)";
+    o.fillRect(x - 0.75, y + 7, 1.5, anchor - y + 4);
+    o.fillStyle = "rgba(0,0,0,0.5)";
+    o.fillRect(x - w / 2 + 2, y - 7 + 2, w, 15);
+    o.fillStyle = bg;
+    o.fillRect(x - w / 2, y - 7, w, 15);
+    o.fillStyle = fg;
+    o.fillText(text, x, y + 1);
   }
 
-  private spray(g: CanvasRenderingContext2D, x: number, y: number, h: number, wet: number) {
-    const n = Math.round(4 + wet * 8);
+  private spray(o: CanvasRenderingContext2D, x: number, y: number, h: number, wet: number, m: number) {
+    const n = Math.round(6 + wet * 14);
     for (let i = 0; i < n; i++) {
-      const back = 7 + Math.random() * 10;
-      const side = (Math.random() - 0.5) * 6;
+      const back = (2.6 + Math.random() * 4) * m;
+      const side = (Math.random() - 0.5) * 2.2 * m;
       const sx = x - Math.cos(h) * back - Math.sin(h) * side;
       const sy = y - Math.sin(h) * back + Math.cos(h) * side;
-      g.fillStyle = `rgba(220,230,245,${(0.15 + Math.random() * 0.25).toFixed(2)})`;
-      g.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+      o.fillStyle = `rgba(220,230,245,${(0.1 + Math.random() * 0.22).toFixed(2)})`;
+      const r = (0.15 + Math.random() * 0.35) * m;
+      o.beginPath();
+      o.arc(sx, sy, r, 0, Math.PI * 2);
+      o.fill();
     }
   }
 
-  private smoke(g: CanvasRenderingContext2D, x: number, y: number) {
+  private smoke(o: CanvasRenderingContext2D, x: number, y: number, m: number) {
     const t = performance.now() / 1000;
-    for (let i = 0; i < 6; i++) {
-      const k = (t * 0.8 + i / 6) % 1;
-      g.fillStyle = `rgba(160,160,160,${(0.5 * (1 - k)).toFixed(2)})`;
-      g.fillRect(Math.round(x + Math.sin(i * 3.1 + t) * 3), Math.round(y - k * 14), 2, 2);
+    for (let i = 0; i < 8; i++) {
+      const k = (t * 0.7 + i / 8) % 1;
+      o.fillStyle = `rgba(150,150,150,${(0.45 * (1 - k)).toFixed(2)})`;
+      o.beginPath();
+      o.arc(x + Math.sin(i * 3.1 + t) * 0.8 * m, y - k * 4 * m, (0.4 + k * 0.8) * m, 0, Math.PI * 2);
+      o.fill();
     }
   }
 
-  private drawRain(g: CanvasRenderingContext2D, cw: number, ch: number, dt: number, rain: number) {
-    const want = Math.round(rain * 260 * (cw * ch) / (480 * 270));
-    while (this.drops.length < want) this.drops.push({ x: Math.random() * cw, y: Math.random() * ch, l: 2 + Math.random() * 3 });
+  private drawRain(o: CanvasRenderingContext2D, W: number, H: number, dt: number, rain: number) {
+    const want = Math.round(rain * 420 * (W * H) / (1600 * 1000));
+    while (this.drops.length < want) this.drops.push({ x: Math.random() * W, y: Math.random() * H, l: 8 + Math.random() * 10 });
     if (this.drops.length > want) this.drops.length = want;
-    g.fillStyle = "rgba(180,200,235,0.55)";
+    o.strokeStyle = "rgba(180,200,235,0.45)";
+    o.lineWidth = 1.2;
+    o.beginPath();
     for (const d of this.drops) {
-      d.x -= 60 * dt;
-      d.y += 260 * dt;
-      if (d.y > ch) {
-        d.y = -4;
-        d.x = Math.random() * (cw + 40);
+      d.x -= 160 * dt;
+      d.y += 800 * dt;
+      if (d.y > H) {
+        d.y = -10;
+        d.x = Math.random() * (W + 80);
       }
-      if (d.x < -4) d.x = cw + 4;
-      g.fillRect(Math.round(d.x), Math.round(d.y), 1, Math.round(d.l));
+      if (d.x < -10) d.x = W + 10;
+      o.moveTo(d.x, d.y);
+      o.lineTo(d.x - d.l * 0.2, d.y + d.l);
     }
+    o.stroke();
   }
 
-  private drawLights(g: CanvasRenderingContext2D, cw: number) {
+  private drawLights(o: CanvasRenderingContext2D, W: number) {
     const lit = Math.min(5, Math.floor(this.race.time));
-    const x0 = Math.round(cw / 2 - 5 * 9);
-    g.fillStyle = "#111";
-    g.fillRect(x0 - 4, 30, 5 * 18 + 6, 22);
+    const r = 16, gap = 46;
+    const x0 = W / 2 - gap * 2;
+    o.fillStyle = "#111";
+    o.fillRect(x0 - 30, 70, gap * 4 + 60, 56);
     for (let i = 0; i < 5; i++) {
-      g.fillStyle = i < lit ? "#ff2a2a" : "#3a1010";
-      g.fillRect(x0 + i * 18, 34, 12, 14);
+      o.beginPath();
+      o.arc(x0 + i * gap, 98, r, 0, Math.PI * 2);
+      o.fillStyle = i < lit ? "#ff2a2a" : "#3a1010";
+      if (i < lit) {
+        o.shadowColor = "#ff2a2a";
+        o.shadowBlur = 18;
+      }
+      o.fill();
+      o.shadowBlur = 0;
     }
   }
 }

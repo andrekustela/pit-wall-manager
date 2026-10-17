@@ -201,6 +201,8 @@ class App {
       const n = Number(e.key);
       if (n >= 1 && n <= SPEEDS.length) setSpeed(SPEEDS[n - 1]);
       if (e.key === "m" || e.key === "M") view.hud.toggleCompact();
+      if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
+      if (e.key === "-" || e.key === "_") view.renderer.zoomOut();
       if (e.key === "Tab" && mine.length) {
         e.preventDefault();
         const i = mine.findIndex((c) => c.id === view.follow);

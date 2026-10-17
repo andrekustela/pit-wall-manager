@@ -162,8 +162,14 @@ export interface CarState {
   finishTime: number | null;
   retired: boolean;
   retireReason: string | null;
-  /** segundos por volta perdidos por dano (asa quebrada); conserta no box */
+  /** dano por peça (segundos por volta perdidos); conserta no box */
+  dmg: { fw: number; rw: number; susp: number };
+  /** soma do dano (s por volta) */
   damage: number;
+  /** disputa na freada: quem perdeu alivia até esse instante */
+  yieldTill: number;
+  /** não decide outra freada antes dessa distância */
+  duelAt: number;
   /** defendendo a posição: fica nessa lateral até esse instante */
   defendTill: number;
   defendLat: number;

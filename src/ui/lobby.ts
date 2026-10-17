@@ -1,7 +1,7 @@
 import type { Connection } from "../net/connection";
 import { LAP_OPTIONS, type LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
-import { carSprite } from "../render/sprites";
+import { carImage } from "../render/carArt";
 import { CIRCUITS } from "../sim/track";
 import { drawTrackThumb, esc } from "./common";
 
@@ -78,13 +78,14 @@ export class LobbyScreen {
       const taken = o && !mine;
       const name = mine && me.teamName ? me.teamName : o?.teamName || t.name;
       return `<button class="teamcard ${mine ? "on" : ""}" data-team="${t.id}" ${taken ? "disabled" : ""}>
-        <canvas data-sprite="${t.id}" width="16" height="7"></canvas>
+        <canvas data-sprite="${t.id}" width="150" height="60"></canvas>
         <div><div class="tn">${esc(name)}</div><div class="st">${
           taken ? `de ${esc(o!.name)}` : lobby.equalCars ? "Carro igual pra todos" : `Carro ${stars(t.carPace)}`
         }</div></div></button>`;
     }).join("");
     teams.querySelectorAll<HTMLCanvasElement>("canvas[data-sprite]").forEach((cv) => {
-      cv.getContext("2d")!.drawImage(carSprite(TEAMS.find((t) => t.id === cv.dataset.sprite)!), 0, 0);
+      const img = carImage(TEAMS.find((t) => t.id === cv.dataset.sprite)!).canvas;
+      cv.getContext("2d")!.drawImage(img, 0, 0, cv.width, cv.height);
     });
     teams.querySelectorAll<HTMLButtonElement>("[data-team]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "team", teamId: b.dataset.team! })),

@@ -63,7 +63,14 @@ for (const step of steps.split(";").map((s) => s.trim()).filter(Boolean)) {
     const r = await cmd("Page.captureScreenshot", { format: "png" });
     writeFileSync(join(outDir, `${arg}.png`), Buffer.from(r.result.data, "base64"));
     console.log(`print: ${arg}.png`);
-  } else if (kind === "eval" || kind === "click") {
+  } else if (kind === "eval" || kind === "click" || kind === "evalfile") {
+    if (kind === "evalfile") {
+      // roda um arquivo .js (pra códigos com ";" que não cabem num passo)
+      const { readFileSync } = await import("node:fs");
+      const r = await cmd("Runtime.evaluate", { expression: readFileSync(arg, "utf8"), awaitPromise: true, returnByValue: true });
+      console.log(`evalfile ${arg} => ${JSON.stringify(r.result?.result?.value ?? r.result?.exceptionDetails?.exception?.description)}`);
+      continue;
+    }
     const expr = kind === "click" ? `((el) => el ? (el.click(), "ok") : "sem elemento")(document.querySelector(${JSON.stringify(arg)}))` : arg;
     const r = await cmd("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
     const v = r.result?.result?.value;

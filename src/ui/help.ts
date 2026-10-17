@@ -51,6 +51,8 @@ const CONTENT: Record<Tab, string> = {
     <p>O plano é um <b>lembrete</b>: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você.</p>`,
   corrida: `
     <ul>
+      <li><b>Estado do carro:</b> o desenho na lateral de cada card mostra o carro peça por peça. Os 4 pneus vão de verde a vermelho conforme gastam (azul = pneu frio, recém-colocado), as asas e a suspensão piscam em vermelho quando quebram (laranja na suspensão = carro baixo demais, batendo no chão), e a barra no meio é o combustível.</li>
+      <li><b>Zoom:</b> roda do mouse ou teclas + e − pra chegar perto dos carros.</li>
       <li><b>Câmera:</b> clique em qualquer carro na pista, na tabela, no minimapa ou no card do seu piloto pra seguir ele.</li>
       <li><b>Ritmo:</b> Atacar é mais rápido, mas gasta mais pneu. Poupar é o contrário.</li>
       <li><b>Motor:</b> mistura Rica é mais rápida e gasta mais combustível. Pobre economiza quando o combustível não vai chegar.</li>
@@ -70,6 +72,7 @@ const CONTENT: Record<Tab, string> = {
       <li><b>1 a 5</b>: velocidade 1x, 2x, 4x, 8x, 16x</li>
       <li><b>Tab</b>: alternar a câmera entre seus dois pilotos</li>
       <li><b>M</b>: minimizar / expandir o painel dos seus pilotos (pra ver mais pista)</li>
+      <li><b>+ / −</b> ou roda do mouse: zoom</li>
       <li><b>?</b> (botão no canto): esta ajuda · <b>🔊</b>: liga/desliga o som</li>
     </ul>`,
 };
