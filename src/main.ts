@@ -189,6 +189,7 @@ class App {
       setSpeed,
       send: (cmd) => conn.send({ t: "cmd", cmd }),
       skip: () => conn.send({ t: "skip" }),
+      exit: () => (isHost ? conn.send({ t: "abort" }) : this.leave()),
     });
     view.minimap = new Minimap(view.hud.minimapCanvas, race, setFollow);
     view.onKey = (e: KeyboardEvent) => {
@@ -211,14 +212,16 @@ class App {
     let lastT = performance.now();
     let hudT = 0;
     const frame = (now: number) => {
-      const realDt = Math.min(0.1, (now - lastT) / 1000);
+      const gap = (now - lastT) / 1000;
+      const realDt = gap > 0.5 ? 0.6 : Math.min(0.1, gap);
       lastT = now;
       // o safety car saiu da pista: câmera volta pro líder
       if (view.follow === "SC" && !(race.sc.active && race.sc.onTrack)) setFollow(race.leader().id);
       view.renderer.draw(realDt, view.speed);
       sound.update(race, view.follow, view.speed);
       if (race.events.length > this.soundEvents) {
-        sound.events(race.events.slice(this.soundEvents), my);
+        // voltando de aba minimizada (frame muito atrasado): não despeja os sons acumulados
+        if (realDt < 0.5) sound.events(race.events.slice(this.soundEvents), my);
         this.soundEvents = race.events.length;
       }
       view.minimap.draw(view.follow);

@@ -51,6 +51,8 @@ export class Room {
   private speed = 1;
   private sentEvents = 0;
   private ticks = 0;
+  private lastTick = 0;
+  private simDebt = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private nextId = 1;
 
@@ -174,6 +176,14 @@ export class Room {
       case "speed":
         if (isHost && this.race && SPEEDS.includes(msg.speed)) this.speed = msg.speed;
         break;
+      case "abort":
+        // host encerra o fim de semana/corrida e todo mundo volta pro lobby
+        if (!isHost || this.phase === "lobby") return;
+        this.dispose();
+        this.race = null;
+        this.champ = null;
+        this.setPhase("lobby");
+        break;
       case "skip":
         if (isHost && this.race?.checkered) this.race.skipToEnd();
         break;
@@ -279,12 +289,25 @@ export class Room {
     this.setPhase("race");
     this.broadcast({ t: "start", opts, speed: this.speed });
 
+    this.lastTick = Date.now();
+    this.simDebt = 0;
     this.timer = setInterval(() => this.tick(), TICK_MS);
   }
 
   private tick() {
     const race = this.race!;
-    for (let i = 0; i < this.speed; i++) race.step(SIM_DT);
+    // anda pelo tempo real que passou: se o navegador atrasar o timer (aba
+    // minimizada no solo), a corrida compensa em vez de ficar lenta
+    const now = Date.now();
+    const elapsed = Math.min(30, (now - this.lastTick) / 1000);
+    this.lastTick = now;
+    this.simDebt += elapsed * this.speed;
+    let steps = 0;
+    while (this.simDebt >= SIM_DT && steps < 12000 && race.phase !== "finished") {
+      race.step(SIM_DT);
+      this.simDebt -= SIM_DT;
+      steps++;
+    }
     this.ticks++;
     const done = race.phase === "finished";
     // no solo manda todo tick (sem custo de rede); online, 10x por segundo

@@ -26,6 +26,7 @@ export interface HudHooks {
   setSpeed(s: number): void;
   send(cmd: Command): void;
   skip(): void;
+  exit(): void;
 }
 
 interface CardState {
@@ -115,11 +116,17 @@ export class Hud {
     const host = this.hooks.isHost;
     this.top.innerHTML =
       [0, ...SPEEDS].map((s) => `<button data-speed="${s}" ${host ? "" : "disabled"}>${s === 0 ? "❚❚" : `${s}x`}</button>`).join("") +
-      `<button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button>`;
+      `<button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button><button data-exit title="${host ? "Encerrar a corrida e voltar pro lobby" : "Sair da sala"}">✕ SAIR</button>`;
     this.top.querySelectorAll<HTMLButtonElement>("[data-speed]").forEach((b) =>
       b.addEventListener("click", () => this.hooks.setSpeed(Number(b.dataset.speed))),
     );
     this.top.querySelector("[data-skip]")!.addEventListener("click", () => this.hooks.skip());
+    this.top.querySelector("[data-exit]")!.addEventListener("click", () => {
+      const msg = host
+        ? "Encerrar a corrida e voltar pro lobby? O resultado não vale (e o campeonato é cancelado)."
+        : "Sair da sala? A IA assume a sua equipe até o fim da corrida.";
+      if (confirm(msg)) this.hooks.exit();
+    });
     if (!host) this.top.title = "Só o host controla a velocidade";
   }
 

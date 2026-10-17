@@ -62,6 +62,7 @@ export type ClientMsg =
   | { t: "cmd"; cmd: Command }
   | { t: "speed"; speed: number }
   | { t: "skip" }
+  | { t: "abort" }
   | { t: "leave" };
 
 export type ServerMsg =

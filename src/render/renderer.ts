@@ -164,14 +164,15 @@ export class Renderer {
       this.label(g, Math.round(x), Math.round(y) - 8, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111");
     }
 
-    // etiquetas: carro seguido e carros do jogador
+    // etiquetas: carro seguido e carros do jogador (empilha quando se sobrepõem)
+    const placed: { x: number; y: number; w: number }[] = [];
     for (const c of race.cars) {
       const sp = this.screenPos.get(c.id);
       if (!sp) continue;
       const mine = c.isHuman;
       if (!mine && c.id !== this.followId) continue;
       const txt = c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`;
-      this.label(g, Math.round(sp.x), Math.round(sp.y) - 8, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff");
+      this.label(g, Math.round(sp.x), Math.round(sp.y) - 8, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
     }
 
     if (race.rain > 0) this.drawRain(g, cw, ch, realDt, race.rain);
@@ -190,11 +191,22 @@ export class Renderer {
     return d;
   }
 
-  private label(g: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string) {
+  private label(g: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string, placed?: { x: number; y: number; w: number }[]) {
     g.font = "8px Silkscreen, monospace";
     g.textAlign = "center";
     g.textBaseline = "bottom";
     const w = Math.ceil(g.measureText(text).width) + 4;
+    const anchor = y;
+    if (placed) {
+      // sobe a etiqueta até não encostar em nenhuma já desenhada
+      const hits = () => placed.some((r) => Math.abs(r.x - x) < (r.w + w) / 2 + 2 && Math.abs(r.y - y) < 11);
+      for (let k = 0; k < 6 && hits(); k++) y -= 11;
+      placed.push({ x, y, w });
+      if (y !== anchor) {
+        g.fillStyle = "rgba(0,0,0,0.6)";
+        g.fillRect(x, y, 1, anchor - y);
+      }
+    }
     g.fillStyle = bg;
     g.fillRect(x - w / 2, y - 9, w, 9);
     g.fillStyle = "#000";

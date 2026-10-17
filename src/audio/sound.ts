@@ -142,10 +142,20 @@ class Sound {
   volume = Number(storeGet("pwm.vol") || 0.7);
   private listeners = new Set<() => void>();
 
+  constructor() {
+    // aba minimizada: o navegador para de desenhar a página, então pausa o som
+    // em vez de deixar o motor travado numa nota
+    document.addEventListener("visibilitychange", () => {
+      if (!this.ctx) return;
+      if (document.hidden) void this.ctx.suspend();
+      else void this.ctx.resume();
+    });
+  }
+
   /** o navegador só libera áudio depois de um clique */
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === "suspended") void this.ctx.resume();
+      if (this.ctx.state === "suspended" && !document.hidden) void this.ctx.resume();
       return;
     }
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
