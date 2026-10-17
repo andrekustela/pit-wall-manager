@@ -39,21 +39,41 @@ export function toast(msg: string) {
 }
 
 /** barra "esperando os outros" nas fases com botão de pronto */
+/** fase -> o que "pronto" quer dizer nela */
+const READY_WHAT: Record<string, string> = {
+  practice: "terminou o treino",
+  quali: "viu a classificação",
+  strategy: "fechou a estratégia",
+  podium: "pronto pra seguir",
+};
+
+/**
+ * Online: painel no canto de cima com cada jogador e se já apertou "pronto"
+ * (a fase só avança quando todos apertam; quem caiu da conexão não segura ninguém).
+ */
 export function updateWaitBar(lobby: LobbyState | null) {
-  let el = document.querySelector<HTMLElement>(".waitbar");
-  const me = lobby?.players.find((p) => p.id === lobby.you);
-  const waiting = lobby?.players.filter((p) => !p.ready) ?? [];
-  const show = !!lobby && !lobby.solo && lobby.phase !== "lobby" && lobby.phase !== "race" && !!me?.ready && waiting.length > 0;
+  let el = document.querySelector<HTMLElement>(".readyboard");
+  const show = !!lobby && !lobby.solo && lobby.phase !== "lobby" && lobby.phase !== "race";
   if (!show) {
     el?.remove();
     return;
   }
   if (!el) {
     el = document.createElement("div");
-    el.className = "waitbar";
+    el.className = "readyboard panel";
     document.body.appendChild(el);
   }
-  el.textContent = `Pronto! Esperando: ${waiting.map((p) => p.name).join(", ")}`;
+  const ps = lobby!.players;
+  const waiting = ps.filter((p) => !p.ready && p.connected);
+  const rows = ps
+    .map((p) => {
+      const color = TEAMS.find((t) => t.id === p.teamId)?.color ?? "#555";
+      const st = !p.connected ? `<span class="rs off">⚠ CAIU</span>` : p.ready ? `<span class="rs ok">✓ PRONTO</span>` : `<span class="rs wait">⏳ ${p.id === lobby!.you ? "VOCÊ" : "…"}</span>`;
+      return `<div class="rrow ${p.id === lobby!.you ? "me" : ""}"><span class="rdot" style="background:${color}"></span><span class="rn">${esc(p.name)}</span>${st}</div>`;
+    })
+    .join("");
+  const foot = waiting.length ? `Faltam ${waiting.length}: ${waiting.map((p) => esc(p.name)).join(", ")}` : "Todos prontos! Avançando…";
+  el.innerHTML = `<div class="rhead">JOGADORES · ${esc(READY_WHAT[lobby!.phase] ?? "pronto")}</div>${rows}<div class="rfoot">${foot}</div>`;
 }
 
 /** desenha a silhueta da pista num canvas */

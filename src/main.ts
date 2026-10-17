@@ -7,7 +7,7 @@ import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
 import type { QualiResult } from "./sim/weekend";
-import { storeSet, toast } from "./ui/common";
+import { storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
 import { LobbyScreen } from "./ui/lobby";
 import { showMenu, type MenuChoice } from "./ui/menu";
@@ -234,6 +234,7 @@ class App {
         break;
     }
     window.scrollTo(0, 0);
+    updateWaitBar(l); // online: painel de quem já está pronto
   }
 
   /** soma a corrida nas estatísticas da conta (melhor carro da sua equipe) */
