@@ -513,3 +513,20 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .chatfeed .chatline.fade { opacity: 0; }
 .chat { display: flex; flex-direction: column-reverse; align-items: flex-start; }
 .chat .chatbox { width: 100%; }
+
+/* login */
+.loginscreen { position: relative; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; overflow: hidden; }
+.loginbg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.loginbox { position: relative; z-index: 1; width: min(420px, 100%); padding: 26px 24px; background: var(--panel-solid); border: 2px solid var(--line); box-shadow: 0 0 0 2px #000, 0 20px 60px rgba(0,0,0,.6); }
+.logintabs { margin-bottom: 14px; }
+.logintabs button { flex: 1; }
+.loginmsg { min-height: 18px; font-size: 13px; color: #ff6b6b; margin: 4px 0; }
+.loginmsg.ok { color: var(--ok); }
+.loginlinks { display: flex; justify-content: space-between; margin-top: 12px; }
+.accountbox { margin-bottom: 12px; }
+.accounthead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.statsgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.statsgrid div { background: #1a1f2b; padding: 8px; text-align: center; }
+.statsgrid b { display: block; font-family: var(--pix); font-size: 18px; color: var(--warn); }
+.statsgrid span { font-size: 11px; color: var(--muted); }
+@media (max-width: 520px) { .statsgrid { grid-template-columns: repeat(2, 1fr); } }

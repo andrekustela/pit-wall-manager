@@ -3,6 +3,7 @@
 import type { ClientMsg, ServerMsg } from "./protocol";
 import { Room, type ChampSave } from "./room";
 import { storeSet } from "../ui/common";
+import { account } from "./account";
 
 export interface Connection {
   send(msg: ClientMsg): void;
@@ -20,7 +21,10 @@ export class LocalConnection implements Connection {
   constructor(name: string, teamName: string, resume?: ChampSave) {
     // entrega assíncrona, igual seria pela rede
     this.room = new Room("SOLO", (_pid, msg) => queueMicrotask(() => this.onMessage(msg)), true);
-    this.room.onSave = (s) => storeSet("pwm.champ", s ? JSON.stringify(s) : "");
+    this.room.onSave = (s) => {
+      storeSet("pwm.champ", s ? JSON.stringify(s) : "");
+      account.saveChamp(s); // na nuvem também (se tiver conta)
+    };
     this.id = this.room.join(resume?.name ?? name, resume?.teamName ?? teamName)!;
     if (resume) queueMicrotask(() => this.room.resume(this.id, resume));
     // depuração: ?debug expõe a sala no console (window.__room)

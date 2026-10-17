@@ -16,6 +16,9 @@ import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
 import { ChatWidget } from "./ui/chat";
+import { account, accountsEnabled } from "./net/account";
+import { showLogin } from "./ui/login";
+import { POINTS, standings } from "./sim/championship";
 
 interface Screen {
   update?(lobby: LobbyState): void;
@@ -49,6 +52,9 @@ class App {
   private soundEvents = 0;
   private draftSeen = -1;
   private chat: ChatWidget | null = null;
+  /** escolheu jogar sem conta nesta visita */
+  private guest = false;
+  private recorded = -1;
 
   helpTab(): HelpTab {
     const p = this.screenPhase;
@@ -57,8 +63,28 @@ class App {
 
   menu() {
     this.teardown();
+    // com contas ligadas, pede login (ou "jogar sem conta")
+    // ?login mostra a tela mesmo sem Supabase configurado (pra ver como fica)
+    if ((accountsEnabled() || params.has("login")) && !account.user && !this.guest && !AUTO) {
+      this.screenPhase = "menu";
+      showLogin(app, (guest) => {
+        this.guest = guest;
+        // campeonato salvo na nuvem vale mais que o do navegador
+        if (account.profile?.champ) storeSet("pwm.champ", JSON.stringify(account.profile.champ));
+        if (account.profile) {
+          storeSet("pwm.name", account.profile.name);
+          storeSet("pwm.team", account.profile.team_name);
+        }
+        this.menu();
+      });
+      return;
+    }
     this.screenPhase = "menu";
-    showMenu(app, (c) => this.connect(c));
+    showMenu(app, (c) => this.connect(c), async () => {
+      await account.signOut();
+      this.guest = false;
+      this.menu();
+    });
     if (AUTO) this.connect({ mode: "solo", name: "Teste", teamName: "Equipe Teste" });
   }
 
@@ -187,12 +213,38 @@ class App {
         break;
       case "podium":
         if (this.lastRace) {
+          this.recordStats(l, this.lastRace);
           this.screen = new PodiumScreen(app, conn, this.lastRace, l);
           sound.fanfare();
         }
         break;
     }
     window.scrollTo(0, 0);
+  }
+
+  /** soma a corrida nas estatísticas da conta (melhor carro da sua equipe) */
+  private recordStats(l: LobbyState, race: Race) {
+    if (!account.profile || this.recorded === race.opts.seed) return;
+    this.recorded = race.opts.seed;
+    const my = this.myTeam();
+    const order = race.ordered();
+    const mine = order.map((c, i) => ({ c, i })).filter((x) => x.c.team.id === my);
+    const fin = mine.filter((x) => !x.c.retired).map((x) => x.i + 1);
+    const points = mine.reduce((a, x) => a + (x.c.retired ? 0 : (POINTS[x.i] ?? 0)), 0);
+    const ch = l.champ;
+    let title = false;
+    if (ch?.finished) {
+      const ids = race.cars.map((c) => c.id);
+      const top = standings(ch.driverPts, ids, ch.results, (d) => race.cars.find((c) => c.id === d)!.team.id)[0];
+      title = race.cars.find((c) => c.id === top.id)?.team.id === my;
+    }
+    account.recordRace({
+      finish: fin.length ? Math.min(...fin) : null,
+      pole: race.opts.grid?.[0] !== undefined && race.cars.find((c) => c.id === race.opts.grid![0])?.team.id === my,
+      points,
+      champDone: !!ch?.finished,
+      title,
+    });
   }
 
   private startRace(opts: RaceOptions, speed: number) {
@@ -300,6 +352,7 @@ class App {
 
 (async () => {
   await document.fonts?.ready;
+  await account.restore().catch(() => false);
   const appInst = new App();
   new HelpWidget(() => appInst.helpTab());
   // áudio só é liberado depois de um clique; aproveita pra fazer o "tic" dos botões

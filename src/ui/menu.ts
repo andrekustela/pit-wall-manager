@@ -1,6 +1,8 @@
 import { esc, storeGet, storeSet } from "./common";
 import type { ChampSave } from "../net/room";
 import { CIRCUITS } from "../sim/track";
+import { account } from "../net/account";
+import { statsHtml } from "./login";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -26,9 +28,9 @@ export interface MenuChoice {
   save?: ChampSave;
 }
 
-export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void) {
-  const name = storeGet("pwm.name");
-  const team = storeGet("pwm.team");
+export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, onLogout?: () => void) {
+  const name = account.profile?.name ?? storeGet("pwm.name");
+  const team = account.profile?.team_name ?? storeGet("pwm.team");
   const save = loadJson<ChampSave>("pwm.champ");
   const sess = loadJson<Session>("pwm.session");
   const ch = save?.v === 1 ? save.champ : null;
@@ -45,8 +47,11 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void) {
     <div class="screen"><div class="wrap" style="max-width:720px">
       <h1 class="title">PIT WALL <span>MANAGER</span></h1>
       <p class="sub">Você é o engenheiro-chefe. Os pilotos correm, você decide o acerto e a estratégia.</p>
-      <div class="box">
-        <h3>SEU PERFIL</h3>
+      ${account.profile ? `<div class="box accountbox"><div class="accounthead"><div><h3 style="margin:0">OLÁ, ${esc(account.profile.name.toUpperCase())}</h3>
+          <div class="hint" style="margin:2px 0 0">${account.profile.team_name ? `Equipe ${esc(account.profile.team_name)}` : "Equipe com o nome original"}</div></div>
+          <div class="row-btns" style="margin:0"><button class="btn small" id="m-edit">EDITAR PERFIL</button><button class="btn small" id="m-logout">SAIR DA CONTA</button></div></div>${statsHtml()}</div>` : ""}
+      <div class="box" id="m-profile" ${account.profile ? "hidden" : ""}>
+        <h3>${account.profile ? "EDITAR PERFIL" : "SEU PERFIL"}</h3>
         <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="m-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
         <label class="fld"><span>Nome da equipe (opcional)</span><input class="txt" id="m-team" maxlength="24" placeholder="Ex.: Kustela Racing" value="${esc(team)}"></label>
       </div>
@@ -73,6 +78,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void) {
     const t = root.querySelector<HTMLInputElement>("#m-team")!.value.trim();
     storeSet("pwm.name", n);
     storeSet("pwm.team", t);
+    if (n) account.setNames(n, t);
+    if (account.profile) return { name: account.profile.name || "Engenheiro", teamName: account.profile.team_name };
     return { name: n || "Engenheiro", teamName: t };
   };
   root.querySelector("#m-resume")?.addEventListener("click", () => onChoose({ mode: "resume", ...get(), save: save! }));
@@ -84,6 +91,19 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void) {
   root.querySelector("#m-forget")?.addEventListener("click", () => {
     storeSet("pwm.session", "");
     showMenu(root, onChoose);
+  });
+  root.querySelector("#m-logout")?.addEventListener("click", () => onLogout?.());
+  // logado: o perfil fica escondido e abre no "editar perfil"
+  root.querySelector("#m-edit")?.addEventListener("click", () => {
+    const box = root.querySelector<HTMLElement>("#m-profile")!;
+    if (box.hidden) {
+      box.hidden = false;
+      root.querySelector<HTMLInputElement>("#m-name")!.focus();
+      root.querySelector("#m-edit")!.textContent = "SALVAR PERFIL";
+    } else {
+      get();
+      showMenu(root, onChoose, onLogout);
+    }
   });
   root.querySelector("#m-solo")!.addEventListener("click", () => onChoose({ mode: "solo", ...get() }));
   root.querySelector("#m-create")!.addEventListener("click", () => onChoose({ mode: "create", ...get() }));
