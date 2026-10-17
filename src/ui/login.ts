@@ -1,4 +1,4 @@
-// Tela de entrada: login por e-mail e senha (Supabase), criar conta, esqueci a
+// Tela de entrada: login por e-mail e senha (Firebase), criar conta, esqueci a
 // senha ou jogar sem conta. Ao fundo, carros passando numa reta.
 import { account, accountsEnabled } from "../net/account";
 import { TEAMS } from "../sim/data";

@@ -1,8 +1,19 @@
-// Conta do jogador (Supabase): login por e-mail e senha, perfil, estatísticas
-// e campeonato solo salvo na nuvem. Sem Supabase configurado, o jogo funciona
-// como antes (convidado, tudo no navegador).
-import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
+// Conta do jogador (Firebase): login por e-mail e senha, perfil, estatísticas
+// e campeonato solo salvo na nuvem. Sem Firebase configurado, o jogo funciona
+// como antes (sem conta, tudo no navegador).
+import { initializeApp, type FirebaseApp } from "firebase/app";
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  type Auth,
+  type User,
+} from "firebase/auth";
+import { doc, getDoc, getFirestore, serverTimestamp, setDoc, type Firestore } from "firebase/firestore";
+import { FIREBASE_CONFIG } from "./config";
 
 export interface PlayerStats {
   races: number;
@@ -26,15 +37,18 @@ export interface Profile {
 
 export const EMPTY_STATS: PlayerStats = { races: 0, wins: 0, podiums: 0, poles: 0, points: 0, dnfs: 0, titles: 0, champs: 0, best: null };
 
-let client: SupabaseClient | null = null;
+let fb: { app: FirebaseApp; auth: Auth; db: Firestore } | null = null;
 
 export function accountsEnabled(): boolean {
-  return !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+  return !!FIREBASE_CONFIG.apiKey && !!FIREBASE_CONFIG.projectId;
 }
 
-function sb(): SupabaseClient {
-  if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
-  return client;
+function F() {
+  if (!fb) {
+    const app = initializeApp(FIREBASE_CONFIG);
+    fb = { app, auth: getAuth(app), db: getFirestore(app) };
+  }
+  return fb;
 }
 
 class Account {
@@ -44,66 +58,91 @@ class Account {
   /** recupera a sessão salva no navegador */
   async restore(): Promise<boolean> {
     if (!accountsEnabled()) return false;
-    const { data } = await sb().auth.getSession();
-    this.user = data.session?.user ?? null;
+    const { auth } = F();
+    this.user = await new Promise<User | null>((resolve) => {
+      const off = onAuthStateChanged(auth, (u) => {
+        off();
+        resolve(u);
+      });
+    });
     if (this.user) await this.loadProfile();
     return !!this.user;
   }
 
   async signIn(email: string, password: string): Promise<string | null> {
-    const { data, error } = await sb().auth.signInWithPassword({ email, password });
-    if (error) return translate(error.message);
-    this.user = data.user;
-    await this.loadProfile();
-    return null;
+    try {
+      const cred = await signInWithEmailAndPassword(F().auth, email, password);
+      this.user = cred.user;
+      await this.loadProfile();
+      return null;
+    } catch (e) {
+      return translate(e);
+    }
   }
 
-  /** cria a conta; devolve erro, ou "confirm" se o Supabase pedir confirmação por e-mail */
   async signUp(email: string, password: string, name: string, teamName = ""): Promise<string | null> {
-    const { data, error } = await sb().auth.signUp({ email, password, options: { data: { name, team_name: teamName } } });
-    if (error) return translate(error.message);
-    if (!data.session) return "confirm";
-    this.user = data.user;
-    await this.loadProfile(name, teamName);
-    return null;
+    try {
+      const cred = await createUserWithEmailAndPassword(F().auth, email, password);
+      this.user = cred.user;
+      await this.loadProfile(name, teamName);
+      return null;
+    } catch (e) {
+      return translate(e);
+    }
   }
 
   async resetPassword(email: string): Promise<string | null> {
-    const { error } = await sb().auth.resetPasswordForEmail(email, { redirectTo: location.origin });
-    return error ? translate(error.message) : null;
+    try {
+      await sendPasswordResetEmail(F().auth, email);
+      return null;
+    } catch (e) {
+      return translate(e);
+    }
   }
 
   async signOut() {
-    if (accountsEnabled()) await sb().auth.signOut();
+    if (accountsEnabled()) await signOut(F().auth);
     this.user = null;
     this.profile = null;
   }
 
+  private ref() {
+    return doc(F().db, "profiles", this.user!.uid);
+  }
+
   private async loadProfile(name?: string, teamName?: string) {
     if (!this.user) return;
-    const { data } = await sb().from("profiles").select("*").eq("id", this.user.id).maybeSingle();
-    if (data) {
-      this.profile = data as Profile;
+    const snap = await getDoc(this.ref());
+    if (snap.exists()) {
+      const d = snap.data();
+      let champ: unknown = null;
+      try {
+        champ = d.champ ? JSON.parse(d.champ) : null;
+      } catch {
+        champ = null;
+      }
+      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champ };
       return;
     }
     const fresh: Profile = {
-      id: this.user.id,
-      name: name || (this.user.user_metadata?.name as string) || this.user.email?.split("@")[0] || "Engenheiro",
-      team_name: teamName ?? ((this.user.user_metadata?.team_name as string) || ""),
+      id: this.user.uid,
+      name: name || this.user.email?.split("@")[0] || "Engenheiro",
+      team_name: teamName ?? "",
       stats: {},
       champ: null,
     };
-    await sb().from("profiles").insert(fresh);
     this.profile = fresh;
+    await setDoc(this.ref(), { name: fresh.name, team_name: fresh.team_name, stats: {}, champ: null, updated_at: serverTimestamp() });
   }
 
   private async save(patch: Partial<Profile>) {
     if (!this.user || !this.profile) return;
     Object.assign(this.profile, patch);
-    await sb()
-      .from("profiles")
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq("id", this.user.id);
+    // campeonato vai como texto (o Firestore não aceita listas dentro de listas)
+    const data: Record<string, unknown> = { ...patch, updated_at: serverTimestamp() };
+    if ("champ" in patch) data.champ = patch.champ ? JSON.stringify(patch.champ) : null;
+    delete data.id;
+    await setDoc(this.ref(), data, { merge: true }).catch((e) => console.warn("não salvou o perfil", e));
   }
 
   setNames(name: string, teamName: string) {
@@ -135,12 +174,14 @@ class Account {
 
 export const account = new Account();
 
-function translate(msg: string): string {
-  if (/invalid login/i.test(msg)) return "E-mail ou senha errados.";
-  if (/already registered|already been registered/i.test(msg)) return "Esse e-mail já tem conta. É só entrar.";
-  if (/password should be at least/i.test(msg)) return "A senha precisa ter pelo menos 6 caracteres.";
-  if (/email not confirmed/i.test(msg)) return "Falta confirmar o e-mail (veja sua caixa de entrada).";
-  if (/invalid email|unable to validate email/i.test(msg)) return "Esse e-mail não parece válido.";
-  if (/rate limit|too many/i.test(msg)) return "Muitas tentativas. Espere um pouco e tente de novo.";
-  return msg;
+function translate(e: unknown): string {
+  const code = (e as { code?: string })?.code ?? "";
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(code)) return "E-mail ou senha errados.";
+  if (/email-already-in-use/.test(code)) return "Esse e-mail já tem conta. É só entrar.";
+  if (/weak-password/.test(code)) return "A senha precisa ter pelo menos 6 caracteres.";
+  if (/invalid-email/.test(code)) return "Esse e-mail não parece válido.";
+  if (/too-many-requests/.test(code)) return "Muitas tentativas. Espere um pouco e tente de novo.";
+  if (/network/.test(code)) return "Sem conexão com o servidor de contas.";
+  if (/operation-not-allowed/.test(code)) return "Login por e-mail ainda não foi ligado no Firebase.";
+  return (e as Error)?.message ?? "Deu algum erro. Tente de novo.";
 }

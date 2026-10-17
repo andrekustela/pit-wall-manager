@@ -18,7 +18,7 @@
     "vite": "^8.3.4"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
+    "firebase": "^10.12.2",
     "tsx": "^4.23.15",
     "ws": "^8.22.0"
   },

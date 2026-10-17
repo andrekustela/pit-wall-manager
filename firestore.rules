@@ -1,0 +1,10 @@
+rules_version = '2';
+// Pit Wall Manager: cada jogador só lê e grava o próprio perfil.
+// Colar em Firebase > Firestore Database > Regras > Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /profiles/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
