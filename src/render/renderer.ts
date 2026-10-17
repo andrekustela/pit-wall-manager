@@ -1,6 +1,7 @@
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage } from "./carArt";
 import { WorldTiles } from "./worldTiles";
+import { TRACK_WIDTH } from "../sim/track";
 
 /**
  * Desenha a corrida num canvas de alta resolução: a pista em vetor (em tiles,
@@ -250,6 +251,25 @@ export class Renderer {
       this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
 
+    // túnel: o teto cobre os carros (as etiquetas continuam aparecendo)
+    if (race.track.tunnel) {
+      o.setTransform(this.dpr * m, 0, 0, this.dpr * m, -viewX * m * this.dpr, -viewY * m * this.dpr);
+      const tp = (this.tunnelPaths ??= tunnelPaths(race.track));
+      o.fillStyle = "rgba(0,0,0,0.35)";
+      o.fill(tp.shadow);
+      o.fillStyle = "#3d4048";
+      o.fill(tp.roof);
+      o.strokeStyle = "#585c66";
+      o.lineWidth = 0.6;
+      o.stroke(tp.roof);
+      o.strokeStyle = "#ffd98a";
+      o.lineWidth = 0.5;
+      o.setLineDash([1.2, 6]);
+      o.stroke(tp.lights);
+      o.setLineDash([]);
+      o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    }
+
     // etiquetas: carro seguido, carros dos jogadores e safety car (empilham quando se sobrepõem)
     const placed: { x: number; y: number; w: number }[] = [];
     const lift = Math.max(14, 1.6 * m);
@@ -269,6 +289,8 @@ export class Renderer {
     if (race.rain > 0) this.drawRain(o, W, H, realDt, race.rain);
     if (race.phase === "lights") this.drawLights(o, W);
   }
+
+  private tunnelPaths: ReturnType<typeof tunnelPaths> | null = null;
 
   private drawCar(o: CanvasRenderingContext2D, x: number, y: number, h: number, img: ReturnType<typeof carImage>, m: number, alpha: number) {
     o.save();
@@ -463,3 +485,30 @@ export class Minimap {
   }
 }
 
+
+/** teto do túnel (cobre a pista e um pouco de cada lado) */
+function tunnelPaths(t: import("../sim/track").Track) {
+  const [a, b0] = t.tunnel!;
+  const b = b0 < a ? b0 + t.L : b0;
+  const half = TRACK_WIDTH / 2 + 4;
+  const band = (l0: number, l1: number, dx = 0, dy = 0) => {
+    const p = new Path2D();
+    const pts: { x: number; y: number }[] = [];
+    for (let s = a; s <= b; s += 3) pts.push(t.pose(s, l0));
+    for (let s = b; s >= a; s -= 3) pts.push(t.pose(s, l1));
+    pts.forEach((q, i) => (i ? p.lineTo(q.x + dx, q.y + dy) : p.moveTo(q.x + dx, q.y + dy)));
+    p.closePath();
+    return p;
+  };
+  const lights = new Path2D();
+  for (const side of [-1, 1]) {
+    let first = true;
+    for (let s = a + 4; s <= b - 4; s += 3) {
+      const q = t.pose(s, side * (half - 2.5));
+      if (first) lights.moveTo(q.x, q.y);
+      else lights.lineTo(q.x, q.y);
+      first = false;
+    }
+  }
+  return { roof: band(-half, half), shadow: band(-half, half, 1.6, 2), lights };
+}

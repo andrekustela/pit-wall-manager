@@ -12,6 +12,8 @@ export interface TrackDef {
   blurb: string;
   points: [number, number][];
   targetLength: number;
+  /** marcações (metros a partir do 1º ponto) feitas com ["M", nome] no turtle */
+  marks?: Record<string, number>;
   /** altura mínima (1..11) antes do carro bater no chão: pista ondulada = alto */
   minHeight: number;
   /** diferença ideal asa dianteira - traseira (equilíbrio do carro) */
@@ -19,6 +21,76 @@ export interface TrackDef {
   /** chance de chover na corrida (0..1) */
   rainChance: number;
   grass: [string, string];
+  /** circuito de rua: muro colado na pista, prédios em vez de árvores, sem brita */
+  street?: boolean;
+  /** facilidade de ultrapassar (1 = normal; Mônaco é bem menos) */
+  overtake?: number;
+}
+
+/** pedaço de pista: reta (comprimento; true = ajustável pra fechar), curva à direita/esquerda (graus, raio), marca */
+type Seg = ["S", number, boolean?] | ["R" | "L", number, number] | ["M", string];
+
+/**
+ * Monta a pista com retas e curvas de raio fixo (fica igual ao desenhado).
+ * A última curva com 0° completa o giro; duas retas marcadas com true esticam
+ * ou encolhem pra pista fechar no ponto de partida.
+ */
+function turtle(segs: Seg[]): Pick<TrackDef, "points" | "targetLength" | "marks"> {
+  const rad = Math.PI / 180;
+  const turns = segs.filter((g) => g[0] === "R" || g[0] === "L") as ["R" | "L", number, number][];
+  const net = turns.reduce((a, g) => a + (g[0] === "R" ? g[1] : -g[1]), 0);
+  const auto = turns.find((g) => g[1] === 0)!;
+  const dir = net >= 0 ? 1 : -1; // horário ou anti-horário
+  auto[1] = Math.abs(360 * dir - net);
+  const run = (adj: number[]) => {
+    let x = 0, y = 0, h = 0, k = 0, len = 0;
+    const pts: [number, number][] = [];
+    const marks: Record<string, number> = {};
+    const step = 4;
+    for (const g of segs) {
+      if (g[0] === "M") {
+        marks[g[1]] = len;
+      } else if (g[0] === "S") {
+        const l = g[1] + (g[2] ? adj[k++] : 0);
+        for (let d = 0; d < l; d += step) pts.push([x + Math.cos(h) * d, y + Math.sin(h) * d]);
+        x += Math.cos(h) * l;
+        y += Math.sin(h) * l;
+        len += l;
+      } else {
+        const a = g[1] * rad * (g[0] === "R" ? 1 : -1);
+        const r = g[2];
+        const arc = Math.abs(a) * r;
+        const n = Math.max(2, Math.ceil(arc / step));
+        // centro da curva fica do lado pra onde vira
+        const side = g[0] === "R" ? 1 : -1;
+        const cx = x - Math.sin(h) * r * side, cy = y + Math.cos(h) * r * side;
+        for (let i = 0; i < n; i++) {
+          const hh = h + (a * i) / n;
+          pts.push([cx + Math.sin(hh) * r * side, cy - Math.cos(hh) * r * side]);
+        }
+        h += a;
+        x = cx + Math.sin(h) * r * side;
+        y = cy - Math.cos(h) * r * side;
+        len += arc;
+      }
+    }
+    return { pts, x, y, len, marks };
+  };
+  // direção das duas retas ajustáveis
+  const dirs: [number, number][] = [];
+  let h = 0;
+  for (const g of segs) {
+    if (g[0] === "S" && g[2]) dirs.push([Math.cos(h), Math.sin(h)]);
+    if (g[0] === "R") h += g[1] * rad;
+    if (g[0] === "L") h -= g[1] * rad;
+  }
+  const r0 = run([0, 0]);
+  const [u, v] = dirs;
+  const det = u[0] * v[1] - u[1] * v[0];
+  const a = (-r0.x * v[1] + r0.y * v[0]) / det;
+  const b = (-u[0] * r0.y + u[1] * r0.x) / det;
+  const out = run([a, b]);
+  return { points: out.pts, targetLength: out.len, marks: out.marks };
 }
 
 export const TRACK_WIDTH = 18;
@@ -72,6 +144,75 @@ export const CIRCUITS: TrackDef[] = [
       [1300, 480], [1180, 470], [1120, 530], [1000, 540], [600, 540], [300, 540],
       [100, 500], [0, 400], [-40, 250], [-60, 120], [-30, 30],
     ],
+  },
+  {
+    name: "Interlagos",
+    blurb: "Anti-horário, sobe e desce. S do Senna logo na largada, miolo travado e subida longa até a reta. Chove muito.",
+    minHeight: 6,
+    balance: 0,
+    rainChance: 0.6,
+    grass: ["#3f8a3c", "#438f40"],
+    overtake: 1.1,
+    ...turtle([
+      ["S", 420, true], // reta dos boxes
+      ["L", 80, 26], ["S", 40], ["R", 60, 34], // S do Senna
+      ["L", 130, 95], // curva do Sol
+      ["S", 620], // reta oposta
+      ["L", 90, 42], ["S", 90], ["L", 45, 55], // descida do Lago
+      ["S", 160, true],
+      ["R", 120, 52], ["S", 60], ["R", 70, 36], // ferradura, laranjinha
+      ["S", 90], ["L", 140, 24], // pinheirinho
+      ["S", 70], ["R", 150, 19], // bico de pato
+      ["S", 110], ["L", 110, 46], // mergulho
+      ["S", 90], ["L", 95, 36], // junção
+      ["S", 120], ["L", 0, 320], // subida dos boxes
+    ]),
+  },
+  {
+    name: "Monte Carlo",
+    blurb: "Rua estreita entre muros e prédios, com grampo e túnel. Quase impossível ultrapassar: a classificação vale ouro. Errou, bateu.",
+    minHeight: 8,
+    balance: 2,
+    rainChance: 0.3,
+    grass: ["#6f7177", "#73757b"],
+    street: true,
+    overtake: 0.3,
+    ...turtle([
+      ["S", 240, true], // reta dos boxes
+      ["R", 90, 19], // Sainte Devote
+      ["S", 230, true], ["L", 20, 150], ["S", 110], // Beau Rivage
+      ["L", 70, 42], // Massenet
+      ["R", 90, 26], // Casino
+      ["S", 80], ["R", 90, 17], // Mirabeau
+      ["S", 70], ["L", 160, 15], // grampo
+      ["S", 50], ["R", 90, 20], // Mirabeau Bas
+      ["S", 60], ["R", 90, 18], // Portier
+      ["M", "t0"], ["R", 60, 170], ["S", 120], ["M", "t1"], // túnel
+      ["S", 120], ["L", 50, 13], ["R", 50, 13], // chicane do porto
+      ["S", 150], ["L", 50, 32], // Tabac
+      ["S", 110], ["L", 30, 22], ["R", 30, 22], ["S", 70], ["R", 35, 19], ["L", 35, 19], // piscina
+      ["S", 110], ["R", 100, 16], // Rascasse
+      ["S", 50], ["R", 0, 21], // Anthony Noghes
+    ]),
+  },
+  {
+    name: "Monza",
+    blurb: "O templo da velocidade: retas imensas cortadas por chicanes, Lesmos e a Parabólica. Asa mínima.",
+    minHeight: 3,
+    balance: -2,
+    rainChance: 0.2,
+    grass: ["#4c8f3c", "#519540"],
+    overtake: 1.25,
+    ...turtle([
+      ["S", 1100, true], // reta principal
+      ["R", 80, 16], ["L", 80, 16], // variante del Rettifilo
+      ["S", 100], ["R", 90, 300], // curva Grande
+      ["S", 260, true], ["L", 60, 16], ["R", 60, 16], // variante della Roggia
+      ["S", 160], ["R", 60, 46], ["S", 90], ["R", 45, 42], // Lesmos
+      ["S", 800], // Serraglio
+      ["L", 40, 40], ["R", 70, 50], ["L", 30, 60], // variante Ascari
+      ["S", 850], ["R", 0, 95], // reta oposta e Parabólica
+    ]),
   },
 ];
 
@@ -157,6 +298,8 @@ export class Track {
   pitBoxStart = 0;
   pitBoxEnd = 0;
   mainStraight: [number, number] = [0, 0];
+  /** trecho coberto (túnel), em s: de..até */
+  tunnel: [number, number] | null = null;
   private profiles = new Map<string, Profile>();
 
   constructor(def: TrackDef) {
@@ -179,6 +322,8 @@ export class Track {
     this.heading = heading;
     this.curvature = curvature;
     this.L = pts.length;
+    const mk = def.marks;
+    if (mk?.t0 !== undefined && mk.t1 !== undefined) this.tunnel = [this.wrap(mk.t0 * k - startIdx), this.wrap(mk.t1 * k - startIdx)];
 
     const runLen = run[1] - run[0];
     this.mainStraight = [this.L - runLen * 0.55, runLen * 0.45];

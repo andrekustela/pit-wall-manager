@@ -7,7 +7,7 @@ const sum: Record<string, number> = {};
 let wetRaces = 0;
 const t0 = Date.now();
 for (let i = 0; i < N; i++) {
-  const r = new Race({ seed: 1000 + i * 7919, laps, trackIndex: i % 3, humanTeams: [], setups: {} });
+  const r = new Race({ seed: 1000 + i * 7919, laps, trackIndex: process.env.TRACK ? Number(process.env.TRACK) : i % 3, humanTeams: [], setups: {} });
   let maxWet = 0;
   let overlap = 0;
   for (let k = 0; k < 20 * 60 * 120 && r.phase !== "finished"; k++) {

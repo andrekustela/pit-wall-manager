@@ -747,7 +747,8 @@ export class Race {
             const delta = o.targetLap - c.targetLap;
             // ultrapassador x muralha
             const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.002;
-            const p = o.order === "letPass" && o.team.id === c.team.id ? 1 : Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside + craft - this.wet * 0.05));
+            const ov = this.track.def.overtake ?? 1;
+            const p = o.order === "letPass" && o.team.id === c.team.id ? 1 : Math.max(0.12 * ov, Math.min(0.9, (0.5 + delta * 0.5 + inside + craft - this.wet * 0.05) * Math.min(1, ov * 1.6)));
             if (this.rng.chance(p)) {
               o.yieldTill = this.time + 1.6; // segurou a freada e passou
             } else {
@@ -767,7 +768,8 @@ export class Race {
         // na arrancada ninguém troca de fila (senão todo mundo ia pro meio e virava fila indiana);
         // as brigas começam a partir da primeira curva
         if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20 && !opening) {
-          const slow = blocker.v < myT * 0.7 || blocker.spin > 0 || blocker.retired || blocker.finished;
+          // na rua só passa quem está bem mais lento (curvas lentas enganam a comparação)
+          const slow = blocker.v < myT * (this.track.def.street ? 0.45 : 0.7) || blocker.spin > 0 || blocker.retired || blocker.finished;
           const lapping = this.dist(blocker) < this.dist(c) - this.track.L / 2;
           const sameTeam = blocker.team.id === c.team.id;
           // companheiro mandado abrir: passa sem briga; "manter posições": não ataca o companheiro
@@ -782,7 +784,7 @@ export class Race {
             const aggr = ((c.driver.profile?.aggression ?? 55) - 50) * 0.003;
             const p = Math.max(0.08, Math.min(0.95, 0.32 + delta * 0.7 + aggr + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.08 : 0) - this.wet * 0.06));
             c.nextAttemptS = this.dist(c) + (firstLap ? 220 : 300);
-            go = this.rng.chance(p);
+            go = this.rng.chance(p * (this.track.def.overtake ?? 1));
           }
           if (go) {
             const side = this.freeSide(c, blocker);
@@ -894,7 +896,8 @@ export class Race {
     const victim = this.rng.chance(0.65) ? rear : rear === a ? b : a;
     const other = victim === a ? b : a;
     const team = victim.isHuman ? victim.team.id : other.isHuman ? other.team.id : undefined;
-    const r = this.rng.next();
+    // rua: muro do lado, o toque vira dano ou batida com mais facilidade
+    const r = this.track.def.street ? 0.25 + this.rng.next() * 0.75 : this.rng.next();
     a.v *= 0.92;
     b.v *= 0.92;
     a.overtaking = null;

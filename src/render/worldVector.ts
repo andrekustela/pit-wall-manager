@@ -192,9 +192,22 @@ export class VectorWorld {
     const stroke = (chunks: Chunk[], width: number, apply: (g: CanvasRenderingContext2D) => void) =>
       this.layers.push({ chunks, pad: width / 2 + 1, apply });
 
+    const street = !!t.def.street;
+    // rua: calçada larga em volta da pista (por baixo de tudo)
+    if (street) {
+      const walk = this.chunks(this.line(0, L - 1, () => 0, 2), true);
+      stroke(walk, W + 14, (g) => {
+        g.strokeStyle = "#8e9198";
+        g.lineWidth = W + 14;
+      });
+      stroke(walk, W + 4.2, (g) => {
+        g.strokeStyle = "#5d6068";
+        g.lineWidth = W + 4.2;
+      });
+    }
     // brita do lado de fora das curvas
     const gravel: Chunk[] = [];
-    for (const r of this.cornerRuns(1 / 260)) {
+    if (!street) for (const r of this.cornerRuns(1 / 260)) {
       const out = -r.side; // lado de fora
       gravel.push(...this.chunks(this.line(r.a - 8, r.b + 8, () => out * (W / 2 + 9)), false));
     }
@@ -261,6 +274,27 @@ export class VectorWorld {
         });
       }
     }
+    // rua: muro colado na pista (do lado do box, só fora do pit lane)
+    if (street) {
+      for (const side of [-1, 1]) {
+        const pts = side < 0 ? this.line(0, L - 1, () => -(W / 2 + 1.6), 2) : this.line(t.pitExitS + 6, t.pitEntryS - 6, () => W / 2 + 1.6, 2);
+        const wl = this.chunks(pts, side < 0);
+        stroke(wl, 1.1, (g) => {
+          g.strokeStyle = "#d9dce1";
+          g.lineWidth = 1.1;
+        });
+        this.layers.push({
+          chunks: wl,
+          pad: 2,
+          apply: (g) => {
+            g.strokeStyle = "#7b818c";
+            g.lineWidth = 1.1;
+            g.setLineDash([0.5, 3.5]);
+            g.lineCap = "butt";
+          },
+        });
+      }
+    }
     // muro do pit
     const wall = this.chunks(this.line(t.pitEntryS + 80, t.pitExitS + L - 80, () => W / 2 + 3.75, 2), false);
     this.layers.push({
@@ -300,9 +334,11 @@ export class VectorWorld {
     });
 
     // arquibancada e placas na reta principal
-    const stand = this.band(L - 320, L + 260, -(W / 2 + 8), -(W / 2 + 22), 2);
-    const roof = this.band(L - 320, L + 260, -(W / 2 + 21), -(W / 2 + 24), 2);
-    const rail = this.band(L - 320, L + 260, -(W / 2 + 7), -(W / 2 + 8), 2);
+    // só ao longo da reta (em pista de reta curta não entra na curva)
+    const sa = Math.max(L - 320, t.mainStraight[0] + 10), sb = Math.min(L + 260, L + t.mainStraight[1] - 10);
+    const stand = this.band(sa, sb, -(W / 2 + 8), -(W / 2 + 22), 2);
+    const roof = this.band(sa, sb, -(W / 2 + 21), -(W / 2 + 24), 2);
+    const rail = this.band(sa, sb, -(W / 2 + 7), -(W / 2 + 8), 2);
     this.shapes.push({
       box: { x0: Math.min(stand.x0, roof.x0), y0: Math.min(stand.y0, roof.y0), x1: Math.max(stand.x1, roof.x1), y1: Math.max(stand.y1, roof.y1) },
       draw: (g) => {
@@ -315,7 +351,7 @@ export class VectorWorld {
       },
     });
     const signs = ["#e8202a", "#1c6ed4", "#f2c230", "#16c2b0", "#ffffff"];
-    for (let s = L - 300, i = 0; s < L + 240; s += 40, i++) {
+    for (let s = sa + 20, i = 0; s < sb - 20; s += 40, i++) {
       const b = this.band(s, s + 24, -(W / 2 + 5), -(W / 2 + 6.5), 2);
       const col = signs[i % signs.length];
       this.shapes.push({ box: b, draw: (g) => { g.fillStyle = col; g.fill(b.path); } });
@@ -363,10 +399,11 @@ export class VectorWorld {
       });
     }
 
-    // árvores longe da pista
+    // árvores longe da pista (na rua: prédios)
     const rng = new Rng(1234);
     const near = this.nearGrid();
-    for (let i = 0; i < 2600; i++) {
+    if (street) this.buildings(rng, near);
+    for (let i = 0; i < (street ? 0 : 2600); i++) {
       const x = rng.range(this.minX, this.maxX), y = rng.range(this.minY, this.maxY);
       if (near(x, y, 45)) continue;
       const r = rng.range(3, 7);
@@ -380,6 +417,38 @@ export class VectorWorld {
           g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
           g.fillStyle = `hsl(118 ${45 + tone * 100}% ${33 + tone * 60}%)`;
           g.beginPath(); g.arc(x - r * 0.25, y - r * 0.25, r * 0.6, 0, Math.PI * 2); g.fill();
+        },
+      });
+    }
+  }
+
+  /** quarteirões de prédios (circuito de rua) */
+  private buildings(rng: Rng, near: (x: number, y: number, d: number) => boolean) {
+    const tones = ["#d8c6a2", "#e7ddcb", "#c9a37f", "#bab4a8", "#ebe5d9", "#cf9f7b", "#a9b4bf", "#e2cfa8"];
+    const boxes: Box[] = [];
+    for (let i = 0; i < 6000; i++) {
+      const w = rng.range(16, 46), h = rng.range(16, 46);
+      const x = rng.range(this.minX, this.maxX - w), y = rng.range(this.minY, this.maxY - h);
+      const cx = x + w / 2, cy = y + h / 2;
+      if (near(cx, cy, Math.max(w, h) / 2 + 16)) continue;
+      if (boxes.some((b) => x < b.x1 + 3 && x + w > b.x0 - 3 && y < b.y1 + 3 && y + h > b.y0 - 3)) continue;
+      const box = { x0: x, y0: y, x1: x + w + 3, y1: y + h + 3 };
+      boxes.push(box);
+      const col = tones[Math.floor(rng.next() * tones.length)];
+      const roof = rng.chance(0.4) ? "#b5523b" : null; // telhado de telha
+      const tall = rng.range(1.5, 3.2);
+      this.shapes.push({
+        box,
+        draw: (g) => {
+          g.fillStyle = "rgba(0,0,0,0.3)";
+          g.fillRect(x + tall, y + tall, w, h);
+          g.fillStyle = col;
+          g.fillRect(x, y, w, h);
+          g.fillStyle = roof ?? "rgba(0,0,0,0.08)";
+          g.fillRect(x + 1.5, y + 1.5, w - 3, h - 3);
+          g.strokeStyle = "rgba(0,0,0,0.25)";
+          g.lineWidth = 0.4;
+          g.strokeRect(x, y, w, h);
         },
       });
     }
@@ -407,6 +476,11 @@ export class VectorWorld {
     const grass = this.track.def.grass;
     g.fillStyle = grass[0];
     g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    if (!this.track.def.street) this.grassBands(g, x0, y0, x1, y1, grass);
+    this.drawLayers(g, x0, y0, x1, y1);
+  }
+
+  private grassBands(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, grass: [string, string]) {
     // faixas de corte da grama
     const band = 24;
     for (let y = Math.floor(y0 / band) * band; y < y1; y += band) {
@@ -416,6 +490,9 @@ export class VectorWorld {
     }
     g.fillStyle = this.pats.grass;
     g.fillRect(x0, y0, x1 - x0, y1 - y0);
+  }
+
+  private drawLayers(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
 
     g.lineJoin = "round";
     g.lineCap = "round";

@@ -125,7 +125,7 @@ export class LobbyScreen {
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
-          <span><b>Campeonato</b><br><span class="hint" style="margin:0">3 etapas, uma em cada pista (${CIRCUITS.map((c) => esc(c.name)).join(" → ")}). Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+          <span><b>Campeonato</b><br><span class="hint" style="margin:0">${CIRCUITS.length} etapas, uma em cada pista (${CIRCUITS.map((c) => esc(c.name)).join(" → ")}). Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-equal" ${lobby.equalCars ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Carros iguais</b><br><span class="hint" style="margin:0">Todo mundo com o mesmo carro e piloto. Ganha quem acertar melhor o carro e a estratégia.</span></span></label>
       </div>
