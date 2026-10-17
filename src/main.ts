@@ -319,6 +319,7 @@ class App {
       }
       view.minimap.draw(view.follow);
       view.hud.drawOnboard(realDt, view.renderer.interp);
+      view.renderer.setBottomInset(view.hud.coverHeight() * 0.85);
       hudT += realDt;
       if (hudT > 0.1) {
         hudT = 0;

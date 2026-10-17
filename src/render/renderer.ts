@@ -177,6 +177,12 @@ export class Renderer {
   private pos = new Map<string, { x: number; y: number; h: number }>();
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
   readonly interp = new Map<string, { s: number; lat: number }>();
+  /** altura de baixo coberta pelo painel (px); a câmera centraliza acima dela */
+  private inset = 0;
+  private insetTarget = 0;
+  setBottomInset(px: number) {
+    this.insetTarget = Math.min(px, window.innerHeight * 0.6);
+  }
 
   draw(realDt: number, speed: number) {
     const race = this.race;
@@ -220,7 +226,9 @@ export class Renderer {
 
     // ---- pista (vetor, em tiles) ----
     const o = this.octx;
-    const viewX = cx - W / m / 2, viewY = cy - H / m / 2;
+    // o carro seguido fica no meio da parte da tela que o painel não cobre (desliza junto)
+    this.inset += (this.insetTarget - this.inset) * Math.min(1, realDt * 12);
+    const viewX = cx - W / m / 2, viewY = cy - (H - this.inset) / m / 2;
     o.setTransform(1, 0, 0, 1, 0, 0);
     // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
     void speed;

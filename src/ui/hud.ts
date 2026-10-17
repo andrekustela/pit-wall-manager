@@ -107,12 +107,46 @@ export class Hud {
   toggleCompact() {
     this.compact = !this.compact;
     storeSet("pwm.compact", this.compact ? "1" : "0");
-    this.applyCompact();
+    this.applyCompact(true);
   }
 
-  private applyCompact() {
-    this.el.querySelector(".team")!.classList.toggle("compact", this.compact);
+  private animT: ReturnType<typeof setTimeout> | null = null;
+
+  /** minimiza/expande o painel deslizando (a câmera da pista acompanha, ver coverHeight) */
+  private applyCompact(animate = false) {
+    const team = this.el.querySelector<HTMLElement>(".team")!;
     this.el.querySelector(".teamtoggle")!.textContent = this.compact ? "▲ EXPANDIR PAINEL (M)" : "▼ MINIMIZAR PAINEL (M)";
+    if (!animate) {
+      team.classList.toggle("compact", this.compact);
+      return;
+    }
+    if (this.animT) clearTimeout(this.animT);
+    const from = team.offsetHeight;
+    // mede a altura final com o conteúdo do outro modo
+    team.style.height = "";
+    team.classList.toggle("compact", this.compact);
+    const to = team.offsetHeight;
+    // expandindo: conteúdo grande já aparece e vai sendo revelado; minimizando: o grande desce e só no fim vira o compacto
+    if (this.compact) team.classList.remove("compact");
+    team.style.overflow = "hidden";
+    team.style.height = `${from}px`;
+    void team.offsetHeight;
+    team.style.transition = "height .38s cubic-bezier(.3,.8,.3,1)";
+    team.style.height = `${Math.max(to, this.compact ? to : 0)}px`;
+    this.animT = setTimeout(() => {
+      team.classList.toggle("compact", this.compact);
+      team.style.transition = "";
+      team.style.height = "";
+      team.style.overflow = "";
+      this.animT = null;
+    }, 400);
+  }
+
+  /** quanto da tela (de baixo pra cima) o painel cobre agora, em px */
+  coverHeight(): number {
+    const w = this.el.querySelector<HTMLElement>(".teamwrap");
+    if (!w) return 0;
+    return Math.max(0, window.innerHeight - w.getBoundingClientRect().top);
   }
 
   destroy() {
@@ -123,13 +157,15 @@ export class Hud {
   // ---------- câmera onboard ----------
 
   private cam: OnboardCam | null = null;
+  private smallAcc = 0;
+  private smallTurn = 0;
+  private smallLast = new Map<string, number>();
   private full: { el: HTMLElement; cv: HTMLCanvasElement; id: string; onKey: (e: KeyboardEvent) => void } | null = null;
 
   /** chamado a cada quadro pela tela da corrida */
   drawOnboard(dt: number, interp: Map<string, { s: number; lat: number }>) {
     this.cam ??= new OnboardCam(this.race);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const paint = (cv: HTMLCanvasElement, id: string) => {
+    const paint = (cv: HTMLCanvasElement, id: string, dpr: number, step: number) => {
       const car = this.race.cars.find((c) => c.id === id);
       if (!car) return;
       const w = cv.clientWidth, h = cv.clientHeight;
@@ -141,18 +177,27 @@ export class Hud {
       const g = cv.getContext("2d")!;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       const p = interp.get(id);
-      this.cam!.draw(g, w, h, car, p?.s ?? car.s, p?.lat ?? car.lateral, dt, interp);
+      this.cam!.draw(g, w, h, car, p?.s ?? car.s, p?.lat ?? car.lateral, step, interp);
     };
     if (this.full) {
-      paint(this.full.cv, this.full.id);
+      paint(this.full.cv, this.full.id, Math.min(2, window.devicePixelRatio || 1), dt);
       this.fullInfo();
       return;
     }
-    if (this.el.querySelector(".team.compact")) return;
-    for (const c of this.mine()) {
-      const cv = this.el.querySelector<HTMLCanvasElement>(`.driver[data-id="${c.id}"] [data-onboard] canvas`);
-      if (cv) paint(cv, c.id);
-    }
+    // telinhas pequenas: uma por vez, ~15 quadros por segundo cada, sem alta resolução
+    // (a corrida em si precisa do quadro inteiro pra rodar a 144 Hz)
+    const mine = this.mine();
+    if (!mine.length) return;
+    this.smallAcc += dt;
+    if (this.smallAcc < 1 / (15 * mine.length)) return;
+    this.smallAcc = 0;
+    this.smallTurn = (this.smallTurn + 1) % mine.length;
+    const c = mine[this.smallTurn];
+    const now = performance.now();
+    const last = this.smallLast.get(c.id) ?? now - 66;
+    this.smallLast.set(c.id, now);
+    const cv = this.el.querySelector<HTMLCanvasElement>(`.driver[data-id="${c.id}"] [data-onboard] canvas`);
+    if (cv) paint(cv, c.id, 1, Math.min(0.2, (now - last) / 1000));
   }
 
   private openOnboard(id: string) {

@@ -544,3 +544,23 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .oninfo b { font-size: 22px; background: rgba(0,0,0,.6); padding: 2px 8px; border-left: 4px solid #fff; }
 .oninfo span { background: rgba(0,0,0,.55); padding: 4px 8px; }
 .onclose { position: absolute; right: 16px; top: 14px; }
+
+/* onboard no painel minimizado: fora dos cards, um de cada lado */
+.team.compact .driver { position: relative; }
+.team.compact .onbox { position: absolute; bottom: -2px; width: 176px; height: 99px; margin: 0; }
+.team.compact .driver:first-child .onbox { right: calc(100% + 10px); }
+.team.compact .driver:nth-child(2) .onbox { left: calc(100% + 10px); right: auto; }
+.team.compact .onbox span { font-size: 8px; }
+/* painel aberto mais enxuto */
+.team:not(.compact) .driver { padding: 6px 8px; font-size: 12px; }
+.team:not(.compact) .driver .top { margin-bottom: 3px; }
+.team:not(.compact) .driver .stats { margin-bottom: 3px; }
+.team:not(.compact) .wear { margin: 1px 0 4px; }
+.team:not(.compact) .row2 { margin-bottom: 2px; }
+.team:not(.compact) .seg button { padding: 2px 0; font-size: 11px; }
+.team:not(.compact) .boxbtn { padding: 4px; margin-top: 2px; }
+.team:not(.compact) .fuelrow { margin-bottom: 2px; }
+@media (max-height: 1080px) { .teamwrap { zoom: .9; } }
+
+/* "hidden" sempre esconde (o display dos componentes passava por cima) */
+[hidden] { display: none !important; }
