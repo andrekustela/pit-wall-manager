@@ -53,7 +53,9 @@ const CONTENT: Record<Tab, string> = {
     <p>O plano é um <b>lembrete</b>: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você.</p>`,
   corrida: `
     <ul>
-      <li><b>Estado do carro:</b> o desenho na lateral de cada card mostra o carro peça por peça. Os 4 pneus vão de verde a vermelho conforme gastam (azul = pneu frio, recém-colocado), as asas e a suspensão piscam em vermelho quando quebram (laranja na suspensão = carro baixo demais, batendo no chão), e a barra no meio é o combustível.</li>
+      <li><b>Estado do carro:</b> o desenho na lateral de cada card mostra o carro peça por peça. Os 4 pneus vão de verde a vermelho conforme gastam (azul = pneu frio)</li>
+      <li><b>Temperatura do pneu:</b> pneu novo sai frio do box e leva quase uma volta pra esquentar. Frio, ele escorrega (mais lento e mais chance de rodar). Atacar esquenta, poupar esfria. Pneu quente demais perde rendimento e gasta muito mais. Pneu de seco na chuva esfria; pneu de chuva no seco ferve.</li>
+      <li><b>Ar sujo:</b> colado atrás de outro carro, nas curvas o seu perde aderência e o pneu esquenta. Na reta, o vácuo ajuda. Por isso é difícil passar quem anda no mesmo ritmo, as asas e a suspensão piscam em vermelho quando quebram (laranja na suspensão = carro baixo demais, batendo no chão), e a barra no meio é o combustível.</li>
       <li><b>Zoom:</b> roda do mouse ou teclas + e − pra chegar perto dos carros.</li>
       <li><b>Câmera:</b> clique em qualquer carro na pista, na tabela, no minimapa ou no card do seu piloto pra seguir ele.</li>
       <li><b>Ritmo:</b> Atacar é mais rápido, mas gasta mais pneu. Poupar é o contrário.</li>

@@ -193,6 +193,10 @@ export interface CarState {
   offTrack: number;
   offSide: number;
   offFate: "rejoin" | "stuck";
+  /** temperatura do pneu (0 = gelado, faixa boa ~0,55-0,82, 1 = fervendo) */
+  tyreTemp: number;
+  /** colado atrás de outro carro numa curva: perde aderência (ar sujo) */
+  dirtyAir: boolean;
   /** problema mecânico no momento (furo, câmbio...) e quanto custa por volta */
   fault: FaultKind | null;
   faultPen: number;

@@ -90,7 +90,7 @@ export function updateStatus(root: Element, c: CarState, race: Race) {
   const svg = root.querySelector(".carstatus");
   if (!svg) return;
   // pneus
-  const cold = c.tyreLaps === 0 && c.pitStops > 0;
+  const cold = (c.tyreTemp ?? 0.6) < 0.5; // pneu frio fica azul
   for (const [k, load] of Object.entries(TYRE_LOAD)) {
     const w = Math.min(1.1, c.wear * load);
     const col = cold ? "#4aa3ff" : wearColor(w);

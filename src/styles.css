@@ -687,3 +687,7 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .hqdrivers { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
 .hqdstat { font-size: 13px; margin-bottom: 6px; color: #c9d1e0; }
 .hqdstat b { color: var(--warn); font-family: var(--pix); }
+.tt.frio { color: #6ea8ff; }
+.tt.ideal { color: var(--ok); }
+.tt.quente { color: #ff8a1c; }
+.tt.dirty { color: #c9d1e0; }

@@ -76,6 +76,16 @@ const OFF_RATE = 1.1e-4;
 /** chance de um problema mecânico aparecer (por carro por segundo): ~4% por corrida */
 const FAULT_RATE = 2.8e-5;
 
+/** quanto o pneu fora da faixa custa por volta (s): frio até ~1 s, quente cresce rápido */
+export function tyreTempPenalty(t: number): number {
+  return Math.max(0, 0.55 - t) * 4 + Math.max(0, t - 0.82) * 5;
+}
+
+/** faixa da temperatura pro painel */
+export function tyreTempLabel(t: number): "frio" | "ideal" | "quente" {
+  return t < 0.5 ? "frio" : t > 0.84 ? "quente" : "ideal";
+}
+
 /** nível padrão da equipe de mecânicos (fora do campeonato ou sem dado) */
 export const CREW_DEFAULT = 2;
 export const CREW_MAX = 5;
@@ -105,7 +115,7 @@ export function fuelPerLap(laps: number): number {
 
 /** campos do carro que mudam durante a corrida (vão no snapshot da rede) */
 const SNAP_KEYS = [
-  "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
+  "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
   "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
@@ -219,6 +229,8 @@ export class Race {
         compound: "M",
         wear: 0,
         tyreLaps: 0,
+        tyreTemp: 0.5,
+        dirtyAir: false,
         usedCompounds: [],
         fuel: 0,
         engine: "normal",
@@ -467,6 +479,7 @@ export class Race {
     this.updateSafetyCar(dt);
 
     const L = this.track.L;
+    this.updateDirtyAir();
     for (const c of this.cars) this.updateTarget(c);
     const targets = new Map<string, number>();
     for (const c of this.cars) targets.set(c.id, this.targetSpeed(c));
@@ -516,12 +529,14 @@ export class Race {
           if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.4)) this.deploySafetyCar();
           continue;
         }
-        // desgaste
+        // temperatura do pneu: vai pro alvo (ritmo, ar sujo, chuva, safety car)
+        if (c.pit === "none") c.tyreTemp += (this.tyreTempTarget(c) - c.tyreTemp) * Math.min(1, dt / 22);
+        // desgaste (pneu fervendo gasta muito mais; ar sujo também)
         if (c.pit === "none") {
           const spec = COMPOUNDS[c.compound];
           c.wear +=
             (ds / L) * spec.wearPerLap * PACE[c.pace].wear * c.driver.tyreCare * (c.team.tyreWear ?? 1) * this.wearScale *
-            wetWear(c.compound, this.wet) * (this.sc.active ? 0.5 : 1);
+            wetWear(c.compound, this.wet) * (this.sc.active ? 0.5 : 1) * (1 + Math.max(0, c.tyreTemp - 0.82) * 6) * (c.dirtyAir ? 1.15 : 1);
         }
         if (c.pit === "none" && c.spin <= 0 && c.offTrack <= 0) {
           this.maybeIncident(c, dt);
@@ -591,6 +606,7 @@ export class Race {
     if (!isWetTyre(c.compound) && w > 0.2) rate *= 1 + 30 * (w - 0.2);
     if (c.pace === "push") rate *= 1.8;
     if (c.wear > 0.9) rate *= 3;
+    if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 6;
     if (c.tuning.h < this.track.def.minHeight) rate *= 1.5;
     if (Math.abs(c.tuning.fw - c.tuning.rw - this.track.def.balance) >= 2) rate *= 1.5;
     if (c.lap <= 0) rate *= 4;
@@ -628,6 +644,7 @@ export class Race {
     if (c.wear > 0.8) rate *= 2;
     if (c.damage > 1) rate *= 1.5;
     if (c.fault === "brakes") rate *= 3;
+    if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 8; // pneu frio escorrega
     if (c.lap <= 0) rate *= 2;
     if (c.overtaking) rate *= 1.6; // mergulhando na briga
     if (!this.rng.chance(rate * dt)) return;
@@ -739,7 +756,8 @@ export class Race {
     const w = c.wear;
     const wearPen = 1.6 * w * w + Math.max(0, w - 0.7) * 14 + Math.max(0, w - 1) * 30;
     const fuel = c.fuel * FUEL_WEIGHT;
-    const cold = c.tyreLaps === 0 && c.pitStops > 0 ? 1.0 : 0;
+    // pneu fora da faixa ideal: frio escorrega, quente perde rendimento
+    const cold = tyreTempPenalty(c.tyreTemp);
     return (
       c.team.carPace + c.driver.skill + spec.offset + wetPenalty(c.compound, this.wet) * wetSkillFactor(c.driver) + wearPen + fuel +
       PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage + c.faultPen +
@@ -757,6 +775,7 @@ export class Race {
     if (c.spin > 0) return c.spin > 2 ? 0 : 12;
     if (c.offTrack > 0) return c.offFate === "stuck" ? 0 : 14;
     let v = c.finished ? base * 0.62 : base * (c.profileLap / c.targetLap);
+    if (c.dirtyAir && base < 72) v *= 0.985; // ar sujo: menos pressão aerodinâmica na curva
     if (this.sc.active && !c.finished) v = Math.min(v, base * 0.7);
     if (c.pit === "entering" || c.pit === "leaving") {
       const box = this.boxS(c);
@@ -1155,6 +1174,7 @@ export class Race {
     }
     c.compound = next;
     c.wear = 0;
+    c.tyreTemp = 0.32; // pneu novo sai frio do box
     c.tyreLaps = 0;
     c.tyreWarn = 0;
     c.fuelWarn = 0;
@@ -1270,6 +1290,38 @@ export class Race {
   }
 
   /** nível dos mecânicos da equipe (a IA usa o engenheiro como referência fora do campeonato) */
+  /** temperatura que o pneu busca agora */
+  private tyreTempTarget(c: CarState): number {
+    if (this.sc.active || c.finished) return 0.45;
+    let t = c.pace === "push" ? 0.84 : c.pace === "conserve" ? 0.58 : 0.7;
+    if (c.dirtyAir) t += 0.1;
+    // pneu de seco no molhado esfria; de chuva no seco ferve
+    const wetTyre = isWetTyre(c.compound);
+    if (!wetTyre && this.wet > 0.25) t -= 0.3 * this.wet;
+    if (wetTyre && this.wet < 0.2) t += 0.25 * (1 - this.wet * 5);
+    if (c.compound === "S") t += 0.04;
+    if (c.compound === "H") t -= 0.05;
+    return Math.max(0.2, Math.min(1, t));
+  }
+
+  /** ar sujo: colado atrás de outro carro (até ~25 m, mesma linha) numa curva */
+  private updateDirtyAir() {
+    const L = this.track.L;
+    for (const c of this.cars) {
+      c.dirtyAir = false;
+      if (c.pit !== "none" || c.retired || c.finished || this.sc.active) continue;
+      for (const o of this.cars) {
+        if (o === c || o.pit !== "none" || o.retired) continue;
+        let d = o.s - c.s;
+        if (d < 0) d += L;
+        if (d > 3 && d < 25 && Math.abs(o.lateral - c.lateral) < 5) {
+          c.dirtyAir = true;
+          break;
+        }
+      }
+    }
+  }
+
   private crewLevel(team: string): number {
     const v = this.opts.crew?.[team];
     if (v !== undefined) return Math.max(0, Math.min(CREW_MAX, v));

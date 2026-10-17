@@ -1,4 +1,4 @@
-import { fmtLap, fuelPerLap, type Race } from "../sim/race";
+import { fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
 import {
   ALL_COMPOUNDS,
   COMPOUNDS,
@@ -615,8 +615,13 @@ export class Hud {
       bar.style.background = wearPct > 0.8 ? "var(--soft)" : wearPct > 0.6 ? "var(--warn)" : "var(--ok)";
       const dryKinds = new Set(c.usedCompounds.filter((x) => x === "S" || x === "M" || x === "H")).size;
       const ruleOk = dryKinds >= 2 || c.usedCompounds.some((x) => x === "I" || x === "W");
-      card.querySelector(".wlabel")!.textContent =
-        `Pneu ${COMPOUNDS[c.compound].label} · ${c.tyreLaps} ${c.tyreLaps === 1 ? "volta" : "voltas"} · ${Math.round((1 - wearPct) * 100)}% de borracha` +
+      // temperatura do pneu (frio / ideal / quente) e ar sujo
+      const tt = tyreTempLabel(c.tyreTemp ?? 0.6);
+      const ttTxt = tt === "frio" ? "🥶 pneu frio" : tt === "quente" ? "🔥 pneu quente" : "🌡 temperatura ideal";
+      card.querySelector(".wlabel")!.innerHTML =
+        esc(`Pneu ${COMPOUNDS[c.compound].label} · ${c.tyreLaps} ${c.tyreLaps === 1 ? "volta" : "voltas"} · ${Math.round((1 - wearPct) * 100)}% de borracha`) +
+        ` · <span class="tt ${tt}" title="Temperatura do pneu: ${Math.round((c.tyreTemp ?? 0) * 100)}%">${ttTxt}</span>` +
+        (c.dirtyAir && !c.finished ? ` · <span class="tt dirty" title="Colado atrás de outro carro: perde aderência nas curvas e o pneu esquenta">💨 ar sujo</span>` : "") +
         (ruleOk ? "" : " · falta usar o 2º tipo de pneu!") +
         (c.damage > 0 ? ` · ⚠ dano: +${c.damage.toFixed(1)}s/volta` : "");
       const cons = race.consumption(c);
