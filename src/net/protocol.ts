@@ -45,6 +45,8 @@ export interface LobbyState {
   equalCars: boolean;
   /** modo campeonato ligado no lobby */
   champMode: boolean;
+  /** porcentagem das pistas que entram no campeonato (sorteadas) */
+  champPct: number;
   /** campeonato em andamento (ou o que acabou de terminar) */
   champ: ChampState | null;
   /** pilotos reais (lendas) em vez dos fictícios */
@@ -64,7 +66,7 @@ export type ClientMsg =
   | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; realDrivers?: boolean }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; realDrivers?: boolean }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }

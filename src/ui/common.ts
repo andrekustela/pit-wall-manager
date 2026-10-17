@@ -1,6 +1,6 @@
 import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
-import { getTrack } from "../sim/track";
+import { CIRCUITS, getTrack } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
 import { profileOf, type DriverProfile } from "../sim/drivers";
 
@@ -64,7 +64,9 @@ export function drawTrackThumb(cv: HTMLCanvasElement, trackIndex: number, color 
   cv.height = h * dpr;
   const g = cv.getContext("2d")!;
   g.scale(dpr, dpr);
-  const t = getTrack(trackIndex);
+  // traçado já desenhado em pontos densos: usa direto (montar a pista inteira é mais caro)
+  const def = CIRCUITS[trackIndex];
+  const t = def.points.length > 200 ? { pts: def.points.map(([x, y]) => ({ x, y })) } : getTrack(trackIndex);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of t.pts) {
     minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);

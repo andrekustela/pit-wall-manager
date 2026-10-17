@@ -31,9 +31,20 @@ export interface ChampState {
   devLog: Record<string, { area: DevArea; gain: number }[]>;
 }
 
-export function newChampionship(): ChampState {
+/** quantas etapas tem um campeonato com essa porcentagem das pistas */
+export function champRounds(pct: number): number {
+  return Math.max(1, Math.round((CIRCUITS.length * pct) / 100));
+}
+
+/** campeonato com uma parte das pistas, sorteadas e em ordem aleatória */
+export function newChampionship(pct = 100, rnd: () => number = Math.random): ChampState {
+  const all = CIRCUITS.map((_, i) => i);
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
   return {
-    rounds: CIRCUITS.map((_, i) => i),
+    rounds: all.slice(0, champRounds(pct)),
     round: 0,
     driverPts: {},
     teamPts: {},

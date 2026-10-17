@@ -65,6 +65,7 @@ export class Room {
   trackIndex = 0;
   equalCars = false;
   champMode = false;
+  champPct = 10;
   private champ: ChampState | null = null;
   private weekend: WeekendInfo | null = null;
   private race: Race | null = null;
@@ -255,6 +256,7 @@ export class Room {
         if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex]) this.trackIndex = msg.trackIndex;
         if (msg.equalCars !== undefined) this.equalCars = !!msg.equalCars;
         if (msg.champ !== undefined) this.champMode = !!msg.champ;
+        if (msg.champPct !== undefined && [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(msg.champPct)) this.champPct = msg.champPct;
         if (msg.realDrivers !== undefined) this.realDrivers = !!msg.realDrivers;
         this.broadcastLobby();
         break;
@@ -262,7 +264,7 @@ export class Room {
         if (!isHost || this.phase !== "lobby") return;
         if ([...this.players.values()].some((o) => !o.teamId))
           return this.send(id, { t: "error", msg: "Todo mundo precisa escolher uma equipe." });
-        this.champ = this.champMode ? newChampionship() : null;
+        this.champ = this.champMode ? newChampionship(this.champPct) : null;
         this.startWeekend();
         break;
       case "practiceLap": {
@@ -541,6 +543,7 @@ export class Room {
       trackIndex: this.trackIndex,
       equalCars: this.equalCars,
       champMode: this.champMode,
+      champPct: this.champPct,
       realDrivers: this.realDrivers,
       lineup: this.lineup,
       swapUsed: [...this.swapUsed],

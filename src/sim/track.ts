@@ -27,71 +27,8 @@ export interface TrackDef {
   overtake?: number;
 }
 
-/** pedaço de pista: reta (comprimento; true = ajustável pra fechar), curva à direita/esquerda (graus, raio), marca */
-type Seg = ["S", number, boolean?] | ["R" | "L", number, number] | ["M", string];
-
-/**
- * Monta a pista com retas e curvas de raio fixo (fica igual ao desenhado).
- * A última curva com 0° completa o giro; duas retas marcadas com true esticam
- * ou encolhem pra pista fechar no ponto de partida.
- */
-function turtle(segs: Seg[]): Pick<TrackDef, "points" | "targetLength" | "marks"> {
-  const rad = Math.PI / 180;
-  const turns = segs.filter((g) => g[0] === "R" || g[0] === "L") as ["R" | "L", number, number][];
-  const net = turns.reduce((a, g) => a + (g[0] === "R" ? g[1] : -g[1]), 0);
-  const auto = turns.find((g) => g[1] === 0)!;
-  const dir = net >= 0 ? 1 : -1; // horário ou anti-horário
-  auto[1] = Math.abs(360 * dir - net);
-  const run = (adj: number[]) => {
-    let x = 0, y = 0, h = 0, k = 0, len = 0;
-    const pts: [number, number][] = [];
-    const marks: Record<string, number> = {};
-    const step = 4;
-    for (const g of segs) {
-      if (g[0] === "M") {
-        marks[g[1]] = len;
-      } else if (g[0] === "S") {
-        const l = g[1] + (g[2] ? adj[k++] : 0);
-        for (let d = 0; d < l; d += step) pts.push([x + Math.cos(h) * d, y + Math.sin(h) * d]);
-        x += Math.cos(h) * l;
-        y += Math.sin(h) * l;
-        len += l;
-      } else {
-        const a = g[1] * rad * (g[0] === "R" ? 1 : -1);
-        const r = g[2];
-        const arc = Math.abs(a) * r;
-        const n = Math.max(2, Math.ceil(arc / step));
-        // centro da curva fica do lado pra onde vira
-        const side = g[0] === "R" ? 1 : -1;
-        const cx = x - Math.sin(h) * r * side, cy = y + Math.cos(h) * r * side;
-        for (let i = 0; i < n; i++) {
-          const hh = h + (a * i) / n;
-          pts.push([cx + Math.sin(hh) * r * side, cy - Math.cos(hh) * r * side]);
-        }
-        h += a;
-        x = cx + Math.sin(h) * r * side;
-        y = cy - Math.cos(h) * r * side;
-        len += arc;
-      }
-    }
-    return { pts, x, y, len, marks };
-  };
-  // direção das duas retas ajustáveis
-  const dirs: [number, number][] = [];
-  let h = 0;
-  for (const g of segs) {
-    if (g[0] === "S" && g[2]) dirs.push([Math.cos(h), Math.sin(h)]);
-    if (g[0] === "R") h += g[1] * rad;
-    if (g[0] === "L") h -= g[1] * rad;
-  }
-  const r0 = run([0, 0]);
-  const [u, v] = dirs;
-  const det = u[0] * v[1] - u[1] * v[0];
-  const a = (-r0.x * v[1] + r0.y * v[0]) / det;
-  const b = (-u[0] * r0.y + u[1] * r0.x) / det;
-  const out = run([a, b]);
-  return { points: out.pts, targetLength: out.len, marks: out.marks };
-}
+import { turtle } from "./trackShape";
+import { REAL_CIRCUITS } from "./realCircuits";
 
 export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
@@ -214,6 +151,7 @@ export const CIRCUITS: TrackDef[] = [
       ["S", 850], ["R", 0, 95], // reta oposta e Parabólica
     ]),
   },
+  ...REAL_CIRCUITS,
 ];
 
 const BRAKE = 40;

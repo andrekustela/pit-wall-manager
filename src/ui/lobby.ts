@@ -3,6 +3,7 @@ import { LAP_OPTIONS, type LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { CIRCUITS } from "../sim/track";
+import { champRounds } from "../sim/championship";
 import { drawTrackThumb, esc } from "./common";
 
 export class LobbyScreen {
@@ -32,7 +33,9 @@ export class LobbyScreen {
         <p class="hint" style="margin-top:-4px">Escolha o carro. Os pilotos são sorteados depois, quando o fim de semana começar (de uma base de 100 pilotos, cada um com seu estilo).</p>
         <div class="teams" id="l-teams"></div>
         <h2>PISTA <span id="l-trackhint" style="color:var(--muted)"></span></h2>
-        <div class="tracks" id="l-tracks"></div>
+        <div class="trackbar"><input class="txt" id="l-tsearch" placeholder="Buscar pista (${CIRCUITS.length} no total)..."><button class="btn" id="l-trand">🎲 SORTEAR</button></div>
+        <div class="trackinfo box" id="l-tinfo"></div>
+        <div class="tracks many" id="l-tracks"></div>
         <h2>REGRAS</h2>
         <div class="box" id="l-opts"></div>
         <div class="row-btns" style="margin-top:24px">
@@ -99,15 +102,28 @@ export class LobbyScreen {
     const tracks = root.querySelector("#l-tracks")!;
     if (!this.thumbsDrawn) {
       tracks.innerHTML = CIRCUITS.map(
-        (c, i) => `<button class="trackcard" data-track="${i}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
-          <div class="st">${esc(c.blurb)}</div><div class="st">Chance de chuva: ${Math.round(c.rainChance * 100)}%</div></button>`,
+        (c, i) => `<button class="trackcard" data-track="${i}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
+          <div class="st">${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
       ).join("");
+      root.querySelector<HTMLInputElement>("#l-tsearch")!.addEventListener("input", (e) => {
+        const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
+        tracks.querySelectorAll<HTMLElement>("[data-track]").forEach((b) => (b.hidden = !!q && !b.dataset.name!.includes(q)));
+      });
+      root.querySelector("#l-trand")!.addEventListener("click", () =>
+        this.conn.send({ t: "options", trackIndex: Math.floor(Math.random() * CIRCUITS.length) }),
+      );
+      // miniaturas desenhadas aos poucos (uma por quadro), pra tela abrir na hora
+      const cvs = [...tracks.querySelectorAll<HTMLCanvasElement>("canvas")];
+      let k = 0;
+      const drawSome = () => {
+        const t0 = performance.now();
+        while (k < cvs.length && performance.now() - t0 < 8) drawTrackThumb(cvs[k], k++);
+        if (k < cvs.length) requestAnimationFrame(drawSome);
+      };
       tracks.querySelectorAll<HTMLButtonElement>("[data-track]").forEach((b) =>
         b.addEventListener("click", () => this.conn.send({ t: "options", trackIndex: Number(b.dataset.track) })),
       );
-      requestAnimationFrame(() =>
-        tracks.querySelectorAll<HTMLCanvasElement>("canvas").forEach((cv, i) => drawTrackThumb(cv, i)),
-      );
+      requestAnimationFrame(drawSome);
       this.thumbsDrawn = true;
     }
     tracks.querySelectorAll<HTMLButtonElement>("[data-track]").forEach((b) => {
@@ -115,6 +131,11 @@ export class LobbyScreen {
       b.disabled = !isHost || lobby.champMode;
     });
     root.querySelector<HTMLElement>("#l-tracks")!.style.opacity = lobby.champMode ? "0.55" : "";
+    (root.querySelector("#l-trand") as HTMLButtonElement).disabled = !isHost || lobby.champMode;
+    const sel = CIRCUITS[lobby.trackIndex];
+    root.querySelector("#l-tinfo")!.innerHTML = lobby.champMode
+      ? `<b>Campeonato</b> · as pistas são sorteadas quando começar`
+      : `<b>${esc(sel.name)}</b>${sel.street ? " · circuito de rua" : ""} · chance de chuva ${Math.round(sel.rainChance * 100)}%<div class="hint" style="margin:4px 0 0">${esc(sel.blurb)}</div>`;
 
     root.querySelector("#l-opts")!.innerHTML = `
       <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:center">
@@ -125,7 +146,10 @@ export class LobbyScreen {
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
-          <span><b>Campeonato</b><br><span class="hint" style="margin:0">${CIRCUITS.length} etapas, uma em cada pista (${CIRCUITS.map((c) => esc(c.name)).join(" → ")}). Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+          <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas entre as ${CIRCUITS.length}, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+        ${lobby.champMode ? `<div><div class="hint" style="margin:0 0 6px">Quantas pistas no campeonato</div>
+          <div class="seg pctseg">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((p) => `<button data-pct="${p}" class="${p === lobby.champPct ? "on" : ""}" ${isHost ? "" : "disabled"} title="${champRounds(p)} etapas">${p}%</button>`).join("")}</div>
+          <div class="hint" style="margin:4px 0 0">${champRounds(lobby.champPct)} etapas</div></div>` : ""}
         <label class="toggle"><input type="checkbox" id="l-equal" ${lobby.equalCars ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Carros iguais</b><br><span class="hint" style="margin:0">Todo mundo com o mesmo carro e piloto. Ganha quem acertar melhor o carro e a estratégia.</span></span></label>
       </div>
@@ -139,11 +163,14 @@ export class LobbyScreen {
     root.querySelector<HTMLInputElement>("#l-champ")!.addEventListener("change", (e) =>
       this.conn.send({ t: "options", champ: (e.target as HTMLInputElement).checked }),
     );
+    root.querySelectorAll<HTMLButtonElement>("[data-pct]").forEach((b) =>
+      b.addEventListener("click", () => this.conn.send({ t: "options", champPct: Number(b.dataset.pct) })),
+    );
     root.querySelector<HTMLInputElement>("#l-equal")!.addEventListener("change", (e) =>
       this.conn.send({ t: "options", equalCars: (e.target as HTMLInputElement).checked }),
     );
 
-    root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? "· no campeonato corre nas 3, nessa ordem" : "";
+    root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? `· campeonato: ${champRounds(lobby.champPct)} pistas sorteadas` : "";
     root.querySelector("#l-start")!.textContent = lobby.champMode ? "INICIAR CAMPEONATO ▶" : "INICIAR FIM DE SEMANA ▶";
 
     const start = root.querySelector<HTMLButtonElement>("#l-start")!;

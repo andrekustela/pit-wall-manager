@@ -462,3 +462,13 @@ label.fld span { display: block; margin-bottom: 4px; }
 .devrivals > div > div { display: flex; align-items: center; }
 .devrivals .lv { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
 .devrivals .mine { font-weight: 700; }
+
+.trackbar { display: flex; gap: 8px; margin-bottom: 8px; }
+.trackbar .txt { flex: 1; }
+.trackinfo { margin-bottom: 8px; }
+.tracks.many { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); max-height: 430px; overflow-y: auto; padding-right: 4px; }
+.tracks.many .trackcard { padding: 6px; }
+.tracks.many .trackcard canvas { height: 64px; }
+.tracks.many .trackcard .tn { font-size: 13px; }
+.pctseg { flex-wrap: wrap; }
+.pctseg button { min-width: 46px; }
