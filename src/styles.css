@@ -390,3 +390,8 @@ label.fld span { display: block; margin-bottom: 4px; }
 .draft-mine .flip-front, .draft-mine .flip-front .dcard { height: 100%; }
 .draft-mine .flip-front .dcard { display: flex; flex-direction: column; }
 .draft-mine .flip-front .dcareer { margin-top: auto; }
+/* confirmação no estilo do jogo */
+.confirmmodal { z-index: 400; }
+.confirmbox { width: min(460px, 100%) !important; }
+.confirmtext { font-size: 15px; line-height: 1.55; margin: 4px 0 16px; }
+.btn.okbtn { background: #1c6ed4; border-color: #6ea8ff; }

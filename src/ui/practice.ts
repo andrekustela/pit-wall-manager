@@ -86,12 +86,6 @@ export class PracticeScreen {
         <button class="btn primary" data-go style="width:100%;margin-top:10px"></button>
         <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th title="Asa dianteira / traseira / altura / suspensão diant. e tras.">ACERTO</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;
       el.querySelector("[data-ficha]")!.addEventListener("click", () => showDriverCards([d], teamName(lobby, myTeam.id), myTeam.color));
-      el.querySelector("[data-swap]")?.addEventListener("click", () => {
-        if (confirm(`Trocar ${d.name} pelo piloto reserva?
-
-O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobby.champ ? " no campeonato todo" : ""}, e as voltas de treino desse piloto se perdem.`))
-          conn.send({ t: "swapDriver", carId: d.id });
-      });
       el.querySelectorAll<HTMLInputElement>("input[type=range]").forEach((inp) =>
         inp.addEventListener("input", () => {
           const k = inp.dataset.k as keyof Tuning;

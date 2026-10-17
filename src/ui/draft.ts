@@ -4,6 +4,7 @@ import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { esc, natBadge, teamDrivers, teamName } from "./common";
 import { driverCardHtml } from "./driverCard";
+import { confirmDialog } from "./confirm";
 
 export function showDraft(lobby: LobbyState, onSwap?: (carId: string) => void, onDone?: () => void) {
   const me = lobby.players.find((p) => p.id === lobby.you)!;
@@ -37,11 +38,17 @@ export function showDraft(lobby: LobbyState, onSwap?: (carId: string) => void, o
   m.querySelectorAll<HTMLElement>(".flip").forEach((el, i) => setTimeout(() => el.classList.add("on"), 500 + i * 700));
   m.querySelectorAll<HTMLElement>(".dteam").forEach((el, i) => setTimeout(() => el.classList.add("on"), 1800 + i * 90));
   m.querySelectorAll<HTMLButtonElement>("[data-swap]").forEach((b) =>
-    b.addEventListener("click", () => {
+    b.addEventListener("click", async () => {
       const d = mine.find((x) => x.id === b.dataset.swap)!;
-      if (!confirm(`Trocar ${d.name} pelo piloto reserva?
+      const ok = await confirmDialog({
+        title: "TROCAR PELO RESERVA",
+        icon: "🎲",
+        text: `Trocar ${d.name} pelo piloto reserva?
 
-O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobby.champ ? " no campeonato todo" : ""}.`)) return;
+O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobby.champ ? " no campeonato todo" : ""}.`,
+        ok: "TROCAR",
+      });
+      if (!ok) return;
       m.remove();
       onSwap!(d.id); // a revelação aparece quando a sala confirmar
     }),

@@ -13,6 +13,7 @@ import {
   type PlannedStop,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
+import { confirmDialog } from "./confirm";
 import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
 
@@ -122,11 +123,13 @@ export class Hud {
       b.addEventListener("click", () => this.hooks.setSpeed(Number(b.dataset.speed))),
     );
     this.top.querySelector("[data-skip]")!.addEventListener("click", () => this.hooks.skip());
-    this.top.querySelector("[data-exit]")!.addEventListener("click", () => {
-      const msg = host
-        ? "Encerrar a corrida e voltar pro lobby? O resultado não vale (e o campeonato é cancelado)."
-        : "Sair da sala? A IA assume a sua equipe até o fim da corrida.";
-      if (confirm(msg)) this.hooks.exit();
+    this.top.querySelector("[data-exit]")!.addEventListener("click", async () => {
+      const ok = await confirmDialog(
+        host
+          ? { title: "SAIR DA CORRIDA", icon: "✕", text: "Encerrar a corrida e voltar pro lobby?\nO resultado não vale (e o campeonato é cancelado).", ok: "ENCERRAR", danger: true }
+          : { title: "SAIR DA SALA", icon: "✕", text: "Sair da sala?\nA IA assume a sua equipe até o fim da corrida.", ok: "SAIR", danger: true },
+      );
+      if (ok) this.hooks.exit();
     });
     if (!host) this.top.title = "Só o host controla a velocidade";
   }

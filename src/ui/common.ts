@@ -120,8 +120,11 @@ export function backButtonHtml(lobby: LobbyState, label: string): string {
 }
 
 export function bindBackButton(root: HTMLElement, send: (msg: { t: "back" }) => void, confirmText?: string) {
-  root.querySelector("[data-back]")?.addEventListener("click", () => {
-    if (confirmText && !confirm(confirmText)) return;
+  root.querySelector("[data-back]")?.addEventListener("click", async () => {
+    if (confirmText) {
+      const { confirmDialog } = await import("./confirm");
+      if (!(await confirmDialog({ title: "VOLTAR", icon: "←", text: confirmText, ok: "VOLTAR" }))) return;
+    }
     send({ t: "back" });
   });
 }
