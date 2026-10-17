@@ -59,15 +59,18 @@ export class Room {
   private nextId = 1;
 
   /** pilotos sorteados pras equipes (novo a cada jogo; o campeonato mantém) */
-  lineup: Lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+  lineup: Lineup = drawLineup((Math.random() * 2 ** 32) >>> 0, true);
   /** reserva escondido de cada equipe e quem já usou a troca (1 por jogo/campeonato) */
   private reserves: Record<string, string> = {};
   private swapUsed = new Set<string>();
 
+  /** pilotos reais (lendas da F1) em vez dos fictícios */
+  realDrivers = true;
+
   private newLineup() {
     const seed = (Math.random() * 2 ** 32) >>> 0;
-    this.lineup = drawLineup(seed);
-    this.reserves = drawReserves(this.lineup, seed);
+    this.lineup = drawLineup(seed, this.realDrivers);
+    this.reserves = drawReserves(this.lineup, seed, this.realDrivers);
     this.swapUsed.clear();
   }
 
@@ -152,6 +155,7 @@ export class Room {
         if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex]) this.trackIndex = msg.trackIndex;
         if (msg.equalCars !== undefined) this.equalCars = !!msg.equalCars;
         if (msg.champ !== undefined) this.champMode = !!msg.champ;
+        if (msg.realDrivers !== undefined) this.realDrivers = !!msg.realDrivers;
         this.broadcastLobby();
         break;
       case "startWeekend":
@@ -419,6 +423,7 @@ export class Room {
       trackIndex: this.trackIndex,
       equalCars: this.equalCars,
       champMode: this.champMode,
+      realDrivers: this.realDrivers,
       lineup: this.lineup,
       swapUsed: [...this.swapUsed],
       champ: this.champ,

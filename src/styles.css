@@ -375,3 +375,11 @@ label.fld span { display: block; margin-bottom: 4px; }
 .draft-others { grid-template-columns: 1fr 1fr !important; }
 .dteam small { color: var(--muted); font-size: 10px; margin-left: 4px; }
 @media (max-width: 1000px) { .draftgrid, .draft-mine, .draft-others { grid-template-columns: 1fr !important; } }
+.swapbtn { width: 100%; margin-top: 6px; }
+.tipbox { white-space: pre-line; }
+.dcareer { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 12.5px; }
+.dct { font-family: var(--pix); font-size: 10px; color: var(--warn); margin-bottom: 6px; }
+.dcstats { display: flex; gap: 14px; margin-bottom: 4px; color: var(--muted); }
+.dcstats b { font-family: var(--num); font-size: 20px; color: var(--text); font-weight: 400; margin-right: 3px; }
+.dcrow { color: var(--muted); margin-bottom: 3px; }
+.dcnote { color: var(--text); line-height: 1.45; margin-top: 4px; }

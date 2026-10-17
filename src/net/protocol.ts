@@ -45,6 +45,8 @@ export interface LobbyState {
   champMode: boolean;
   /** campeonato em andamento (ou o que acabou de terminar) */
   champ: ChampState | null;
+  /** pilotos reais (lendas) em vez dos fictícios */
+  realDrivers: boolean;
   /** pilotos sorteados de cada equipe */
   lineup: import("../sim/drivers").Lineup;
   /** equipes que já usaram a troca pelo reserva */
@@ -58,7 +60,7 @@ export type ClientMsg =
   | { t: "join"; code: string; name: string; teamName: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; realDrivers?: boolean }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }

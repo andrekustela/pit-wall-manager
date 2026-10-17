@@ -28,7 +28,8 @@ export interface Conditions {
   stiff: number;
   /** arrasto (vento contra na reta > 1) */
   drag: number;
-  notes: string[];
+  /** avisos da pista com dica de acerto */
+  notes: { icon: string; title: string; hint: string }[];
 }
 
 export function makeConditions(seed: number, track: Track): Conditions {
@@ -38,13 +39,13 @@ export function makeConditions(seed: number, track: Track): Conditions {
   const base = 80 - track.def.minHeight * 6.5; // pista ondulada pede suspensão mais macia
   const stiff = Math.max(10, Math.min(90, Math.round(base - bump * 6 + rng.gauss(8))));
   const drag = Math.round((1 + rng.gauss(0.05)) * 100) / 100;
-  const notes: string[] = [];
-  if (bump > 0) notes.push("asfalto mais ondulado que o normal");
-  if (bump < 0) notes.push("asfalto recapeado, mais liso");
-  if (drag > 1.04) notes.push("vento contra na reta principal");
-  if (drag < 0.96) notes.push("vento a favor na reta principal");
-  if (balance > 0.6) notes.push("asfalto quente, a traseira tende a escorregar");
-  if (balance < -0.6) notes.push("asfalto frio, a frente tende a escorregar");
+  const notes: Conditions["notes"] = [];
+  if (bump > 0) notes.push({ icon: "〰", title: "Asfalto mais ondulado que o normal", hint: "Suba um pouco o carro e deixe a suspensão mais macia, senão ele bate no chão e pula." });
+  if (bump < 0) notes.push({ icon: "▬", title: "Asfalto recapeado, mais liso", hint: "Dá pra baixar o carro e endurecer um pouco a suspensão sem o carro bater." });
+  if (drag > 1.04) notes.push({ icon: "💨", title: "Vento contra na reta principal", hint: "As retas ficam mais lentas: vale tirar um pouco de asa pra ganhar velocidade." });
+  if (drag < 0.96) notes.push({ icon: "💨", title: "Vento a favor na reta principal", hint: "As retas ficam mais rápidas: dá pra colocar um pouco mais de asa e ganhar nas curvas." });
+  if (balance > 0.6) notes.push({ icon: "🔥", title: "Asfalto quente: a traseira tende a escorregar", hint: "Coloque um pouco mais de asa traseira (ou tire da dianteira)." });
+  if (balance < -0.6) notes.push({ icon: "❄", title: "Asfalto frio: a frente tende a escorregar", hint: "Coloque um pouco mais de asa dianteira (ou tire da traseira)." });
   return { balance, bump, stiff, drag, notes };
 }
 

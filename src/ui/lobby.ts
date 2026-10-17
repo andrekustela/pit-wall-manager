@@ -122,6 +122,8 @@ export class LobbyScreen {
           <div class="seg" style="min-width:240px">${LAP_OPTIONS.map(
             (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"}>${n} voltas</button>`,
           ).join("")}</div></div>
+        <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
+          <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Campeonato</b><br><span class="hint" style="margin:0">3 etapas, uma em cada pista (${CIRCUITS.map((c) => esc(c.name)).join(" → ")}). Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-equal" ${lobby.equalCars ? "checked" : ""} ${isHost ? "" : "disabled"}>
@@ -130,6 +132,9 @@ export class LobbyScreen {
       <p class="hint">Regras: reabastecimento liberado · 2 compostos de pneu obrigatórios (menos se usar pneu de chuva) · pode chover, ter batida e safety car.</p>`;
     root.querySelectorAll<HTMLButtonElement>("[data-laps]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "options", laps: Number(b.dataset.laps) })),
+    );
+    root.querySelector<HTMLInputElement>("#l-real")!.addEventListener("change", (e) =>
+      this.conn.send({ t: "options", realDrivers: (e.target as HTMLInputElement).checked }),
     );
     root.querySelector<HTMLInputElement>("#l-champ")!.addEventListener("change", (e) =>
       this.conn.send({ t: "options", champ: (e.target as HTMLInputElement).checked }),

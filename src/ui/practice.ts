@@ -76,9 +76,7 @@ export class PracticeScreen {
       this.panels.push(panel);
       el.innerHTML = `
         <h3 style="display:flex;justify-content:space-between;align-items:center"><span>${natBadge(d)} ${esc(d.name.toUpperCase())} · ${esc(d.style)}</span>
-          <span><button class="linkbtn" data-ficha>ver ficha</button>${
-            lobby.swapUsed?.includes(myTeam.id) ? "" : ` · <button class="linkbtn" data-swap title="Troca por um piloto reserva surpresa (só 1 vez)">trocar pelo reserva</button>`
-          }</span></h3>
+          <span><button class="linkbtn" data-ficha>ver ficha</button></span></h3>
         ${LABELS.map(
           ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
             <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
@@ -122,13 +120,19 @@ O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobb
     const chance = f ? f.chance : 0;
     const raceIcon = !f ? "☀" : chance >= 70 ? "🌧" : "🌦";
     const notes = weekendConditions(w).notes;
+    const NL = "\n";
+    const trackTip = notes.length
+      ? "Neste fim de semana:" + NL + NL +
+        notes.map((n) => `${n.icon} ${n.title}${NL}→ ${n.hint}`).join(NL + NL) + NL + NL +
+        "O acerto ideal também depende do gosto de cada piloto (veja a ficha)."
+      : "Condições normais de pista neste fim de semana.";
     const item = (icon: string, title: string, sub: string, tip: string) =>
       `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
     return `<div class="conds" style="margin-bottom:12px">
       ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
       ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
       ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
-      ${item("🏁", "Pista", notes.length ? `${notes.length} aviso(s)` : "normal", notes.length ? `Neste fim de semana: ${notes.join("; ")}. Isso muda o acerto ideal.` : "Condições normais de pista neste fim de semana.")}
+      ${item("🏁", "Pista", notes.length ? notes.map((n) => n.icon).join(" ") + ` ${notes.length === 1 ? "1 aviso" : `${notes.length} avisos`}` : "normal", trackTip)}
       ${item("?", "Como funciona", "acerto", "Ajuste o carro e dê voltas de teste. Depois de cada volta o piloto diz no rádio o que está errado (piloto com bom feedback é mais preciso). O acerto ideal muda com a pista, as condições do fim de semana e o gosto de cada piloto. A volta marcada em USAR é a que vai pra classificação e pra corrida.")}
     </div>`;
   }

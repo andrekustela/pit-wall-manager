@@ -4,6 +4,7 @@
 import { TEAMS } from "./data";
 import { Rng } from "./rng";
 import type { Driver } from "./types";
+import { buildLegends } from "./legends";
 
 export interface DriverProfile {
   id: string;
@@ -118,7 +119,11 @@ function buildPool(): DriverProfile[] {
 }
 
 export const DRIVER_POOL: DriverProfile[] = buildPool();
-const BY_ID = new Map(DRIVER_POOL.map((d) => [d.id, d]));
+/** 100 pilotos reais de todas as eras (opção "Lendas da F1") */
+export const LEGEND_POOL: DriverProfile[] = buildLegends(styleOf);
+const BY_ID = new Map([...DRIVER_POOL, ...LEGEND_POOL].map((d) => [d.id, d]));
+
+const poolOf = (real?: boolean) => (real ? LEGEND_POOL : DRIVER_POOL);
 
 export function profileOf(id: string): DriverProfile | undefined {
   return BY_ID.get(id);
@@ -128,9 +133,9 @@ export function profileOf(id: string): DriverProfile | undefined {
 export type Lineup = Record<string, [string, string]>;
 
 /** sorteia 20 pilotos da base pras 10 equipes */
-export function drawLineup(seed: number): Lineup {
+export function drawLineup(seed: number, real = false): Lineup {
   const rng = new Rng(seed ^ 0x7a11);
-  const ids = DRIVER_POOL.map((d) => d.id);
+  const ids = poolOf(real).map((d) => d.id);
   for (let i = ids.length - 1; i > 0; i--) {
     const j = Math.floor(rng.next() * (i + 1));
     [ids[i], ids[j]] = [ids[j], ids[i]];
@@ -156,10 +161,10 @@ export function toDriver(p: DriverProfile, teamId: string): Driver {
 }
 
 /** reserva (3º piloto) de cada equipe: sorteado entre os que ficaram de fora; segredo até a troca */
-export function drawReserves(lineup: Lineup, seed: number): Record<string, string> {
+export function drawReserves(lineup: Lineup, seed: number, real = false): Record<string, string> {
   const rng = new Rng(seed ^ 0x5e5e);
   const used = new Set(Object.values(lineup).flat());
-  const free = DRIVER_POOL.map((d) => d.id).filter((id) => !used.has(id));
+  const free = poolOf(real).map((d) => d.id).filter((id) => !used.has(id));
   for (let i = free.length - 1; i > 0; i--) {
     const j = Math.floor(rng.next() * (i + 1));
     [free[i], free[j]] = [free[j], free[i]];

@@ -1,6 +1,7 @@
 // Ficha do piloto (janela): idade, nacionalidade, estilo, atributos e preferências de acerto.
 import type { DriverProfile } from "../sim/drivers";
 import { esc, natBadge } from "./common";
+import { CAREERS } from "../sim/legendsHistory";
 
 const ATTRS: [keyof DriverProfile, string, string][] = [
   ["pace", "Velocidade", "Ritmo puro de volta rápida"],
@@ -35,6 +36,7 @@ export function driverCardHtml(p: DriverProfile, team: string, color: string): s
         <span class="dbar"><i style="width:${p[k]}%;background:${barColor(p[k] as number)}"></i></span><b>${p[k]}</b></div>`,
     ).join("")}</div>
     <div class="dpref">Preferência de acerto: ${esc(prefText(p))}</div>
+    ${careerHtml(p)}
   </div>`;
 }
 
@@ -71,4 +73,17 @@ export function showReserveReveal(gone: DriverProfile, came: DriverProfile, team
   document.body.appendChild(m);
   setTimeout(() => m.querySelector(".flip")!.classList.add("on"), 700);
   setTimeout(() => ((m.querySelector(".reserve-verdict") as HTMLElement).style.opacity = "1"), 1400);
+}
+
+/** carreira real (só pros pilotos da opção "Lendas") */
+function careerHtml(p: DriverProfile): string {
+  const c = p.id.startsWith("r_") ? CAREERS[p.short] : undefined;
+  if (!c) return "";
+  return `<div class="dcareer">
+    <div class="dct">CARREIRA NA F1 · ${esc(c.years)}</div>
+    <div class="dcstats"><span><b>${c.titles ? c.titles.split(",").length : 0}</b> título(s)</span><span><b>${esc(c.wins)}</b> vitórias</span></div>
+    ${c.titles ? `<div class="dcrow">🏆 ${esc(c.titles)}</div>` : ""}
+    <div class="dcrow">Equipes: ${esc(c.teams)}</div>
+    <div class="dcnote">${esc(c.note)}</div>
+  </div>`;
 }
