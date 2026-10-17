@@ -1,0 +1,10 @@
+# Deploy no Render (https://render.com): New > Blueprint > aponte pro repositório.
+# Um serviço só: serve o jogo (dist/) e o WebSocket do online (/ws).
+services:
+  - type: web
+    name: pit-wall-manager
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
