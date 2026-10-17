@@ -19,7 +19,8 @@ export class LobbyScreen {
             <h1 class="title">${lobby.solo ? "FIM DE <span>SEMANA</span>" : "SALA <span>ONLINE</span>"}</h1>
             <p class="sub">Treino livre (5 voltas de teste) → Classificação (Q1, Q2, Q3) → Estratégia → Corrida</p>
           </div>
-          ${lobby.solo ? "" : `<div class="box" style="text-align:center"><div class="hint" style="margin:0">Código da sala</div><div class="code">${esc(lobby.code)}</div></div>`}
+          ${lobby.solo ? "" : `<div class="box" style="text-align:center"><div class="hint" style="margin:0">Código da sala</div><div class="code">${esc(lobby.code)}</div>
+            <div class="row-btns" style="justify-content:center;margin-top:8px"><button class="btn small" data-copy="code">📋 COPIAR CÓDIGO</button><button class="btn small" data-copy="link">🔗 COPIAR CONVITE</button></div></div>`}
         </div>
         <div class="cols">
           <div class="box">
@@ -58,6 +59,21 @@ export class LobbyScreen {
       conn.send({ t: "startWeekend" });
     });
     root.querySelector("#l-exit")!.addEventListener("click", onExit);
+    // copiar o código ou o link de convite (o link abre o jogo com o código preenchido)
+    root.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const text = b.dataset.copy === "link" ? `${location.origin}/?sala=${lobby.code}` : lobby.code;
+        const label = b.textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+          b.textContent = "✓ COPIADO!";
+        } catch {
+          // sem permissão de área de transferência: mostra pra copiar na mão
+          window.prompt("Copie:", text);
+        }
+        setTimeout(() => (b.textContent = label), 1500);
+      }),
+    );
 
     this.update(lobby);
   }

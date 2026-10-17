@@ -60,9 +60,9 @@ export interface LobbyState {
 }
 
 export type ClientMsg =
-  | { t: "create"; name: string; teamName: string }
-  | { t: "join"; code: string; name: string; teamName: string }
-  | { t: "rejoin"; code: string; token: string }
+  | { t: "create"; name: string; teamName: string; v?: string }
+  | { t: "join"; code: string; name: string; teamName: string; v?: string }
+  | { t: "rejoin"; code: string; token: string; v?: string }
   | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "repairEngine"; carId: string }
   | { t: "newEngine"; carId: string }

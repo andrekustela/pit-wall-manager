@@ -12,6 +12,9 @@ const PORT = Number(process.env.PORT ?? 8787);
 const DIST = resolve(process.cwd(), "dist");
 
 const rooms = new Map<string, Room>();
+/** versão publicada (commit no Render); o jogo do navegador manda a dele pra comparar */
+const BUILD = process.env.RENDER_GIT_COMMIT ?? "dev";
+const OUTDATED = "O jogo foi atualizado. Aperte F5 (ou feche e abra o app) pra carregar a versão nova.";
 const sockets = new Map<string, WebSocket>(); // `${code}:${playerId}` -> ws
 
 // ---------- HTTP (arquivos estáticos) ----------
@@ -101,10 +104,13 @@ wss.on("connection", (ws: WebSocket) => {
       return;
     }
     try {
+      // jogo desatualizado (aba aberta de antes de uma atualização): pede pra recarregar
+      if ((msg.t === "create" || msg.t === "join" || msg.t === "rejoin") && BUILD !== "dev" && msg.v && msg.v !== "dev" && msg.v !== BUILD)
+        return reply({ t: "error", msg: OUTDATED });
       if (msg.t === "rejoin") {
         if (room) return;
         const r = rooms.get(String(msg.code ?? "").toUpperCase().trim());
-        if (!r) return reply({ t: "error", msg: "A sala não existe mais." });
+        if (!r) return reply({ t: "error", msg: "A sala não existe mais (o servidor pode ter reiniciado numa atualização). Crie uma sala nova." });
         // registra o socket antes, porque o rejoin já manda o lobby e a corrida
         const target = [...r.players.values()].find((p) => p.token === msg.token);
         if (!target) return reply({ t: "error", msg: "Não deu pra voltar pra essa sala." });
@@ -117,7 +123,7 @@ wss.on("connection", (ws: WebSocket) => {
       if (msg.t === "create" || msg.t === "join") {
         if (room) return;
         const r = msg.t === "create" ? makeRoom() : rooms.get(String(msg.code ?? "").toUpperCase().trim());
-        if (!r) return reply({ t: "error", msg: "Sala não encontrada." });
+        if (!r) return reply({ t: "error", msg: "Sala não encontrada. Confira o código; se o jogo acabou de ser atualizado, peça pro host criar a sala de novo e aperte F5." });
         if (r.phase !== "lobby") return reply({ t: "error", msg: "Essa sala já está no meio do fim de semana. Espere acabar." });
         const id = r.join(msg.name, msg.teamName);
         if (!id) return reply({ t: "error", msg: "Sala cheia." });
@@ -158,4 +164,12 @@ wss.on("connection", (ws: WebSocket) => {
   });
 });
 
-http.listen(PORT, () => console.log(`Pit Wall Manager: servidor na porta ${PORT}`));
+http.listen(PORT, () => console.log(`Pit Wall Manager: servidor na porta ${PORT} (versão ${BUILD.slice(0, 7)})`));
+
+// o Render desliga o servidor antigo numa atualização: avisa quem está jogando
+// (as salas ficam só na memória e somem junto)
+process.on("SIGTERM", () => {
+  const msg: ServerMsg = { t: "error", msg: "O servidor está sendo atualizado agora e a sala vai fechar. Em 1 minuto, aperte F5 e crie a sala de novo." };
+  for (const ws of sockets.values()) if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+  setTimeout(() => process.exit(0), 500);
+});

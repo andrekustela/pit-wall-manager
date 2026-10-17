@@ -115,4 +115,14 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   };
   root.querySelector("#m-join")!.addEventListener("click", join);
   root.querySelector("#m-code")!.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && join());
+  // veio por um link de convite (?sala=CODE): código já preenchido e o botão em destaque
+  const invite = new URLSearchParams(location.search).get("sala")?.trim().toUpperCase();
+  if (invite && /^[A-Z]{4}$/.test(invite)) {
+    const inp = root.querySelector<HTMLInputElement>("#m-code")!;
+    inp.value = invite;
+    const jb = root.querySelector<HTMLButtonElement>("#m-join")!;
+    jb.classList.add("primary");
+    jb.textContent = `ENTRAR NA SALA ${invite} ▶`;
+    inp.closest(".box")?.classList.add("invited");
+  }
 }

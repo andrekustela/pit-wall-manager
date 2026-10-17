@@ -17,6 +17,7 @@ import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
 import { ChatWidget } from "./ui/chat";
+import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
 import { showLogin } from "./ui/login";
 import { setupInstall } from "./ui/install";
@@ -118,9 +119,11 @@ class App {
     };
     // telas antigas guardam a conexão velha: redesenha tudo ao voltar
     if (c.mode === "rejoin") this.screenPhase = null;
-    if (c.mode === "rejoin") conn.send({ t: "rejoin", code: c.code!, token: c.token! });
-    if (c.mode === "create") conn.send({ t: "create", name: c.name, teamName: c.teamName });
-    if (c.mode === "join") conn.send({ t: "join", code: c.code!, name: c.name, teamName: c.teamName });
+    // v = versão do jogo: o servidor recusa se estiver desatualizado (evita sala quebrada)
+    const v = __BUILD__;
+    if (c.mode === "rejoin") conn.send({ t: "rejoin", code: c.code!, token: c.token!, v });
+    if (c.mode === "create") conn.send({ t: "create", name: c.name, teamName: c.teamName, v });
+    if (c.mode === "join") conn.send({ t: "join", code: c.code!, name: c.name, teamName: c.teamName, v });
   }
 
   private leave() {
@@ -141,6 +144,13 @@ class App {
   private onMessage(m: ServerMsg) {
     switch (m.t) {
       case "error":
+        if (/Aperte F5/.test(m.msg)) {
+          // jogo desatualizado ou servidor atualizando: oferece recarregar na hora
+          storeSet("pwm.session", "");
+          void confirmDialog({ title: "Jogo atualizado", icon: "🔄", text: m.msg, ok: "RECARREGAR AGORA", cancel: "DEPOIS" }).then((ok) => ok && location.reload());
+          if (!this.lobby) this.leave();
+          break;
+        }
         toast(m.msg);
         if (/não existe mais|voltar pra essa sala/.test(m.msg)) storeSet("pwm.session", "");
         if (!this.lobby) this.leave();

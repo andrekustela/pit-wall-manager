@@ -4,7 +4,7 @@ import WebSocket from "ws";
 import type { ClientMsg, LobbyState, ServerMsg } from "../src/net/protocol";
 
 const port = process.argv[2] ?? "8799";
-const url = `ws://localhost:${port}/ws`;
+const url = port.startsWith("ws") ? port : `ws://localhost:${port}/ws`;
 
 class Bot {
   ws: WebSocket;

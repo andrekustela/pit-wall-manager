@@ -626,3 +626,4 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .menulogo { margin: 0 auto; }
 .menuhead + .sub { text-align: center; }
 @media (max-width: 700px) { .menuhead { flex-direction: column; } .menuhead #m-install { position: static; } }
+.box.invited { border-color: #6ea8ff; box-shadow: 0 0 0 2px rgba(110, 168, 255, .35); }
