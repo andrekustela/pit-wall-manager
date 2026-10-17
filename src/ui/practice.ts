@@ -2,7 +2,7 @@ import type { Connection } from "../net/connection";
 import type { LobbyState, ServerMsg } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { toDriver } from "../sim/drivers";
-import { showDriverCards } from "./driverCard";
+import { showDriverCards, showReserveReveal } from "./driverCard";
 import { fmtLap } from "../sim/race";
 import { CIRCUITS, getTrack } from "../sim/track";
 import { carProfile, type QualiLap } from "../sim/tuning";
@@ -36,6 +36,21 @@ export class PracticeScreen {
   private ready = false;
 
   constructor(private root: HTMLElement, private conn: Connection, private lobby: LobbyState) {
+    this.build();
+  }
+
+  /** ids dos meus pilotos agora (pra perceber a troca pelo reserva) */
+  private myIds(lobby: LobbyState): string {
+    const me = lobby.players.find((p) => p.id === lobby.you)!;
+    return teamDrivers(lobby, me.teamId!).map((d) => d.id).join(",");
+  }
+
+  private build() {
+    const lobby = this.lobby;
+    const conn = this.conn;
+    const root = this.root;
+    this.panels = [];
+    this.ready = false;
     const w = lobby.weekend!;
     const me = lobby.players.find((p) => p.id === lobby.you)!;
     const track = CIRCUITS[w.trackIndex];
@@ -61,7 +76,9 @@ export class PracticeScreen {
       this.panels.push(panel);
       el.innerHTML = `
         <h3 style="display:flex;justify-content:space-between;align-items:center"><span>${natBadge(d)} ${esc(d.name.toUpperCase())} · ${esc(d.style)}</span>
-          <button class="linkbtn" data-ficha>ver ficha</button></h3>
+          <span><button class="linkbtn" data-ficha>ver ficha</button>${
+            lobby.swapUsed?.includes(myTeam.id) ? "" : ` · <button class="linkbtn" data-swap title="Troca por um piloto reserva surpresa (só 1 vez)">trocar pelo reserva</button>`
+          }</span></h3>
         ${LABELS.map(
           ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
             <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
@@ -71,6 +88,12 @@ export class PracticeScreen {
         <button class="btn primary" data-go style="width:100%;margin-top:10px"></button>
         <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th title="Asa dianteira / traseira / altura / suspensão diant. e tras.">ACERTO</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;
       el.querySelector("[data-ficha]")!.addEventListener("click", () => showDriverCards([d], teamName(lobby, myTeam.id), myTeam.color));
+      el.querySelector("[data-swap]")?.addEventListener("click", () => {
+        if (confirm(`Trocar ${d.name} pelo piloto reserva?
+
+O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobby.champ ? " no campeonato todo" : ""}, e as voltas de treino desse piloto se perdem.`))
+          conn.send({ t: "swapDriver", carId: d.id });
+      });
       el.querySelectorAll<HTMLInputElement>("input[type=range]").forEach((inp) =>
         inp.addEventListener("input", () => {
           const k = inp.dataset.k as keyof Tuning;
@@ -214,8 +237,19 @@ export class PracticeScreen {
   }
 
   update(lobby: LobbyState) {
+    const before = this.myIds(this.lobby);
+    const old = teamDrivers(this.lobby, this.lobby.players.find((p) => p.id === this.lobby.you)!.teamId!);
     this.lobby = lobby;
     updateWaitBar(lobby);
+    if (this.myIds(lobby) !== before) {
+      // trocou pelo reserva: revela a carta e redesenha a tela com o piloto novo
+      const me = lobby.players.find((p) => p.id === lobby.you)!;
+      const now = teamDrivers(lobby, me.teamId!);
+      const gone = old.find((d) => !now.some((x) => x.id === d.id));
+      const came = now.find((d) => !old.some((x) => x.id === d.id));
+      this.build();
+      if (gone && came) showReserveReveal(gone, came, teamName(lobby, me.teamId!), TEAMS.find((t) => t.id === me.teamId)!.color);
+    }
   }
 
   destroy() {

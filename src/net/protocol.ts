@@ -47,6 +47,8 @@ export interface LobbyState {
   champ: ChampState | null;
   /** pilotos sorteados de cada equipe */
   lineup: import("../sim/drivers").Lineup;
+  /** equipes que já usaram a troca pelo reserva */
+  swapUsed: string[];
   players: LobbyPlayer[];
   weekend: WeekendPublic | null;
 }
@@ -68,6 +70,7 @@ export type ClientMsg =
   | { t: "abort" }
   | { t: "back" }
   | { t: "reroll" }
+  | { t: "swapDriver"; carId: string }
   | { t: "leave" };
 
 export type ServerMsg =

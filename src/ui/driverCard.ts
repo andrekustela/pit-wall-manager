@@ -51,3 +51,24 @@ export function showDriverCards(drivers: DriverProfile[], team: string, color: s
   });
   document.body.appendChild(m);
 }
+
+/** revela o reserva: carta virando + comparação com quem saiu */
+export function showReserveReveal(gone: DriverProfile, came: DriverProfile, team: string, color: string) {
+  const diff = came.rating - gone.rating;
+  const m = document.createElement("div");
+  m.className = "helpmodal";
+  m.innerHTML = `<div class="helpbox panel" style="width:min(560px,100%)">
+    <div class="helphead"><b>🎲 PILOTO RESERVA</b></div>
+    <p class="hint" style="margin-top:0">Sai ${esc(gone.name)} (${gone.rating}). Entra…</p>
+    <div class="flip"><div class="flip-back">?</div><div class="flip-front">${driverCardHtml(came, team, color)}</div></div>
+    <p class="reserve-verdict" style="opacity:0;transition:opacity .4s;font-family:var(--pix);font-size:14px;margin:12px 0 0;color:${diff > 0 ? "var(--ok)" : diff < 0 ? "var(--soft)" : "var(--muted)"}">
+      ${diff > 0 ? `MELHOROU! +${diff} na nota geral` : diff < 0 ? `PIOROU… ${diff} na nota geral` : "MESMA NOTA GERAL"}</p>
+    <button class="go" data-close style="margin-top:12px">OK ▶</button>
+  </div>`;
+  m.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-close]")) m.remove();
+  });
+  document.body.appendChild(m);
+  setTimeout(() => m.querySelector(".flip")!.classList.add("on"), 700);
+  setTimeout(() => ((m.querySelector(".reserve-verdict") as HTMLElement).style.opacity = "1"), 1400);
+}

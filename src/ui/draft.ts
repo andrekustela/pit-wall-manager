@@ -25,7 +25,8 @@ export function showDraft(lobby: LobbyState, onDone?: () => void) {
         ${teamDrivers(lobby, t.id).map((d) => `<span>${natBadge(d)} ${esc(d.name)} <i>${d.rating}</i> <small>${esc(d.style)}</small></span>`).join("")}</div>`,
       )
       .join("")}</div></div></div>
-    <button class="go" data-go style="margin-top:16px">VAMOS PRO TREINO ▶</button>
+    <p class="hint">Não gostou? No treino você pode <b>trocar 1 piloto pelo reserva</b> (uma vez só). O reserva é surpresa: pode ser melhor ou pior.</p>
+    <button class="go" data-go style="margin-top:8px">VAMOS PRO TREINO ▶</button>
   </div>`;
   document.body.appendChild(m);
   // revela as cartas uma de cada vez

@@ -154,3 +154,17 @@ export function toDriver(p: DriverProfile, teamId: string): Driver {
     profile: p,
   };
 }
+
+/** reserva (3º piloto) de cada equipe: sorteado entre os que ficaram de fora; segredo até a troca */
+export function drawReserves(lineup: Lineup, seed: number): Record<string, string> {
+  const rng = new Rng(seed ^ 0x5e5e);
+  const used = new Set(Object.values(lineup).flat());
+  const free = DRIVER_POOL.map((d) => d.id).filter((id) => !used.has(id));
+  for (let i = free.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [free[i], free[j]] = [free[j], free[i]];
+  }
+  const out: Record<string, string> = {};
+  TEAMS.forEach((t, i) => (out[t.id] = free[i]));
+  return out;
+}

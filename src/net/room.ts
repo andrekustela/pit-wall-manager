@@ -2,7 +2,7 @@
 // estratégia -> corrida -> pódio). Não sabe nada de rede: no solo roda no
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
-import { drawLineup, type Lineup } from "../sim/drivers";
+import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
 import { awardPoints, newChampionship, type ChampState } from "../sim/championship";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -60,6 +60,16 @@ export class Room {
 
   /** pilotos sorteados pras equipes (novo a cada jogo; o campeonato mantém) */
   lineup: Lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+  /** reserva escondido de cada equipe e quem já usou a troca (1 por jogo/campeonato) */
+  private reserves: Record<string, string> = {};
+  private swapUsed = new Set<string>();
+
+  private newLineup() {
+    const seed = (Math.random() * 2 ** 32) >>> 0;
+    this.lineup = drawLineup(seed);
+    this.reserves = drawReserves(this.lineup, seed);
+    this.swapUsed.clear();
+  }
 
   constructor(readonly code: string, private send: Send, readonly solo = false) {}
 
@@ -205,10 +215,31 @@ export class Room {
         }
         break;
       }
+      case "swapDriver": {
+        // troca 1 piloto pelo reserva (surpresa), uma vez só, durante o treino
+        const team = p.teamId;
+        if (this.phase !== "practice" || !team || !this.owns(p, msg.carId) || this.swapUsed.has(team)) return;
+        const res = this.reserves[team];
+        if (!res) return;
+        const pair = [...this.lineup[team]] as [string, string];
+        pair[pair.indexOf(msg.carId)] = res;
+        this.lineup = { ...this.lineup, [team]: pair };
+        if (this.weekend) this.weekend.lineup = this.lineup;
+        this.swapUsed.add(team);
+        p.tunings[res] = p.tunings[msg.carId] ?? { ...DEFAULT_TUNING };
+        delete p.tunings[msg.carId];
+        delete p.practiceCount[msg.carId];
+        delete p.practiceLaps[msg.carId];
+        this.broadcastLobby();
+        // reenvia as voltas do outro piloto (a tela é redesenhada)
+        for (const [carId, laps] of Object.entries(p.practiceLaps))
+          laps.forEach((lap, lapIndex) => this.send(id, { t: "practice", carId, lapIndex, lap }));
+        break;
+      }
       case "reroll":
         // host sorteia os pilotos de novo (só no lobby)
         if (!isHost || this.phase !== "lobby") return;
-        this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+        this.newLineup();
         this.broadcastLobby();
         break;
       case "abort":
@@ -244,7 +275,7 @@ export class Room {
     const players = [...this.players.values()];
     const seed = (Math.random() * 2 ** 32) >>> 0;
     // pilotos sorteados agora (depois da escolha das equipes); no campeonato, só na 1ª etapa
-    if (!this.champ || this.champ.round === 0) this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+    if (!this.champ || this.champ.round === 0) this.newLineup();
     const human: Record<string, string> = {};
     const teamNames: Record<string, string> = {};
     for (const p of players) {
@@ -288,7 +319,7 @@ export class Room {
       } else {
         // jogo novo: pilotos sorteados de novo
         this.champ = null;
-        this.lineup = drawLineup((Math.random() * 2 ** 32) >>> 0);
+        this.newLineup();
         this.setPhase("lobby");
       }
     }
@@ -389,6 +420,7 @@ export class Room {
       equalCars: this.equalCars,
       champMode: this.champMode,
       lineup: this.lineup,
+      swapUsed: [...this.swapUsed],
       champ: this.champ,
       weekend,
       players: [...this.players.values()].map((p) => ({
