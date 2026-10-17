@@ -273,6 +273,11 @@ class App {
       points,
       champDone: !!ch?.finished,
       title,
+      lap: (() => {
+        // melhor volta da sua equipe (vira recorde no ranking se for a sua melhor ali)
+        const best = mine.map((x) => x.c).filter((c) => c.bestLap).sort((a, b) => a.bestLap! - b.bestLap!)[0];
+        return best ? { track: race.opts.trackIndex, time: best.bestLap!, driver: best.driver.name } : undefined;
+      })(),
     });
   }
 

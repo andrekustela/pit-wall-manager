@@ -708,3 +708,5 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .rpbar .rpspeed { flex: none; }
 @media (max-width: 800px) { .rpside { left: 12px; width: auto; top: auto; bottom: 76px; height: 38%; } }
 .rpbar .rpspeed button { min-width: 42px; padding: 4px 6px; }
+.rankbox { width: min(820px, 96vw); }
+.rankbody { max-height: 70vh; overflow-y: auto; }

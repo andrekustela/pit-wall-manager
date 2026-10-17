@@ -6,6 +6,7 @@ import { statsHtml } from "./login";
 import { mountInstallButton } from "./install";
 import { deleteSave, listSaves, renameSave } from "./saves";
 import { confirmDialog } from "./confirm";
+import { showRanking } from "./ranking";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -60,7 +61,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <p class="sub">Você é o engenheiro-chefe. Os pilotos correm, você decide o acerto e a estratégia.</p>
       ${account.profile ? `<div class="box accountbox"><div class="accounthead"><div><h3 style="margin:0">OLÁ, ${esc(account.profile.name.toUpperCase())}</h3>
           <div class="hint" style="margin:2px 0 0">${account.profile.team_name ? `Equipe ${esc(account.profile.team_name)}` : "Equipe com o nome original"}</div></div>
-          <div class="row-btns" style="margin:0"><button class="btn small" id="m-edit">EDITAR PERFIL</button><button class="btn small" id="m-logout">SAIR DA CONTA</button></div></div>${statsHtml()}</div>` : ""}
+          <div class="row-btns" style="margin:0"><button class="btn small primary" id="m-rank">🏆 RANKING</button><button class="btn small" id="m-edit">EDITAR PERFIL</button><button class="btn small" id="m-logout">SAIR DA CONTA</button></div></div>${statsHtml()}</div>` : ""}
       <div class="box" id="m-profile" ${account.profile ? "hidden" : ""}>
         <h3>${account.profile ? "EDITAR PERFIL" : "SEU PERFIL"}</h3>
         <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="m-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
@@ -118,6 +119,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     showMenu(root, onChoose);
   });
   root.querySelector("#m-logout")?.addEventListener("click", () => onLogout?.());
+  root.querySelector("#m-rank")?.addEventListener("click", () => void showRanking());
   // logado: o perfil fica escondido e abre no "editar perfil"
   root.querySelector("#m-edit")?.addEventListener("click", () => {
     const box = root.querySelector<HTMLElement>("#m-profile")!;
