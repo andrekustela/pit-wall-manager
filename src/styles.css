@@ -575,3 +575,5 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .onpanel .driver { width: 440px; background: rgba(12, 15, 21, 0.86); backdrop-filter: blur(3px); }
 .onpanel .onbox { display: none; }
 @media (max-width: 900px) { .onpanel { left: 8px; right: 8px; top: auto; bottom: 8px; max-height: 45%; } .onpanel .driver { width: auto; } }
+
+.board .name .eng { color: var(--muted); font-size: .85em; text-transform: none; }

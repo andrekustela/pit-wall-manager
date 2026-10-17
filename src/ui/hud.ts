@@ -24,6 +24,8 @@ export const SPEEDS = [1, 2, 4, 8, 16];
 
 export interface HudHooks {
   myTeamId: string;
+  /** modo online: mostra o engenheiro (jogador) ao lado dos pilotos dele */
+  online?: boolean;
   isHost: boolean;
   getFollow(): string;
   setFollow(id: string): void;
@@ -531,7 +533,7 @@ export class Hud {
         return `<div class="row ${c.team.id === my ? "player" : ""} ${c.id === follow ? "follow" : ""}" data-car="${c.id}" title="${esc(c.team.name)}">
           <span class="pos">${c.position}</span>
           <span class="bar" style="background:${c.team.color}"></span>
-          <span class="name">${surname(c.driver.name)}</span>
+          <span class="name">${surname(c.driver.name)}${this.hooks.online && c.isHuman ? ` <span class="eng">(${esc(race.engineers[c.team.id]?.name ?? "")})</span>` : ""}</span>
           <span class="gap ${cls}">${gap}</span>
           <span class="lt ${ltCls}">${lt ? fmtShort(lt) : ""}</span>
           ${tyreIcon(c.compound, `${COMPOUNDS[c.compound].label} · ${c.tyreLaps} voltas`)}

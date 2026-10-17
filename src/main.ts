@@ -263,6 +263,7 @@ class App {
       view.hud.update();
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
+    view.renderer.showEngineers = !this.lobby?.solo;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
       if (!isHost) return;
@@ -272,6 +273,7 @@ class App {
     };
     view.hud = new Hud(app, race, {
       myTeamId: my,
+      online: !this.lobby?.solo,
       isHost,
       getFollow: () => view.follow,
       setFollow,

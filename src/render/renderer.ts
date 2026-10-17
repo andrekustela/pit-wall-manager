@@ -177,6 +177,8 @@ export class Renderer {
   private pos = new Map<string, { x: number; y: number; h: number }>();
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
   readonly interp = new Map<string, { s: number; lat: number }>();
+  /** online: etiqueta dos carros dos jogadores mostra o engenheiro */
+  showEngineers = false;
   /** altura de baixo coberta pelo painel (px); a câmera centraliza acima dela */
   private inset = 0;
   private insetTarget = 0;
@@ -296,7 +298,8 @@ export class Renderer {
       if (!sp) continue;
       const mine = c.isHuman;
       if (!mine && c.id !== this.followId) continue;
-      const txt = c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`;
+      const eng = this.showEngineers && c.isHuman ? ` (${race.engineers[c.team.id]?.name ?? ""})` : "";
+      const txt = (c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`) + eng;
       this.label(o, sp.x, sp.y - lift, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
     }
 
