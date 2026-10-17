@@ -3,11 +3,13 @@
 // como antes (sem conta, tudo no navegador).
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   type Auth,
   type User,
@@ -85,6 +87,18 @@ class Account {
       const cred = await createUserWithEmailAndPassword(F().auth, email, password);
       this.user = cred.user;
       await this.loadProfile(name, teamName);
+      return null;
+    } catch (e) {
+      return translate(e);
+    }
+  }
+
+  /** entra com a conta Google (abre uma janelinha do Google) */
+  async signInGoogle(): Promise<string | null> {
+    try {
+      const cred = await signInWithPopup(F().auth, new GoogleAuthProvider());
+      this.user = cred.user;
+      await this.loadProfile(cred.user.displayName?.split(" ")[0] ?? undefined);
       return null;
     } catch (e) {
       return translate(e);
@@ -182,6 +196,9 @@ function translate(e: unknown): string {
   if (/invalid-email/.test(code)) return "Esse e-mail não parece válido.";
   if (/too-many-requests/.test(code)) return "Muitas tentativas. Espere um pouco e tente de novo.";
   if (/network/.test(code)) return "Sem conexão com o servidor de contas.";
-  if (/operation-not-allowed/.test(code)) return "Login por e-mail ainda não foi ligado no Firebase.";
+  if (/operation-not-allowed/.test(code)) return "Esse tipo de login ainda não foi ligado no Firebase.";
+  if (/popup-closed-by-user|cancelled-popup-request/.test(code)) return "Janela do Google fechada antes de terminar.";
+  if (/popup-blocked/.test(code)) return "O navegador bloqueou a janela do Google. Libere pop-ups pra este site.";
+  if (/unauthorized-domain/.test(code)) return "Este endereço ainda não está liberado no Firebase (Domínios autorizados).";
   return (e as Error)?.message ?? "Deu algum erro. Tente de novo.";
 }

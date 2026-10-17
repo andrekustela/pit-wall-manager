@@ -564,3 +564,8 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 
 /* "hidden" sempre esconde (o display dos componentes passava por cima) */
 [hidden] { display: none !important; }
+
+.loginor { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; color: var(--muted); font-size: 12px; }
+.loginor::before, .loginor::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.googlebtn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: #1f1f1f; border-color: #fff; font-weight: 700; padding: 10px; }
+.googlebtn:hover { background: #f1f3f4; }
