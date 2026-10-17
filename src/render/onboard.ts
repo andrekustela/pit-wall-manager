@@ -559,8 +559,15 @@ export class OnboardCam {
     body.addColorStop(0.5, shade(col, 0.12 + light));
     body.addColorStop(1, shade(col, -0.35 + light));
     shape([[47.6, 40], [52.4, 40], [56, 64], [44, 64]], body);
+    // corpo continua do bico até o cockpit (sem buraco no meio)
+    const deck = g.createLinearGradient(X(40), 0, X(60), 0);
+    deck.addColorStop(0, shade(col, -0.3 + light));
+    deck.addColorStop(0.5, shade(col, 0.05 + light));
+    deck.addColorStop(1, shade(col, -0.3 + light));
+    shape([[44, 62], [56, 62], [60, 100], [40, 100]], deck);
     // faixa da equipe no meio do bico
     shape([[49.4, 41], [50.6, 41], [51.4, 63], [48.6, 63]], shade(acc, light));
+    shape([[48.6, 63], [51.4, 63], [52, 72], [48, 72]], shade(acc, -0.1 + light));
     // câmera/antena no bico
     g.strokeStyle = "#111";
     g.lineWidth = Math.max(1, u * 0.25);
