@@ -63,6 +63,8 @@ const REF_LAPS = 30; // desgaste é escalado pra corrida "parecer" ter 30 voltas
 const PIT_SPEED = 22; // m/s (~80 km/h)
 const MANDATORY_PENALTY = 30;
 const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
+/** chance de passar reto (por segundo, numa curva), com ritmo normal */
+const OFF_RATE = 1.1e-4;
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
 const CAR_L = 4.4;
@@ -82,7 +84,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -135,7 +137,7 @@ export class Race {
   telemetry: Record<string, LapRec[]> = {};
   private teleState: Record<string, { c: Compound; stops: number }> = {};
   /** contadores (pra balancear e pro resumo) */
-  stats = { attempts: 0, aborts: 0, noSide: 0, overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0 };
+  stats = { attempts: 0, aborts: 0, noSide: 0, overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0, offs: 0 };
 
   private rng: Rng;
   private wearScale: number;
@@ -213,6 +215,9 @@ export class Race {
         finishTime: null,
         retired: false,
         retireReason: null,
+        offTrack: 0,
+        offSide: 1,
+        offFate: "rejoin",
         spin: 0,
         damage: 0,
         dmg: { ...NO_DAMAGE },
@@ -493,7 +498,10 @@ export class Race {
             (ds / L) * spec.wearPerLap * PACE[c.pace].wear * c.driver.tyreCare * (c.team.tyreWear ?? 1) * this.wearScale *
             wetWear(c.compound, this.wet) * (this.sc.active ? 0.5 : 1);
         }
-        if (c.pit === "none" && c.spin <= 0) this.maybeIncident(c, dt);
+        if (c.pit === "none" && c.spin <= 0 && c.offTrack <= 0) {
+          this.maybeIncident(c, dt);
+          this.maybeOffTrack(c, dt);
+        }
         if (c.retired) continue;
         if (c.isHuman) {
           this.followPlan(c);
@@ -501,6 +509,20 @@ export class Race {
         }
       }
       if (c.spin > 0) c.spin = Math.max(0, c.spin - dt);
+      if (c.offTrack > 0) {
+        c.offTrack -= dt;
+        if (c.offTrack <= 0) {
+          c.offTrack = 0;
+          const team = c.isHuman ? c.team.id : undefined;
+          if (c.offFate === "stuck") {
+            this.retire(c, this.track.def.street ? "Bateu no muro" : "Preso na brita");
+            if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.5)) this.deploySafetyCar();
+          } else {
+            c.lateralTarget = c.offSide * (TRACK_WIDTH / 2 - 2);
+            this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off");
+          }
+        }
+      }
 
       this.updatePit(c, prevS, ds);
 
@@ -560,6 +582,46 @@ export class Race {
       this.retire(c, "Acidente");
       if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
       else this.log("Bandeira amarela no local do acidente.", false, undefined, "yellow");
+    }
+  }
+
+  /**
+   * Passou reto na curva: quanto mais agressivo (ritmo "atacar", piloto agressivo e
+   * pouco constante, pneu gasto, chuva), maior a chance. Às vezes volta, às vezes não.
+   */
+  private maybeOffTrack(c: CarState, dt: number) {
+    if (this.checkered || this.sc.active || c.finished || c.v < 30) return;
+    const t = this.track;
+    const ahead = t.curvature[Math.floor(t.wrap(c.s + 25)) % t.L];
+    if (Math.abs(ahead) < 1 / 140) return; // só na entrada de curva
+    const prof = c.driver.profile;
+    let rate = OFF_RATE * PACE[c.pace].risk;
+    rate *= 0.6 + ((prof?.aggression ?? 55) / 100) * 0.8;
+    rate *= 1.5 - ((prof?.consistency ?? 70) / 100) * 0.8;
+    rate *= 1 + 4 * this.wet * (isWetTyre(c.compound) ? 0.4 : 1.5);
+    if (c.wear > 0.8) rate *= 2;
+    if (c.damage > 1) rate *= 1.5;
+    if (c.lap <= 0) rate *= 2;
+    if (c.overtaking) rate *= 1.6; // mergulhando na briga
+    if (!this.rng.chance(rate * dt)) return;
+
+    const team = c.isHuman ? c.team.id : undefined;
+    c.offTrack = this.rng.range(2.5, 5.5);
+    c.offSide = ahead > 0 ? -1 : 1; // pra fora da curva
+    c.overtaking = null;
+    c.wear = Math.min(1.2, c.wear + 0.04);
+    this.stats.offs++;
+    const street = !!t.def.street;
+    const r = this.rng.next();
+    // rua: muro; autódromo: brita (às vezes atola)
+    c.offFate = r < (street ? 0.3 : 0.14) ? "stuck" : "rejoin";
+    if (c.offFate === "rejoin" && this.rng.chance(street ? 0.45 : 0.15)) {
+      const dmg = this.rng.range(0.4, 1.4);
+      c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
+      c.damage += dmg;
+      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, team, "damage");
+    } else {
+      this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off");
     }
   }
 
@@ -627,6 +689,7 @@ export class Race {
   private targetSpeed(c: CarState): number {
     const base = c.profile[Math.floor(this.track.wrap(c.s)) % this.track.L];
     if (c.spin > 0) return c.spin > 2 ? 0 : 12;
+    if (c.offTrack > 0) return c.offFate === "stuck" ? 0 : 14;
     let v = c.finished ? base * 0.62 : base * (c.profileLap / c.targetLap);
     if (this.sc.active && !c.finished) v = Math.min(v, base * 0.7);
     if (c.pit === "entering" || c.pit === "leaving") {
@@ -829,6 +892,12 @@ export class Race {
   private moveLateral(c: CarState, dt: number) {
     if (c.spin > 0) {
       c.lateral += Math.max(-3 * dt, Math.min(3 * dt, -9 - c.lateral)); // rodando, escorrega pra fora
+      return;
+    }
+    if (c.offTrack > 0) {
+      // escapando pra fora da curva
+      const out = c.offSide * (TRACK_WIDTH / 2 + 6);
+      c.lateral += Math.max(-5 * dt, Math.min(5 * dt, out - c.lateral));
       return;
     }
     const step = Math.max(-2.6 * dt, Math.min(2.6 * dt, c.lateralTarget - c.lateral));

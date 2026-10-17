@@ -277,7 +277,11 @@ label.fld span { display: block; margin-bottom: 4px; }
 @media (max-width: 900px) { .teamwrap { left: 12px; right: 12px; transform: none; } .teamwrap .team { width: 100%; } }
 
 /* volume */
-.helpbtns .vol { width: 90px; accent-color: var(--accent); align-self: center; background: #1d2331; padding: 0 6px; height: 34px; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; }
+.helpbtns .vol { width: 90px; align-self: center; -webkit-appearance: none; appearance: none; height: 22px; background: transparent; cursor: pointer; margin: 0 4px; }
+.helpbtns .vol::-webkit-slider-runnable-track { height: 6px; background: linear-gradient(90deg, #2a3242, #4a5262); border-radius: 3px; }
+.helpbtns .vol::-moz-range-track { height: 6px; background: linear-gradient(90deg, #2a3242, #4a5262); border-radius: 3px; }
+.helpbtns .vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 16px; margin-top: -5px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; }
+.helpbtns .vol::-moz-range-thumb { width: 10px; height: 14px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; }
 
 /* painel de estado do carro (lateral do card) */
 .driver { display: grid; grid-template-columns: 132px 1fr; column-gap: 10px; align-items: start; width: 500px; }

@@ -95,10 +95,11 @@ export interface PlannedStop {
   fuel: number;
 }
 
-export const PACE: Record<PaceMode, { label: string; offset: number; wear: number; fuel: number }> = {
-  push: { label: "Atacar", offset: -0.4, wear: 1.5, fuel: 1.08 },
-  normal: { label: "Normal", offset: 0, wear: 1, fuel: 1 },
-  conserve: { label: "Poupar", offset: 0.65, wear: 0.62, fuel: 0.94 },
+/** risk = chance de erro de pilotagem (passar reto) */
+export const PACE: Record<PaceMode, { label: string; offset: number; wear: number; fuel: number; risk: number }> = {
+  push: { label: "Atacar", offset: -0.4, wear: 1.5, fuel: 1.08, risk: 8 },
+  normal: { label: "Normal", offset: 0, wear: 1, fuel: 1, risk: 1 },
+  conserve: { label: "Poupar", offset: 0.65, wear: 0.62, fuel: 0.94, risk: 0.35 },
 };
 
 export const ENGINE: Record<EngineMode, { label: string; offset: number; fuel: number }> = {
@@ -177,6 +178,10 @@ export interface CarState {
   finishTime: number | null;
   retired: boolean;
   retireReason: string | null;
+  /** passou reto e está fora da pista (segundos que faltam); lado e o que vai acontecer */
+  offTrack: number;
+  offSide: number;
+  offFate: "rejoin" | "stuck";
   /** dano por peça (segundos por volta perdidos); conserta no box */
   dmg: { fw: number; suspF: number; rw: number; suspR: number };
   /** quais peças danificadas trocar na próxima parada */
