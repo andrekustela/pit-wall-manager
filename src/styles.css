@@ -577,3 +577,8 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 @media (max-width: 900px) { .onpanel { left: 8px; right: 8px; top: auto; bottom: 8px; max-height: 45%; } .onpanel .driver { width: auto; } }
 
 .board .name .eng { color: var(--muted); font-size: .85em; text-transform: none; }
+
+/* motores no painel de desenvolvimento */
+.devengines { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.devengines .engrow { margin: 8px 0 0; }
+.devengines .engrow > span:first-child { min-width: 160px; }

@@ -3,12 +3,34 @@ import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, devLapGain } from "../sim/development";
 import { CIRCUITS, getTrack } from "../sim/track";
+import { ENGINE_REPAIR_COST, ENGINE_REPAIR_GAIN } from "../sim/championship";
+import { profileOf } from "../sim/drivers";
 import { esc, teamName } from "./common";
 
 export function devPanelHtml(lobby: LobbyState): string {
   const ch = lobby.champ;
   if (!ch || ch.finished || !ch.dev) return "";
   return `<h2>DESENVOLVIMENTO DO CARRO</h2><div class="box devbox" id="devbox">${devInner(lobby)}</div>`;
+}
+
+/** motores da equipe: saúde de cada um e a revisão (gasta pontos de desenvolvimento) */
+function enginesHtml(lobby: LobbyState, team: string, pts: number): string {
+  const ch = lobby.champ!;
+  if (!ch.engines) return "";
+  const rows = (lobby.lineup[team] ?? [])
+    .map((id) => {
+      const h = ch.engines[id] ?? 1;
+      const cls = h > 0.6 ? "ok" : h > 0.35 ? "warn" : "bad";
+      const full = h >= 0.999;
+      const dead = h <= 0.02;
+      const can = !full && !dead && pts >= ENGINE_REPAIR_COST;
+      const after = Math.min(100, Math.round((h + ENGINE_REPAIR_GAIN) * 100));
+      const label = full ? "MOTOR INTEIRO" : dead ? "QUEBRADO (TROCA NO TREINO)" : `REVISAR · ${ENGINE_REPAIR_COST} pts (vai a ${after}%)`;
+      return `<div class="engrow"><span>${esc(profileOf(id)?.name ?? id)}</span><div class="engbar"><i class="${cls}" style="width:${Math.round(h * 100)}%"></i></div><b class="${cls}">${Math.round(h * 100)}%</b>
+        <button class="btn small ${can ? "primary" : ""}" data-repair="${id}" ${can ? "" : "disabled"}>${label}</button></div>`;
+    })
+    .join("");
+  return `<div class="devengines"><b>MOTORES</b><span class="hint" style="margin:0 0 0 8px">O desgaste passa de uma etapa pra outra. Revisar usa pontos de desenvolvimento em vez de evoluir o carro. Reservas da equipe: ${ch.spares?.[team] ?? 0}.</span>${rows}</div>`;
 }
 
 export function devInner(lobby: LobbyState): string {
@@ -59,5 +81,6 @@ export function devInner(lobby: LobbyState): string {
     </div>
     <div class="devcards">${cards}</div>
     ${log ? `<div class="devlog">${log}</div>` : ""}
+    ${enginesHtml(lobby, team, pts)}
     <details class="devrivals"><summary>Desenvolvimento das equipes (A = aerodinâmica, M = motor, C = chassi)</summary><div>${rivals}</div></details>`;
 }

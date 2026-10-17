@@ -64,6 +64,7 @@ export type ClientMsg =
   | { t: "join"; code: string; name: string; teamName: string }
   | { t: "rejoin"; code: string; token: string }
   | { t: "develop"; area: import("../sim/development").DevArea }
+  | { t: "repairEngine"; carId: string }
   | { t: "newEngine"; carId: string }
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }

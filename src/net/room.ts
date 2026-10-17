@@ -3,7 +3,7 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, swapEngine, type ChampState } from "../sim/championship";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, repairEngine, swapEngine, type ChampState } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -350,7 +350,7 @@ export class Room {
       }
       case "chat": {
         if (this.solo) return;
-        const text = String(msg.text ?? "").replace(/[ -]/g, " ").trim().slice(0, 200);
+        const text = String(msg.text ?? "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 200);
         const now = Date.now();
         if (!text || now - (this.lastChat.get(id) ?? 0) < 400) return; // anti-flood
         this.lastChat.set(id, now);
@@ -374,6 +374,15 @@ export class Room {
         const ch = this.champ;
         if (this.phase !== "podium" || !ch || ch.finished || !p.teamId || !DEV_AREAS.some((a) => a.id === msg.area)) return;
         if (investDev(ch, p.teamId, msg.area, null, Math.random) === null) return;
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
+      case "repairEngine": {
+        // revisa o motor gastando pontos de desenvolvimento (entre as etapas)
+        const ch = this.champ;
+        if (this.phase !== "podium" || !ch || ch.finished || !p.teamId || !this.owns(p, msg.carId)) return;
+        if (!repairEngine(ch, p.teamId, msg.carId)) return;
         this.saveChamp();
         this.broadcastLobby();
         break;
@@ -555,7 +564,7 @@ export class Room {
     if (done) {
       if (this.champ) {
         awardPoints(this.champ, race);
-        aiDevelop(this.champ, new Set([...this.players.values()].map((p) => p.teamId!)), Math.random);
+        aiDevelop(this.champ, new Set([...this.players.values()].map((p) => p.teamId!)), Math.random, this.lineup);
         this.saveChamp();
       }
       this.dispose();

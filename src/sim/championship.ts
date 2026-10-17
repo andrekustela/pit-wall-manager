@@ -141,11 +141,28 @@ export function investDev(ch: ChampState, team: string, area: DevArea, quality: 
   return gain;
 }
 
-/** equipes da IA gastam tudo (engenheiro bom espalha melhor) */
-export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => number) {
+/** revisão do motor entre as etapas: custa pontos de desenvolvimento e devolve saúde */
+export const ENGINE_REPAIR_COST = 2;
+export const ENGINE_REPAIR_GAIN = 0.25;
+
+/** revisa o motor do carro; devolve false se não dava (sem pontos ou motor já inteiro) */
+export function repairEngine(ch: ChampState, team: string, carId: string): boolean {
+  const h = ch.engines[carId] ?? 1;
+  if (h >= 0.999 || h <= 0.02 || (ch.devPts[team] ?? 0) < ENGINE_REPAIR_COST) return false;
+  ch.devPts[team] -= ENGINE_REPAIR_COST;
+  ch.engines[carId] = Math.min(1, h + ENGINE_REPAIR_GAIN);
+  return true;
+}
+
+/** equipes da IA gastam tudo (engenheiro bom espalha melhor); motor muito gasto é revisado antes */
+export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => number, lineup?: Record<string, string[]>) {
   for (const team of Object.keys(ch.devPts)) {
     if (humanTeams.has(team)) continue;
     const q = ch.engineers?.[team]?.quality ?? 0.5;
+    for (const id of lineup?.[team] ?? []) {
+      // engenheiro bom cuida do motor mais cedo
+      while ((ch.engines[id] ?? 1) < 0.35 + q * 0.2 && repairEngine(ch, team, id));
+    }
     for (let guard = 0; guard < 20; guard++) {
       const lv = devOf(ch, team);
       // bom engenheiro sobe a área mais atrasada; ruim escolhe meio no chute
