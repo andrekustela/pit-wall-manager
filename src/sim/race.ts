@@ -54,6 +54,7 @@ export interface RaceOptions {
   teamNames?: Record<string, string>;
   engineers?: Record<string, Engineer>;
   lineup?: import("./drivers").Lineup;
+  dev?: Record<string, import("./development").DevLevels>;
 }
 
 export type RacePhase = "lights" | "racing" | "finished";
@@ -479,7 +480,7 @@ export class Race {
         }
         // motor: desgasta mais na mistura rica/atacando; quase no fim pode quebrar
         const engMult = (c.engine === "rich" ? 2.2 : c.engine === "lean" ? 0.6 : 1) * (c.pace === "push" ? 1.3 : 1) * (c.engineSave ? ENGINE_SAVE.wear : 1);
-        c.engineHealth = Math.max(0, c.engineHealth - (ds / L) * ENGINE_WEAR_PER_LAP * this.wearScale * engMult);
+        c.engineHealth = Math.max(0, c.engineHealth - (ds / L) * ENGINE_WEAR_PER_LAP * this.wearScale * engMult * (c.team.engineWear ?? 1));
         if (c.engineHealth < 0.3 && !this.checkered && this.rng.chance((0.3 - c.engineHealth) * 0.03 * dt)) {
           this.retire(c, "Motor");
           if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.4)) this.deploySafetyCar();
@@ -489,7 +490,7 @@ export class Race {
         if (c.pit === "none") {
           const spec = COMPOUNDS[c.compound];
           c.wear +=
-            (ds / L) * spec.wearPerLap * PACE[c.pace].wear * c.driver.tyreCare * this.wearScale *
+            (ds / L) * spec.wearPerLap * PACE[c.pace].wear * c.driver.tyreCare * (c.team.tyreWear ?? 1) * this.wearScale *
             wetWear(c.compound, this.wet) * (this.sc.active ? 0.5 : 1);
         }
         if (c.pit === "none" && c.spin <= 0) this.maybeIncident(c, dt);

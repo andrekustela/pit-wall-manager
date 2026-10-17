@@ -3,6 +3,8 @@
 import { DRIVERS, TEAMS } from "./data";
 import { profileOf, toDriver, type Lineup } from "./drivers";
 import { Rng } from "./rng";
+import { devLapGain, devWear, type DevLevels } from "./development";
+import { getTrack } from "./track";
 import type { Driver, Team } from "./types";
 
 export interface Engineer {
@@ -17,17 +19,28 @@ export interface EntrantOptions {
   teamNames?: Record<string, string>;
   /** pilotos sorteados de cada equipe (sem isso, usa a escalação fixa antiga) */
   lineup?: Lineup;
+  /** níveis de desenvolvimento de cada equipe (campeonato) */
+  dev?: Record<string, DevLevels>;
+  trackIndex?: number;
 }
 
 /** no modo igual todo mundo tem carro e piloto equivalentes */
 const EQUAL_SKILL = 0.25;
 
 export function buildEntrants(opts: EntrantOptions): { teams: Team[]; drivers: Driver[] } {
-  const teams = TEAMS.map((t) => ({
-    ...t,
-    name: opts.teamNames?.[t.id]?.trim() || t.name,
-    carPace: opts.equalCars ? 0 : t.carPace,
-  }));
+  const teams = TEAMS.map((t) => {
+    const base = opts.equalCars ? 0 : t.carPace;
+    const lv = opts.dev?.[t.id];
+    if (!lv) return { ...t, name: opts.teamNames?.[t.id]?.trim() || t.name, carPace: base };
+    const wear = devWear(lv);
+    return {
+      ...t,
+      name: opts.teamNames?.[t.id]?.trim() || t.name,
+      carPace: base - devLapGain(getTrack(opts.trackIndex ?? 0), lv),
+      tyreWear: wear.tyre,
+      engineWear: wear.engine,
+    };
+  });
   if (opts.lineup) {
     // pilotos da base: no modo "carros iguais" só o carro é igual; o piloto faz a diferença
     const drivers = TEAMS.flatMap((t) => (opts.lineup![t.id] ?? []).map((id) => toDriver(profileOf(id)!, t.id)));

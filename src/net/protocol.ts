@@ -61,6 +61,7 @@ export type ClientMsg =
   | { t: "create"; name: string; teamName: string }
   | { t: "join"; code: string; name: string; teamName: string }
   | { t: "rejoin"; code: string; token: string }
+  | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
   | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; realDrivers?: boolean }

@@ -1,8 +1,9 @@
-// Treino livre e classificação (volta única).
+// Treino livre e classificação (Q1, Q2, Q3).
 import { buildEntrants, type Engineer } from "./entrants";
 import { Rng } from "./rng";
 import { getTrack } from "./track";
 import type { Lineup } from "./drivers";
+import type { DevLevels } from "./development";
 import { aiTuning, clampTuning, makeConditions, qualiLap, type QualiLap } from "./tuning";
 import type { Tuning } from "./types";
 import { makeWeather } from "./weather";
@@ -17,6 +18,7 @@ export interface WeekendInfo {
   teamNames: Record<string, string>;
   engineers: Record<string, Engineer>;
   lineup?: Lineup;
+  dev?: Record<string, DevLevels>;
 }
 
 /** condições da pista no fim de semana (vento, ondulação, temperatura) */

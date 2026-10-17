@@ -1,5 +1,6 @@
 // Campeonato: uma etapa em cada pista, pontos estilo F1.
 import type { Engineer } from "./entrants";
+import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type DevArea, type DevLevels } from "./development";
 import type { Race } from "./race";
 import { CIRCUITS } from "./track";
 
@@ -22,6 +23,12 @@ export interface ChampState {
   /** engenheiros sorteados no início, valem pro campeonato todo */
   engineers: Record<string, Engineer> | null;
   finished: boolean;
+  /** níveis de desenvolvimento de cada equipe */
+  dev: Record<string, DevLevels>;
+  /** pontos de desenvolvimento pra gastar */
+  devPts: Record<string, number>;
+  /** o que aconteceu nos investimentos desde a última corrida */
+  devLog: Record<string, { area: DevArea; gain: number }[]>;
 }
 
 export function newChampionship(): ChampState {
@@ -33,6 +40,9 @@ export function newChampionship(): ChampState {
     results: [],
     engineers: null,
     finished: false,
+    dev: {},
+    devPts: {},
+    devLog: {},
   };
 }
 
@@ -51,6 +61,45 @@ export function awardPoints(ch: ChampState, race: Race) {
     winnerTeam: order[0].team.id,
   });
   if (ch.results.length >= ch.rounds.length) ch.finished = true;
+  if (ch.finished) return;
+  // pontos de desenvolvimento: quem está atrás no campeonato ganha mais
+  ch.devLog = {};
+  const teamIds = [...new Set(race.cars.map((c) => c.team.id))].sort((a, b) => (ch.teamPts[b] ?? 0) - (ch.teamPts[a] ?? 0));
+  teamIds.forEach((id, rank) => (ch.devPts[id] = (ch.devPts[id] ?? 0) + roundDevPoints(rank, teamIds.length)));
+}
+
+export function devOf(ch: ChampState, team: string): DevLevels {
+  return (ch.dev[team] ??= { ...NO_DEV });
+}
+
+/** investe numa área; devolve quanto subiu (0, 1, 2) ou null se não dava */
+export function investDev(ch: ChampState, team: string, area: DevArea, quality: number | null, rnd: () => number): number | null {
+  const lv = devOf(ch, team);
+  if (lv[area] >= DEV_MAX) return null;
+  const cost = devCost(lv[area]);
+  if ((ch.devPts[team] ?? 0) < cost) return null;
+  ch.devPts[team] -= cost;
+  const gain = Math.min(DEV_MAX - lv[area], rollUpgrade(rnd, quality));
+  lv[area] += gain;
+  (ch.devLog[team] ??= []).push({ area, gain });
+  return gain;
+}
+
+/** equipes da IA gastam tudo (engenheiro bom espalha melhor) */
+export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => number) {
+  for (const team of Object.keys(ch.devPts)) {
+    if (humanTeams.has(team)) continue;
+    const q = ch.engineers?.[team]?.quality ?? 0.5;
+    for (let guard = 0; guard < 20; guard++) {
+      const lv = devOf(ch, team);
+      // bom engenheiro sobe a área mais atrasada; ruim escolhe meio no chute
+      const areas = DEV_AREAS.map((a) => a.id).filter((a) => lv[a] < DEV_MAX && devCost(lv[a]) <= (ch.devPts[team] ?? 0));
+      if (!areas.length) break;
+      areas.sort((a, b) => lv[a] - lv[b]);
+      const pick = rnd() < q ? areas[0] : areas[Math.floor(rnd() * areas.length)];
+      investDev(ch, team, pick, q, rnd);
+    }
+  }
 }
 
 /** tabela ordenada (empate: quem tem mais vitórias, depois melhor resultado) */

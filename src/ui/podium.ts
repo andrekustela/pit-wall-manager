@@ -3,9 +3,11 @@ import type { LobbyState } from "../net/protocol";
 import { engineerLabel } from "../sim/entrants";
 import type { Race } from "../sim/race";
 import type { CarState } from "../sim/types";
+import type { DevArea } from "../sim/development";
 import { esc, updateWaitBar } from "./common";
 import { resultsTable } from "./results";
 import { bindTelemetry, telemetryHtml } from "./telemetry";
+import { devInner, devPanelHtml } from "./devPanel";
 import { POINTS, standings } from "../sim/championship";
 import { CIRCUITS } from "../sim/track";
 
@@ -43,12 +45,18 @@ export class PodiumScreen {
           </div>
         </div>
         ${champSection(race, lobby)}
+        ${devPanelHtml(lobby)}
         <h2>RESULTADO COMPLETO · ${esc(race.track.name)} · ${race.laps} VOLTAS</h2>
         ${resultsTable(race, me.teamId ?? "")}
         ${telemetryHtml(race, me.teamId ?? "")}
         <button class="go" id="pd-go">${goLabel(lobby)}</button>
       </div></div>`;
     bindTelemetry(root);
+    root.addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-dev]");
+      if (b && !b.disabled) conn.send({ t: "develop", area: b.dataset.dev as DevArea });
+    });
+    this.root = root;
     const go = root.querySelector<HTMLButtonElement>("#pd-go")!;
     go.addEventListener("click", () => {
       this.ready = !this.ready;
@@ -185,8 +193,16 @@ export class PodiumScreen {
     }
   }
 
+  private root: HTMLElement | null = null;
+
   update(lobby: LobbyState) {
     updateWaitBar(lobby);
+    const box = this.root?.querySelector("#devbox");
+    if (box && lobby.champ) {
+      const open = box.querySelector("details")?.open;
+      box.innerHTML = devInner(lobby);
+      if (open) box.querySelector("details")!.open = true;
+    }
   }
 
   destroy() {

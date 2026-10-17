@@ -3,7 +3,8 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
-import { awardPoints, newChampionship, type ChampState } from "../sim/championship";
+import { aiDevelop, awardPoints, investDev, newChampionship, type ChampState } from "../sim/championship";
+import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
@@ -129,6 +130,10 @@ export class Room {
     this.reserves = s.reserves;
     this.swapUsed = new Set(s.swapUsed);
     this.champ = s.champ;
+    // save antigo (antes do desenvolvimento existir)
+    this.champ.dev ??= {};
+    this.champ.devPts ??= {};
+    this.champ.devLog ??= {};
     this.champ.round++;
     this.startWeekend();
   }
@@ -335,6 +340,15 @@ export class Room {
           laps.forEach((lap, lapIndex) => this.send(id, { t: "practice", carId, lapIndex, lap }));
         break;
       }
+      case "develop": {
+        // investe no carro entre as etapas do campeonato
+        const ch = this.champ;
+        if (this.phase !== "podium" || !ch || ch.finished || !p.teamId || !DEV_AREAS.some((a) => a.id === msg.area)) return;
+        if (investDev(ch, p.teamId, msg.area, null, Math.random) === null) return;
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
       case "reroll":
         // host sorteia os pilotos de novo (só no lobby)
         if (!isHost || this.phase !== "lobby") return;
@@ -399,6 +413,7 @@ export class Room {
       teamNames,
       engineers,
       lineup: this.lineup,
+      dev: ch ? JSON.parse(JSON.stringify(ch.dev)) : undefined,
     };
     this.setPhase("practice");
   }
@@ -457,6 +472,7 @@ export class Room {
       teamNames: w.teamNames,
       engineers: w.engineers,
       lineup: w.lineup,
+      dev: w.dev,
     };
     this.race = new Race(opts);
     this.lastStart = opts;
@@ -495,6 +511,7 @@ export class Room {
     if (done) {
       if (this.champ) {
         awardPoints(this.champ, race);
+        aiDevelop(this.champ, new Set([...this.players.values()].map((p) => p.teamId!)), Math.random);
         this.saveChamp();
       }
       this.dispose();

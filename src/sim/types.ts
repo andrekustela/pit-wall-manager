@@ -12,6 +12,9 @@ export interface Team {
   accent: string;
   /** segundos por volta mais lento que o melhor carro */
   carPace: number;
+  /** desenvolvimento do campeonato: multiplicadores de desgaste */
+  tyreWear?: number;
+  engineWear?: number;
 }
 
 export interface Driver {
