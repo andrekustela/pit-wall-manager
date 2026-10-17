@@ -619,3 +619,10 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
   .loginscreen { flex-direction: column; gap: 18px; }
   .loginlogo { width: min(240px, 60vw); }
 }
+
+/* menu: logo e frase no centro; botão de instalar no canto, sem empurrar o logo */
+.menuhead { position: relative; justify-content: center; }
+.menuhead #m-install { position: absolute; right: 0; top: 0; }
+.menulogo { margin: 0 auto; }
+.menuhead + .sub { text-align: center; }
+@media (max-width: 700px) { .menuhead { flex-direction: column; } .menuhead #m-install { position: static; } }
