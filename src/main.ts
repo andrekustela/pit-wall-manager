@@ -16,11 +16,13 @@ import { PracticeScreen } from "./ui/practice";
 import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
+import { HqScreen } from "./ui/hq";
 import { ChatWidget } from "./ui/chat";
 import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
 import { showLogin } from "./ui/login";
 import { setupInstall } from "./ui/install";
+import { mergeCloudSaves, type SaveMap } from "./ui/saves";
 import { POINTS, standings } from "./sim/championship";
 
 interface Screen {
@@ -73,8 +75,8 @@ class App {
       this.screenPhase = "menu";
       showLogin(app, (guest) => {
         this.guest = guest;
-        // campeonato salvo na nuvem vale mais que o do navegador
-        if (account.profile?.champ) storeSet("pwm.champ", JSON.stringify(account.profile.champ));
+        // campeonatos salvos na nuvem entram na lista do navegador (o mais novo vence)
+        mergeCloudSaves(account.profile?.champs as SaveMap | null);
         if (account.profile) {
           storeSet("pwm.name", account.profile.name);
           storeSet("pwm.team", account.profile.team_name);
@@ -232,6 +234,11 @@ class App {
           sound.fanfare();
         }
         break;
+      case "hq":
+        // sede da equipe (entre as etapas do campeonato)
+        if (l.champ) this.screen = new HqScreen(app, conn, l);
+        if (AUTO) setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
+        break;
     }
     window.scrollTo(0, 0);
     updateWaitBar(l); // online: painel de quem já está pronto
@@ -375,6 +382,7 @@ class App {
   setupInstall();
   await document.fonts?.ready;
   await account.restore().catch(() => false);
+  mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
   new HelpWidget(() => appInst.helpTab());
   // áudio só é liberado depois de um clique; aproveita pra fazer o "tic" dos botões

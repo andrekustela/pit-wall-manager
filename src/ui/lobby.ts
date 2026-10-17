@@ -163,6 +163,8 @@ export class LobbyScreen {
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas entre as ${CIRCUITS.length}, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+        ${lobby.champMode ? `<div style="min-width:240px"><div class="hint" style="margin:0 0 6px">Nome do campeonato</div>
+          <input class="txt" id="l-cname" maxlength="40" placeholder="Ex.: Copa dos Amigos 2026" value="${esc(lobby.champName)}" ${isHost ? "" : "disabled"}></div>` : ""}
         ${lobby.champMode ? `<div><div class="hint" style="margin:0 0 6px">Quantas pistas no campeonato</div>
           <div class="seg pctseg">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((p) => `<button data-pct="${p}" class="${p === lobby.champPct ? "on" : ""}" ${isHost ? "" : "disabled"} title="${champRounds(p)} etapas">${p}%</button>`).join("")}</div>
           <div class="hint" style="margin:4px 0 0">${champRounds(lobby.champPct)} etapas</div></div>` : ""}
@@ -181,6 +183,9 @@ export class LobbyScreen {
     );
     root.querySelectorAll<HTMLButtonElement>("[data-pct]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "options", champPct: Number(b.dataset.pct) })),
+    );
+    root.querySelector<HTMLInputElement>("#l-cname")?.addEventListener("change", (e) =>
+      this.conn.send({ t: "options", champName: (e.target as HTMLInputElement).value }),
     );
     root.querySelector<HTMLInputElement>("#l-equal")!.addEventListener("change", (e) =>
       this.conn.send({ t: "options", equalCars: (e.target as HTMLInputElement).checked }),

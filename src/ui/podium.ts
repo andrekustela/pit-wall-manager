@@ -7,9 +7,9 @@ import type { DevArea } from "../sim/development";
 import { esc, updateWaitBar } from "./common";
 import { resultsTable } from "./results";
 import { bindTelemetry, telemetryHtml } from "./telemetry";
-import { devInner, devPanelHtml } from "./devPanel";
+
 import { POINTS, standings } from "../sim/championship";
-import { CIRCUITS } from "../sim/track";
+
 
 const W = 320, H = 180;
 
@@ -45,7 +45,7 @@ export class PodiumScreen {
           </div>
         </div>
         ${champSection(race, lobby)}
-        ${devPanelHtml(lobby)}
+
         <h2>RESULTADO COMPLETO · ${esc(race.track.name)} · ${race.laps} VOLTAS</h2>
         ${resultsTable(race, me.teamId ?? "")}
         ${telemetryHtml(race, me.teamId ?? "")}
@@ -58,7 +58,7 @@ export class PodiumScreen {
       const r = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-repair]");
       if (r && !r.disabled) conn.send({ t: "repairEngine", carId: r.dataset.repair! });
     });
-    this.root = root;
+
     const go = root.querySelector<HTMLButtonElement>("#pd-go")!;
     go.addEventListener("click", () => {
       this.ready = !this.ready;
@@ -195,16 +195,10 @@ export class PodiumScreen {
     }
   }
 
-  private root: HTMLElement | null = null;
+
 
   update(lobby: LobbyState) {
     updateWaitBar(lobby);
-    const box = this.root?.querySelector("#devbox");
-    if (box && lobby.champ) {
-      const open = box.querySelector("details")?.open;
-      box.innerHTML = devInner(lobby);
-      if (open) box.querySelector("details")!.open = true;
-    }
   }
 
   destroy() {
@@ -214,8 +208,8 @@ export class PodiumScreen {
 }
 
 function goLabel(lobby: LobbyState): string {
-  const ch = lobby.champ;
-  if (ch && !ch.finished) return `PRÓXIMA ETAPA: ${CIRCUITS[ch.rounds[ch.round + 1]].name.toUpperCase()} ▶`;
+  // campeonato: o pódio leva pra sede da equipe (troféus, fábrica, mecânicos...)
+  if (lobby.champ) return "IR PRA SEDE DA EQUIPE ▶";
   return lobby.solo ? "NOVO FIM DE SEMANA ▶" : "VOLTAR PRO LOBBY ▶";
 }
 

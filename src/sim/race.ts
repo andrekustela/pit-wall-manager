@@ -61,6 +61,8 @@ export interface RaceOptions {
   engineStart?: Record<string, number>;
   /** multiplicador do desgaste do motor (no campeonato gasta menos por corrida) */
   engineWearMult?: number;
+  /** nível da equipe de mecânicos de cada equipe (0..5): pit stop mais rápido e com menos erro */
+  crew?: Record<string, number>;
 }
 
 export type RacePhase = "lights" | "racing" | "finished";
@@ -73,6 +75,19 @@ const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
 const OFF_RATE = 1.1e-4;
 /** chance de um problema mecânico aparecer (por carro por segundo): ~4% por corrida */
 const FAULT_RATE = 2.8e-5;
+
+/** nível padrão da equipe de mecânicos (fora do campeonato ou sem dado) */
+export const CREW_DEFAULT = 2;
+export const CREW_MAX = 5;
+/** chance de dar errado no pit stop por nível de mecânicos (nível 0 ≈ 10%, nível 5 ≈ 1,5%) */
+export function crewErrorChance(level: number): number {
+  return Math.max(0.01, 0.1 - level * 0.017);
+}
+/** tempo médio de troca de pneu (s) por nível */
+export function crewStopTime(level: number): number {
+  const lo = 2.9 - level * 0.18;
+  return lo + (1.0 - level * 0.12) / 2;
+}
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
 const CAR_L = 4.4;
@@ -1083,9 +1098,24 @@ export class Race {
           return;
         }
         c.pit = "stopped";
-        // troca de pneu e reabastecimento acontecem ao mesmo tempo
-        let tyres = this.rng.range(2.0, 2.9);
-        if (this.rng.chance(0.06)) tyres += this.rng.range(2.5, 6);
+        // troca de pneu e reabastecimento acontecem ao mesmo tempo; a equipe de
+        // mecânicos (nível 0..5) define a velocidade e a chance de erro
+        const crew = this.crewLevel(c.team.id);
+        const lo = 2.9 - crew * 0.18;
+        let tyres = this.rng.range(lo, lo + 1.0 - crew * 0.12);
+        if (this.rng.chance(crewErrorChance(crew))) {
+          const team = c.isHuman ? c.team.id : undefined;
+          if (this.rng.chance(0.75)) {
+            const lost = this.rng.range(2.5, 6);
+            tyres += lost;
+            const what = ["a roda traseira esquerda travou", "a porca da dianteira direita espanou", "o macaco da frente falhou", "a roda traseira direita não encaixou"][Math.floor(this.rng.next() * 4)];
+            this.log(`Parada lenta de ${c.driver.short}: ${what}! (+${lost.toFixed(1)}s)`, c.isHuman || c.position <= 6, team, "pitin");
+          } else {
+            // soltou o carro na frente de outro: punição
+            c.penalty += 5;
+            this.log(`${c.driver.name}: liberação insegura no box! Punição de 5 segundos.`, true, team, "penalty");
+          }
+        }
         const add = Math.min(c.boxFuel, FUEL_MAX - c.fuel);
         const refuel = add > 0.5 ? add / REFUEL_RATE + this.rng.range(0.4, 0.8) : 0;
         const mate = this.cars.find((o) => o !== c && o.team.id === c.team.id && o.pit === "stopped");
@@ -1237,6 +1267,14 @@ export class Race {
       return score(b) - score(a);
     });
     sorted.forEach((c, i) => (c.position = i + 1));
+  }
+
+  /** nível dos mecânicos da equipe (a IA usa o engenheiro como referência fora do campeonato) */
+  private crewLevel(team: string): number {
+    const v = this.opts.crew?.[team];
+    if (v !== undefined) return Math.max(0, Math.min(CREW_MAX, v));
+    const q = this.engineers[team]?.quality;
+    return q === null || q === undefined ? CREW_DEFAULT : Math.round(1 + q * 3);
   }
 
   private mate(c: CarState): CarState | null {

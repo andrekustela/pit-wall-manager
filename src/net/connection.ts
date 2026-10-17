@@ -2,8 +2,7 @@
 // ou WebSocket (online, sala roda no servidor). A interface é a mesma.
 import type { ClientMsg, ServerMsg } from "./protocol";
 import { Room, type ChampSave } from "./room";
-import { storeSet } from "../ui/common";
-import { account } from "./account";
+import { putSave } from "../ui/saves";
 
 export interface Connection {
   send(msg: ClientMsg): void;
@@ -21,9 +20,9 @@ export class LocalConnection implements Connection {
   constructor(name: string, teamName: string, resume?: ChampSave) {
     // entrega assíncrona, igual seria pela rede
     this.room = new Room("SOLO", (_pid, msg) => queueMicrotask(() => this.onMessage(msg)), true);
+    // cada campeonato tem seu save (no navegador e na conta)
     this.room.onSave = (s) => {
-      storeSet("pwm.champ", s ? JSON.stringify(s) : "");
-      account.saveChamp(s); // na nuvem também (se tiver conta)
+      if (s) putSave(s);
     };
     this.id = this.room.join(resume?.name ?? name, resume?.teamName ?? teamName)!;
     if (resume) queueMicrotask(() => this.room.resume(this.id, resume));

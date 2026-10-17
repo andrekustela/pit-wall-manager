@@ -1,7 +1,7 @@
 // Campeonato: uma etapa em cada pista, pontos estilo F1.
 import type { Engineer } from "./entrants";
 import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type DevArea, type DevLevels } from "./development";
-import type { Race } from "./race";
+import { CREW_DEFAULT, CREW_MAX, type Race } from "./race";
 import { TEAMS } from "./data";
 import { CIRCUITS } from "./track";
 
@@ -13,6 +13,10 @@ export interface RoundResult {
   order: string[];
   retired: string[];
   winnerTeam: string;
+  /** quem largou na pole */
+  pole?: string;
+  /** volta mais rápida (piloto e tempo) */
+  fastest?: { carId: string; time: number } | null;
 }
 
 export interface ChampState {
@@ -36,6 +40,27 @@ export interface ChampState {
   spares: Record<string, number>;
   /** posições de punição no grid da próxima corrida (motor novo sem reserva) */
   gridPen: Record<string, number>;
+  /** nível da equipe de mecânicos (0..5) de cada equipe */
+  crew: Record<string, number>;
+  /** nome que o jogador deu pro campeonato e um id pra achar o save */
+  name?: string;
+  id?: string;
+}
+
+/** custo (pontos de desenvolvimento) de subir os mecânicos do nível atual pro próximo */
+export function crewCost(level: number): number {
+  return 2 + level;
+}
+
+/** treina a equipe de mecânicos (sobe 1 nível); false se não dava */
+export function upgradeCrew(ch: ChampState, team: string): boolean {
+  ch.crew ??= {};
+  const lv = ch.crew[team] ?? CREW_DEFAULT;
+  const cost = crewCost(lv);
+  if (lv >= CREW_MAX || (ch.devPts[team] ?? 0) < cost) return false;
+  ch.devPts[team] -= cost;
+  ch.crew[team] = lv + 1;
+  return true;
 }
 
 /** no campeonato o motor gasta menos por corrida (dura umas 6 etapas no ritmo normal) */
@@ -97,6 +122,8 @@ export function newChampionship(pct = 100, rnd: () => number = Math.random): Cha
     engines: {},
     spares: Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(n)])),
     gridPen: {},
+    crew: Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT])),
+    id: Math.random().toString(36).slice(2, 10),
   };
 }
 
@@ -115,6 +142,8 @@ export function awardPoints(ch: ChampState, race: Race) {
     order: order.map((c) => c.id),
     retired: order.filter((c) => c.retired).map((c) => c.id),
     winnerTeam: order[0].team.id,
+    pole: race.opts.grid?.[0],
+    fastest: race.fastestLap,
   });
   if (ch.results.length >= ch.rounds.length) ch.finished = true;
   if (ch.finished) return;
@@ -163,6 +192,8 @@ export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => nu
       // engenheiro bom cuida do motor mais cedo
       while ((ch.engines[id] ?? 1) < 0.35 + q * 0.2 && repairEngine(ch, team, id));
     }
+    // engenheiro bom também investe nos mecânicos (às vezes)
+    if ((ch.crew?.[team] ?? CREW_DEFAULT) < 1 + Math.round(q * 4) && rnd() < 0.35 + q * 0.4) upgradeCrew(ch, team);
     for (let guard = 0; guard < 20; guard++) {
       const lv = devOf(ch, team);
       // bom engenheiro sobe a área mais atrasada; ruim escolhe meio no chute

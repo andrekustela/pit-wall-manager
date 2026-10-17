@@ -7,7 +7,8 @@ import type { CarSetup, Command, Tuning } from "../sim/types";
 import type { Forecast } from "../sim/weather";
 import type { QualiResult } from "../sim/weekend";
 
-export type Phase = "lobby" | "practice" | "quali" | "strategy" | "race" | "podium";
+/** hq = sede da equipe, entre uma etapa e outra do campeonato */
+export type Phase = "lobby" | "practice" | "quali" | "strategy" | "race" | "podium" | "hq";
 
 export interface LobbyPlayer {
   id: string;
@@ -47,6 +48,8 @@ export interface LobbyState {
   champMode: boolean;
   /** porcentagem das pistas que entram no campeonato (sorteadas) */
   champPct: number;
+  /** nome do campeonato (o jogador escolhe) */
+  champName: string;
   /** campeonato em andamento (ou o que acabou de terminar) */
   champ: ChampState | null;
   /** pilotos reais (lendas) em vez dos fictícios */
@@ -65,11 +68,12 @@ export type ClientMsg =
   | { t: "rejoin"; code: string; token: string; v?: string }
   | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "repairEngine"; carId: string }
+  | { t: "upgradeCrew" }
   | { t: "newEngine"; carId: string }
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; realDrivers?: boolean }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; champName?: string; realDrivers?: boolean }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }

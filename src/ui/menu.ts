@@ -4,6 +4,8 @@ import { CIRCUITS } from "../sim/track";
 import { account } from "../net/account";
 import { statsHtml } from "./login";
 import { mountInstallButton } from "./install";
+import { deleteSave, listSaves, renameSave } from "./saves";
+import { confirmDialog } from "./confirm";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -32,18 +34,26 @@ export interface MenuChoice {
 export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, onLogout?: () => void) {
   const name = account.profile?.name ?? storeGet("pwm.name");
   const team = account.profile?.team_name ?? storeGet("pwm.team");
-  const save = loadJson<ChampSave>("pwm.champ");
+  const saves = listSaves();
   const sess = loadJson<Session>("pwm.session");
-  const ch = save?.v === 1 ? save.champ : null;
-  const cont =
-    ch || sess
-      ? `<div class="box resumebox" style="margin-top:12px">
-        ${ch ? `<div class="resumerow"><div><b>CAMPEONATO SALVO</b><div class="hint" style="margin:2px 0 0">${esc(save!.name)} · próxima etapa ${ch.round + 2}/${ch.rounds.length}: ${esc(CIRCUITS[ch.rounds[ch.round + 1]]?.name ?? "")}</div></div>
-          <div class="row-btns"><button class="btn" id="m-drop">DESCARTAR</button><button class="btn primary" id="m-resume">CONTINUAR ▶</button></div></div>` : ""}
-        ${sess ? `<div class="resumerow"><div><b>SALA ONLINE ${esc(sess.code)}</b><div class="hint" style="margin:2px 0 0">A conexão caiu? Volte pro mesmo lugar (a IA cuidou do seu carro enquanto isso).</div></div>
-          <div class="row-btns"><button class="btn" id="m-forget">ESQUECER</button><button class="btn primary" id="m-rejoin">VOLTAR PRA SALA ▶</button></div></div>` : ""}
-      </div>`
-      : "";
+  const champRows = saves
+    .map((s) => {
+      const ch = s.champ;
+      const done = ch.results.length;
+      const next = ch.rounds[ch.round + 1];
+      const when = s.updated ? new Date(s.updated).toLocaleDateString("pt-BR") : "";
+      const status = ch.finished
+        ? `🏆 Concluído · ${ch.rounds.length} etapas`
+        : `Etapa ${done} de ${ch.rounds.length} feita · próxima: ${esc(CIRCUITS[next]?.name ?? "")}`;
+      return `<div class="resumerow champrow" data-cid="${esc(ch.id)}"><div><b>${esc(ch.name ?? "Campeonato")}</b>
+          <div class="hint" style="margin:2px 0 0">${status} · ${esc(s.name)}${s.teamName ? ` (${esc(s.teamName)})` : ""}${when ? ` · ${when}` : ""}</div></div>
+          <div class="row-btns"><button class="btn small" data-crename>RENOMEAR</button><button class="btn small" data-cdel>APAGAR</button>
+          <button class="btn small primary" data-cplay>${ch.finished ? "VER TROFÉUS ▶" : "CONTINUAR ▶"}</button></div></div>`;
+    })
+    .join("");
+  const cont = `${saves.length ? `<div class="box resumebox" style="margin-top:12px"><h3 style="margin:0 0 4px">MEUS CAMPEONATOS</h3>${champRows}</div>` : ""}
+    ${sess ? `<div class="box resumebox" style="margin-top:12px"><div class="resumerow"><div><b>SALA ONLINE ${esc(sess.code)}</b><div class="hint" style="margin:2px 0 0">A conexão caiu? Volte pro mesmo lugar (a IA cuidou do seu carro enquanto isso).</div></div>
+          <div class="row-btns"><button class="btn" id="m-forget">ESQUECER</button><button class="btn primary" id="m-rejoin">VOLTAR PRA SALA ▶</button></div></div></div>` : ""}`;
   root.innerHTML = `
     <div class="screen"><div class="wrap" style="max-width:720px">
       <div class="menuhead"><img class="menulogo" src="/brand/logo.png" alt="Pit Wall Manager"><div id="m-install"></div></div>
@@ -83,12 +93,26 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     if (account.profile) return { name: account.profile.name || "Engenheiro", teamName: account.profile.team_name };
     return { name: n || "Engenheiro", teamName: t };
   };
-  root.querySelector("#m-resume")?.addEventListener("click", () => onChoose({ mode: "resume", ...get(), save: save! }));
-  root.querySelector("#m-rejoin")?.addEventListener("click", () => onChoose({ mode: "rejoin", ...get(), code: sess!.code, token: sess!.token }));
-  root.querySelector("#m-drop")?.addEventListener("click", () => {
-    storeSet("pwm.champ", "");
-    showMenu(root, onChoose);
+  // meus campeonatos: continuar, renomear, apagar
+  root.querySelectorAll<HTMLElement>(".champrow").forEach((row) => {
+    const id = row.dataset.cid!;
+    const save = saves.find((s) => s.champ.id === id)!;
+    row.querySelector("[data-cplay]")!.addEventListener("click", () => onChoose({ mode: "resume", ...get(), save }));
+    row.querySelector("[data-crename]")!.addEventListener("click", () => {
+      const n = window.prompt("Novo nome do campeonato:", save.champ.name ?? "");
+      if (n !== null && n.trim()) {
+        renameSave(id, n);
+        showMenu(root, onChoose, onLogout);
+      }
+    });
+    row.querySelector("[data-cdel]")!.addEventListener("click", async () => {
+      const ok = await confirmDialog({ title: "Apagar campeonato", icon: "🗑", text: `Apagar "${save.champ.name ?? "Campeonato"}"? Não dá pra desfazer.`, ok: "APAGAR", danger: true });
+      if (!ok) return;
+      deleteSave(id);
+      showMenu(root, onChoose, onLogout);
+    });
   });
+  root.querySelector("#m-rejoin")?.addEventListener("click", () => onChoose({ mode: "rejoin", ...get(), code: sess!.code, token: sess!.token }));
   root.querySelector("#m-forget")?.addEventListener("click", () => {
     storeSet("pwm.session", "");
     showMenu(root, onChoose);

@@ -3,7 +3,8 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, repairEngine, swapEngine, type ChampState } from "../sim/championship";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, repairEngine, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
+import { CREW_DEFAULT } from "../sim/race";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -45,6 +46,8 @@ export type Send = (playerId: string, msg: ServerMsg) => void;
 /** campeonato solo salvo no navegador (pra continuar depois) */
 export interface ChampSave {
   v: 1;
+  /** quando foi salvo (ms) */
+  updated?: number;
   champ: ChampState;
   lineup: Lineup;
   reserves: Record<string, string>;
@@ -66,6 +69,7 @@ export class Room {
   equalCars = false;
   champMode = false;
   champPct = 10;
+  champName = "";
   private champ: ChampState | null = null;
   private weekend: WeekendInfo | null = null;
   private race: Race | null = null;
@@ -102,9 +106,10 @@ export class Room {
     const ch = this.champ;
     const p = [...this.players.values()][0];
     if (!this.onSave || !ch || !p?.teamId) return;
-    if (ch.finished) return this.onSave(null);
+    // campeonato que acabou também fica salvo (vira histórico de troféus)
     this.onSave({
       v: 1,
+      updated: Date.now(),
       champ: ch,
       lineup: this.lineup,
       reserves: this.reserves,
@@ -118,7 +123,7 @@ export class Room {
     });
   }
 
-  /** continua um campeonato salvo: já começa a próxima etapa */
+  /** continua um campeonato salvo: abre na sede da equipe (de lá vai pra próxima etapa) */
   resume(id: string, s: ChampSave) {
     const p = this.players.get(id);
     if (!p || this.phase !== "lobby") return;
@@ -138,8 +143,11 @@ export class Room {
     this.champ.engines ??= {};
     this.champ.spares ??= {};
     this.champ.gridPen ??= {};
-    this.champ.round++;
-    this.startWeekend();
+    this.champ.crew ??= Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT]));
+    this.champ.id ??= Math.random().toString(36).slice(2, 10);
+    this.champName = this.champ.name ?? "";
+    // o save é feito entre uma etapa e outra: volta pra sede (o "pronto" de lá avança a etapa)
+    this.setPhase("hq");
   }
 
   private teamDrivers(teamId: string | null): string[] {
@@ -262,6 +270,7 @@ export class Room {
         if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex]) this.trackIndex = msg.trackIndex;
         if (msg.equalCars !== undefined) this.equalCars = !!msg.equalCars;
         if (msg.champ !== undefined) this.champMode = !!msg.champ;
+        if (msg.champName !== undefined) this.champName = clean(String(msg.champName), 40);
         if (msg.champPct !== undefined && [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(msg.champPct)) this.champPct = msg.champPct;
         if (msg.realDrivers !== undefined) this.realDrivers = !!msg.realDrivers;
         this.broadcastLobby();
@@ -271,6 +280,7 @@ export class Room {
         if ([...this.players.values()].some((o) => !o.teamId))
           return this.send(id, { t: "error", msg: "Todo mundo precisa escolher uma equipe." });
         this.champ = this.champMode ? newChampionship(this.champPct) : null;
+        if (this.champ) this.champ.name = this.champName || `Campeonato ${new Date().toLocaleDateString("pt-BR")}`;
         this.startWeekend();
         break;
       case "practiceLap": {
@@ -372,7 +382,7 @@ export class Room {
       case "develop": {
         // investe no carro entre as etapas do campeonato
         const ch = this.champ;
-        if (this.phase !== "podium" || !ch || ch.finished || !p.teamId || !DEV_AREAS.some((a) => a.id === msg.area)) return;
+        if (!this.betweenRounds() || !ch || ch.finished || !p.teamId || !DEV_AREAS.some((a) => a.id === msg.area)) return;
         if (investDev(ch, p.teamId, msg.area, null, Math.random) === null) return;
         this.saveChamp();
         this.broadcastLobby();
@@ -381,8 +391,17 @@ export class Room {
       case "repairEngine": {
         // revisa o motor gastando pontos de desenvolvimento (entre as etapas)
         const ch = this.champ;
-        if (this.phase !== "podium" || !ch || ch.finished || !p.teamId || !this.owns(p, msg.carId)) return;
+        if (!this.betweenRounds() || !ch || ch.finished || !p.teamId || !this.owns(p, msg.carId)) return;
         if (!repairEngine(ch, p.teamId, msg.carId)) return;
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
+      case "upgradeCrew": {
+        // treina a equipe de mecânicos (pit stop mais rápido e com menos erro)
+        const ch = this.champ;
+        if (!this.betweenRounds() || !ch || ch.finished || !p.teamId) return;
+        if (!upgradeCrew(ch, p.teamId)) return;
         this.saveChamp();
         this.broadcastLobby();
         break;
@@ -466,17 +485,28 @@ export class Room {
     else if (this.phase === "quali") this.setPhase("strategy");
     else if (this.phase === "strategy") this.startRace();
     else if (this.phase === "podium") {
+      // campeonato: pódio -> sede da equipe (troféus, fábrica, mecânicos...)
+      if (this.champ) this.setPhase("hq");
+      else this.endGame();
+    } else if (this.phase === "hq") {
       const ch = this.champ;
       if (ch && !ch.finished) {
         ch.round++;
         this.startWeekend(); // próxima etapa
-      } else {
-        // jogo novo: pilotos sorteados de novo
-        this.champ = null;
-        this.newLineup();
-        this.setPhase("lobby");
-      }
+      } else this.endGame();
     }
+  }
+
+  /** acabou o jogo/campeonato: volta pro lobby com pilotos sorteados de novo */
+  private endGame() {
+    this.champ = null;
+    this.newLineup();
+    this.setPhase("lobby");
+  }
+
+  /** entre uma etapa e outra (pódio ou sede): dá pra investir no carro */
+  private betweenRounds() {
+    return this.phase === "podium" || this.phase === "hq";
   }
 
   private lastQuali: { results: ReturnType<typeof runQualifying>["results"]; wet: number } | null = null;
@@ -514,6 +544,7 @@ export class Room {
       dev: w.dev,
       engineStart: this.champ ? { ...this.champ.engines } : undefined,
       engineWearMult: this.champ ? CHAMP_ENGINE_WEAR : undefined,
+      crew: this.champ?.crew ? { ...this.champ.crew } : undefined,
     };
     // motor novo sem reserva: perde posições no grid
     const pen = this.champ?.gridPen ?? {};
@@ -595,6 +626,7 @@ export class Room {
       equalCars: this.equalCars,
       champMode: this.champMode,
       champPct: this.champPct,
+      champName: this.champName,
       realDrivers: this.realDrivers,
       lineup: this.lineup,
       swapUsed: [...this.swapUsed],

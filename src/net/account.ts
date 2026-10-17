@@ -34,7 +34,8 @@ export interface Profile {
   name: string;
   team_name: string;
   stats: Partial<PlayerStats>;
-  champ: unknown | null;
+  /** campeonatos salvos (id -> save) */
+  champs: Record<string, unknown> | null;
 }
 
 export const EMPTY_STATS: PlayerStats = { races: 0, wins: 0, podiums: 0, poles: 0, points: 0, dnfs: 0, titles: 0, champs: 0, best: null };
@@ -129,13 +130,22 @@ class Account {
     const snap = await getDoc(this.ref());
     if (snap.exists()) {
       const d = snap.data();
-      let champ: unknown = null;
+      let champs: Record<string, unknown> | null = null;
       try {
-        champ = d.champ ? JSON.parse(d.champ) : null;
+        champs = d.champs ? JSON.parse(d.champs) : null;
+        // save antigo (um campeonato só) vira o primeiro da lista
+        if (!champs && d.champ) {
+          const old = JSON.parse(d.champ) as { champ?: { id?: string; name?: string } };
+          if (old?.champ) {
+            old.champ.id ??= "antigo";
+            old.champ.name ??= "Meu campeonato";
+            champs = { [old.champ.id]: old };
+          }
+        }
       } catch {
-        champ = null;
+        champs = null;
       }
-      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champ };
+      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs };
       return;
     }
     const fresh: Profile = {
@@ -143,10 +153,10 @@ class Account {
       name: name || this.user.email?.split("@")[0] || "Engenheiro",
       team_name: teamName ?? "",
       stats: {},
-      champ: null,
+      champs: null,
     };
     this.profile = fresh;
-    await setDoc(this.ref(), { name: fresh.name, team_name: fresh.team_name, stats: {}, champ: null, updated_at: serverTimestamp() });
+    await setDoc(this.ref(), { name: fresh.name, team_name: fresh.team_name, stats: {}, champs: null, updated_at: serverTimestamp() });
   }
 
   private async save(patch: Partial<Profile>) {
@@ -154,7 +164,7 @@ class Account {
     Object.assign(this.profile, patch);
     // campeonato vai como texto (o Firestore não aceita listas dentro de listas)
     const data: Record<string, unknown> = { ...patch, updated_at: serverTimestamp() };
-    if ("champ" in patch) data.champ = patch.champ ? JSON.stringify(patch.champ) : null;
+    if ("champs" in patch) data.champs = patch.champs ? JSON.stringify(patch.champs) : null;
     delete data.id;
     await setDoc(this.ref(), data, { merge: true }).catch((e) => console.warn("não salvou o perfil", e));
   }
@@ -163,8 +173,9 @@ class Account {
     if (this.profile && (this.profile.name !== name || this.profile.team_name !== teamName)) void this.save({ name, team_name: teamName });
   }
 
-  saveChamp(champ: unknown | null) {
-    void this.save({ champ });
+  /** campeonatos salvos na nuvem (junto do perfil) */
+  saveChamps(champs: Record<string, unknown>) {
+    void this.save({ champs });
   }
 
   /** soma o resultado de uma corrida nas estatísticas */

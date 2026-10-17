@@ -655,3 +655,35 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .readyboard .rs.off { color: #ff6b6b; }
 .readyboard .rfoot { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 @media (max-width: 700px) { .readyboard { top: auto; bottom: 64px; right: 8px; } }
+
+/* sede da equipe */
+.hq { max-width: 1040px; }
+.hqhead { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-left: 6px solid #fff; padding: 6px 0 6px 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.hqpts { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); line-height: 1.2; }
+.hqtabs { margin-bottom: 10px; flex-wrap: wrap; }
+.hqtabs button { padding: 8px 0; font-family: var(--pix); font-size: 12px; }
+.hqbody { min-height: 360px; }
+.hqnext { display: flex; gap: 16px; align-items: center; }
+.hqnext canvas { width: 260px; height: 140px; flex: none; background: #0b0e15; border: 1px solid var(--line); }
+@media (max-width: 700px) { .hqnext { flex-direction: column; align-items: stretch; } .hqnext canvas { width: 100%; } }
+.crewbox { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
+@media (max-width: 760px) { .crewbox { grid-template-columns: 1fr; } }
+.pips.big { display: flex; gap: 4px; align-items: center; margin: 8px 0; }
+.pips.big i { width: 34px; height: 12px; background: #2a303d; }
+.pips.big i.on { background: var(--ok); }
+.pips.big span { margin-left: 8px; font-size: 12px; color: var(--muted); }
+.crewtab { margin: 6px 0 12px; }
+.trophies { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-top: 10px; }
+.trophy { border: 2px solid var(--line); padding: 10px; text-align: center; background: #141924; }
+.trophy .ti { font-size: 34px; line-height: 1.1; }
+.trophy .tn { font-weight: 700; font-size: 13px; margin-top: 4px; }
+.trophy .tp { font-family: var(--pix); font-size: 11px; color: var(--muted); margin-top: 2px; }
+.trophy .tw { font-size: 12px; color: #b7bfd0; }
+.trophy .tx { display: flex; gap: 6px; justify-content: center; margin-top: 6px; font-size: 10px; font-family: var(--pix); color: var(--warn); min-height: 12px; }
+.trophy.gold { border-color: #ffcc00; background: linear-gradient(180deg, rgba(255,204,0,.18), #141924 70%); }
+.trophy.silver { border-color: #c9d1e0; background: linear-gradient(180deg, rgba(201,209,224,.14), #141924 70%); }
+.trophy.bronze { border-color: #cd7f32; background: linear-gradient(180deg, rgba(205,127,50,.16), #141924 70%); }
+.trophy.dnf { opacity: .55; }
+.hqdrivers { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.hqdstat { font-size: 13px; margin-bottom: 6px; color: #c9d1e0; }
+.hqdstat b { color: var(--warn); font-family: var(--pix); }
