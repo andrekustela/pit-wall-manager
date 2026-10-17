@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b2130"/><stop offset="1" stop-color="#0b0e15"/></linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#b81622"/><stop offset=".5" stop-color="#ff3344"/><stop offset="1" stop-color="#b81622"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- zebra em curva -->
+  <path d="M60 420 A330 330 0 0 1 420 60" fill="none" stroke="#f2f2f2" stroke-width="34"/>
+  <path d="M60 420 A330 330 0 0 1 420 60" fill="none" stroke="#e8202a" stroke-width="34" stroke-dasharray="44 44"/>
+  <!-- carro visto de cima, inclinado -->
+  <g transform="translate(262 262) rotate(45)">
+    <rect x="-118" y="-150" width="236" height="34" rx="8" fill="#e9edf5"/>
+    <rect x="-112" y="-144" width="224" height="12" rx="4" fill="#e8202a"/>
+    <rect x="-110" y="-104" width="54" height="80" rx="20" fill="#111"/>
+    <rect x="56" y="-104" width="54" height="80" rx="20" fill="#111"/>
+    <rect x="-118" y="66" width="62" height="94" rx="22" fill="#111"/>
+    <rect x="56" y="66" width="62" height="94" rx="22" fill="#111"/>
+    <path d="M-16 -150 L16 -150 L30 -40 L62 10 L66 120 L40 176 L-40 176 L-66 120 L-62 10 L-30 -40 Z" fill="url(#body)"/>
+    <ellipse cx="0" cy="10" rx="20" ry="34" fill="#0b0d12"/>
+    <circle cx="0" cy="8" r="13" fill="#ffd23b"/>
+    <rect x="-96" y="168" width="192" height="30" rx="6" fill="#e9edf5"/>
+    <rect x="-90" y="174" width="180" height="10" rx="3" fill="#e8202a"/>
+  </g>
+</svg>

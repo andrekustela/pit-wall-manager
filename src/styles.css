@@ -602,3 +602,8 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .logrow .li { text-align: center; }
 .logrow.imp { color: #e9edf5; }
 .logrow.mine { background: rgba(255, 255, 255, 0.06); border-left: 2px solid var(--accent); }
+
+/* topo do menu com o botão de instalar */
+.menuhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.installbtn { background: #1c6ed4; border-color: #6ea8ff; color: #fff; }
+.installbtn:hover { background: #2a7ee6; }

@@ -22,6 +22,7 @@ const MIME: Record<string, string> = {
   ".css": "text/css",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".webmanifest": "application/manifest+json",
   ".ico": "image/x-icon",
 };
 

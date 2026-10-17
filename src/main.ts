@@ -18,6 +18,7 @@ import { showDraft } from "./ui/draft";
 import { ChatWidget } from "./ui/chat";
 import { account } from "./net/account";
 import { showLogin } from "./ui/login";
+import { setupInstall } from "./ui/install";
 import { POINTS, standings } from "./sim/championship";
 
 interface Screen {
@@ -356,6 +357,7 @@ class App {
 }
 
 (async () => {
+  setupInstall();
   await document.fonts?.ready;
   await account.restore().catch(() => false);
   const appInst = new App();

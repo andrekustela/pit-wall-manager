@@ -3,6 +3,7 @@ import type { ChampSave } from "../net/room";
 import { CIRCUITS } from "../sim/track";
 import { account } from "../net/account";
 import { statsHtml } from "./login";
+import { mountInstallButton } from "./install";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -45,7 +46,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       : "";
   root.innerHTML = `
     <div class="screen"><div class="wrap" style="max-width:720px">
-      <h1 class="title">PIT WALL <span>MANAGER</span></h1>
+      <div class="menuhead"><h1 class="title">PIT WALL <span>MANAGER</span></h1><div id="m-install"></div></div>
       <p class="sub">Você é o engenheiro-chefe. Os pilotos correm, você decide o acerto e a estratégia.</p>
       ${account.profile ? `<div class="box accountbox"><div class="accounthead"><div><h3 style="margin:0">OLÁ, ${esc(account.profile.name.toUpperCase())}</h3>
           <div class="hint" style="margin:2px 0 0">${account.profile.team_name ? `Equipe ${esc(account.profile.team_name)}` : "Equipe com o nome original"}</div></div>
@@ -105,6 +106,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       showMenu(root, onChoose, onLogout);
     }
   });
+  mountInstallButton(root.querySelector<HTMLElement>("#m-install")!);
   root.querySelector("#m-solo")!.addEventListener("click", () => onChoose({ mode: "solo", ...get() }));
   root.querySelector("#m-create")!.addEventListener("click", () => onChoose({ mode: "create", ...get() }));
   const join = () => {
