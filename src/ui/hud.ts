@@ -66,7 +66,7 @@ export class Hud {
     this.cons = fuelPerLap(race.laps);
     this.el = document.createElement("div");
     this.el.innerHTML = `
-      <div class="board panel"><div class="head"><span class="hl">POS</span><span class="lapc"></span></div>
+      <div class="board panel"><div class="head"><span class="hl">POS</span><span class="lapc"></span><button class="boardmin" title="Minimizar/expandir posições (tecla P)"></button></div>
         <div class="colhead"><span></span><span></span><span>PILOTO</span><span style="text-align:right">GAP</span><span style="text-align:right">ÚLT</span><span></span></div>
         <div class="rows"></div></div>
       <div class="topbar panel"></div>
@@ -90,6 +90,8 @@ export class Hud {
     this.banner.addEventListener("click", () => {
       if (this.race.sc.active && this.race.sc.onTrack) this.hooks.setFollow("SC");
     });
+    this.el.querySelector(".boardmin")!.addEventListener("click", () => this.toggleBoard());
+    this.applyBoard();
     // pointerdown: a tabela é redesenhada várias vezes por segundo e o "click" se perdia
     this.board.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -105,6 +107,20 @@ export class Hud {
   }
 
   private compact = storeGet("pwm.compact") === "1";
+  private boardMini = storeGet("pwm.boardmini") === "1";
+
+  /** tabela de posições minimizada: só posição, sigla e gap */
+  toggleBoard() {
+    this.boardMini = !this.boardMini;
+    storeSet("pwm.boardmini", this.boardMini ? "1" : "0");
+    this.applyBoard();
+  }
+
+  private applyBoard() {
+    this.el.querySelector(".board")!.classList.toggle("compactb", this.boardMini);
+    const b = this.el.querySelector(".boardmin")!;
+    b.textContent = this.boardMini ? "▸" : "◂";
+  }
 
   toggleCompact() {
     this.compact = !this.compact;
@@ -533,6 +549,7 @@ export class Hud {
         return `<div class="row ${c.team.id === my ? "player" : ""} ${c.id === follow ? "follow" : ""}" data-car="${c.id}" title="${esc(c.team.name)}">
           <span class="pos">${c.position}</span>
           <span class="bar" style="background:${c.team.color}"></span>
+          <span class="code">${esc(c.driver.short)}</span>
           <span class="name">${surname(c.driver.name)}${this.hooks.online && c.isHuman ? ` <span class="eng">(${esc(race.engineers[c.team.id]?.name ?? "")})</span>` : ""}</span>
           <span class="gap ${cls}">${gap}</span>
           <span class="lt ${ltCls}">${lt ? fmtShort(lt) : ""}</span>

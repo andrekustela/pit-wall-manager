@@ -251,4 +251,6 @@ export interface RaceEvent {
   teamId?: string;
   /** tipo do evento (usado pros sons) */
   kind?: string;
+  /** volta do líder quando aconteceu (histórico da corrida) */
+  lap?: number;
 }

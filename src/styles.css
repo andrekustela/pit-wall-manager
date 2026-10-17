@@ -582,3 +582,23 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .devengines { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .devengines .engrow { margin: 8px 0 0; }
 .devengines .engrow > span:first-child { min-width: 160px; }
+
+/* tabela de posições minimizada (tecla P): só posição, sigla e gap */
+.board .code { display: none; font-family: var(--pix); font-size: 11px; }
+.board .boardmin { background: none; border: 0; color: #fff; font-size: 12px; padding: 0 0 0 8px; cursor: pointer; line-height: 1; }
+.board .head { align-items: center; }
+.board.compactb { width: 140px; }
+.board.compactb .head .hl, .board.compactb .colhead, .board.compactb .name, .board.compactb .lt, .board.compactb .tyre { display: none; }
+.board.compactb .head .lapc { flex: 1; }
+.board.compactb .row { grid-template-columns: 20px 4px 34px 1fr; gap: 5px; padding: 2px 6px; }
+.board.compactb .code { display: block; }
+
+/* histórico da corrida (aba da telemetria) */
+.logbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.loglist { max-height: 460px; overflow-y: auto; font-size: 13px; padding-right: 6px; -webkit-user-select: text; user-select: text; }
+.loglap { font-family: var(--pix); font-size: 11px; color: var(--muted); margin: 10px 0 4px; padding-bottom: 2px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel-solid); }
+.logrow { display: grid; grid-template-columns: 44px 22px 1fr; gap: 6px; padding: 3px 4px; color: #b7bfd0; }
+.logrow .lt { font-family: var(--num); color: var(--muted); font-variant-numeric: tabular-nums; }
+.logrow .li { text-align: center; }
+.logrow.imp { color: #e9edf5; }
+.logrow.mine { background: rgba(255, 255, 255, 0.06); border-left: 2px solid var(--accent); }

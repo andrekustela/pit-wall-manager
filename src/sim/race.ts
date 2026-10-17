@@ -1437,7 +1437,8 @@ export class Race {
   }
 
   private log(text: string, important: boolean, teamId?: string, kind?: string) {
-    this.events.push({ time: this.time, text, important, teamId, kind });
+    const lead = this.cars.length ? Math.max(...this.cars.map((c) => c.lap)) : 0;
+    this.events.push({ time: this.time, text, important, teamId, kind, lap: Math.min(this.laps, Math.max(1, lead + 1)) });
   }
 }
 

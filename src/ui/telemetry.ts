@@ -16,11 +16,39 @@ export function telemetryHtml(race: Race, myTeamId: string): string {
         <button data-tt="pos" class="on">POSIÇÕES</button>
         <button data-tt="laps">TEMPOS DE VOLTA</button>
         <button data-tt="stints">PNEUS / PARADAS</button>
+        <button data-tt="log">HISTÓRICO</button>
       </div>
       <div data-tp="pos">${positionsChart(race, myTeamId)}</div>
       <div data-tp="laps" hidden>${lapsChart(race, myTeamId)}</div>
       <div data-tp="stints" hidden>${stintsChart(race, myTeamId)}</div>
+      <div data-tp="log" hidden>${historyHtml(race, myTeamId)}</div>
     </div>`;
+}
+
+/** ícone de cada tipo de acontecimento no histórico */
+const KIND_ICON: Record<string, string> = {
+  overtake: "⇄", touch: "⚠", damage: "🔧", spin: "↻", crash: "💥", out: "⛔", off: "↗", fault: "⚙",
+  radio: "📻", fastest: "⏱", sc: "🚨", scin: "🚨", green: "🟩", yellow: "🟨", lastlap: "🏁", pit: "🅿", pitin: "🅿", pitout: "🅿",
+  info: "•", rain: "🌧", dry: "☀", start: "🚦", penalty: "⚖",
+};
+
+/** tudo que aconteceu na corrida, por escrito, volta a volta (filtro: tudo / só a sua equipe) */
+function historyHtml(race: Race, my: string): string {
+  if (!race.events.length) return `<p class="hint">Nada registrado nesta corrida.</p>`;
+  let lastLap = -1;
+  const rows = race.events
+    .map((e) => {
+      const lap = e.lap ?? 1;
+      const head = lap !== lastLap ? `<div class="loglap">VOLTA ${lap}</div>` : "";
+      lastLap = lap;
+      const min = Math.floor(e.time / 60), sec = Math.floor(e.time % 60);
+      const mine = e.teamId === my;
+      return `${head}<div class="logrow ${mine ? "mine" : ""} ${e.important ? "imp" : ""}" data-mine="${mine ? 1 : 0}">
+        <span class="lt">${min}:${String(sec).padStart(2, "0")}</span><span class="li">${KIND_ICON[e.kind ?? ""] ?? "•"}</span><span>${esc(e.text)}</span></div>`;
+    })
+    .join("");
+  return `<div class="logbar"><label class="toggle"><input type="checkbox" data-logmine><span>Só o que envolve a sua equipe</span></label><span class="hint" style="margin:0">${race.events.length} acontecimentos</span></div>
+    <div class="loglist">${rows}</div>`;
 }
 
 /** liga as abas e o destaque ao passar o mouse */
@@ -33,6 +61,24 @@ export function bindTelemetry(root: HTMLElement) {
       box.querySelectorAll<HTMLElement>("[data-tp]").forEach((p) => (p.hidden = p.dataset.tp !== b.dataset.tt));
     }),
   );
+  // histórico: filtro "só a sua equipe" (esconde também os títulos de volta que ficarem vazios)
+  box.querySelector<HTMLInputElement>("[data-logmine]")?.addEventListener("change", (e) => {
+    const only = (e.target as HTMLInputElement).checked;
+    const list = box.querySelector(".loglist")!;
+    let header: HTMLElement | null = null;
+    let any = false;
+    for (const el of [...list.children] as HTMLElement[]) {
+      if (el.classList.contains("loglap")) {
+        if (header) header.hidden = !any;
+        header = el;
+        any = false;
+      } else {
+        el.hidden = only && el.dataset.mine !== "1";
+        if (!el.hidden) any = true;
+      }
+    }
+    if (header) header.hidden = !any;
+  });
   // passar o mouse num piloto (linha ou nome) destaca ele
   box.querySelectorAll<SVGElement>("[data-car]").forEach((el) => {
     const id = el.dataset.car!;
