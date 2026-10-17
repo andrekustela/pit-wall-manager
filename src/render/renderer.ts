@@ -25,11 +25,13 @@ export class Renderer {
     this.followId = followId;
     this.resize();
     window.addEventListener("resize", this.resize);
-    canvas.addEventListener("click", (e) => {
+    // na hora que aperta (o carro anda entre apertar e soltar); área de toque generosa
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
       let best: string | null = null;
-      let bestD = Math.max(24, CAR_LEN_M * this.m2css() * 0.7);
+      let bestD = Math.max(36, CAR_LEN_M * this.m2css() * 1.1);
       for (const [id, p] of this.screenPos) {
         const d = Math.hypot(p.x - x, p.y - y);
         if (d < bestD) {
@@ -420,12 +422,12 @@ export class Minimap {
     });
     this.path.closePath();
     canvas.style.cursor = "pointer";
-    canvas.addEventListener("click", (e) => {
+    canvas.addEventListener("pointerdown", (e) => {
       const r = canvas.getBoundingClientRect();
       const x = ((e.clientX - r.left) / r.width) * canvas.width;
       const y = ((e.clientY - r.top) / r.height) * canvas.height;
       let best: string | null = null;
-      let bestD = 10;
+      let bestD = 16;
       for (const [id, [dx, dy]] of this.dots) {
         const d = Math.hypot(dx - x, dy - y);
         if (d < bestD) {

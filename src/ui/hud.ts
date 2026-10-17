@@ -87,7 +87,9 @@ export class Hud {
     this.banner.addEventListener("click", () => {
       if (this.race.sc.active && this.race.sc.onTrack) this.hooks.setFollow("SC");
     });
-    this.board.addEventListener("click", (e) => {
+    // pointerdown: a tabela é redesenhada várias vezes por segundo e o "click" se perdia
+    this.board.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
       const row = (e.target as HTMLElement).closest<HTMLElement>("[data-car]");
       if (row) this.hooks.setFollow(row.dataset.car!);
     });
