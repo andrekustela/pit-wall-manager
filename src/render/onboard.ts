@@ -8,6 +8,8 @@ import { TRACK_WIDTH, type Track } from "../sim/track";
 import type { CarState } from "../sim/types";
 
 const COMPOUND_COLOR: Record<string, string> = { S: "#ff3b3b", M: "#ffd23b", H: "#f2f2f2", I: "#3bd16f", W: "#2e8bff" };
+/** quanto a camada do carro sobra pra cada lado (fração da largura) */
+const BODY_MARGIN = 0.4;
 const EYE = 1.35; // altura da câmera (atrás da cabeça do piloto, m)
 const FAR = 340; // até onde enxerga (m)
 const W2 = TRACK_WIDTH / 2;
@@ -37,6 +39,7 @@ export class OnboardCam {
   private tread = 0;
   private drops: { x: number; y: number; r: number; life: number }[] = [];
   private steer = new Map<string, number>();
+  private pedals = new Map<string, { v: number; thr: number; brk: number }>();
 
   constructor(private race: Race) {
     this.elev = makeElevation(race.track);
@@ -369,6 +372,9 @@ export class OnboardCam {
     this.steer.set(car.id, steer);
     const light = tunnel ? -0.35 : 0;
 
+    // ---- asa dianteira (na ponta do bico, atrás dos pneus) ----
+    g.drawImage(this.layer("wing|" + `${W}x${H}|${car.team.id}|${tunnel ? 1 : 0}`, g, W, H, (c) => this.wingLayer(c, W, H, car, tunnel)), 0, 0, W, H);
+
     // ---- pneus da frente ----
     const tyreCol = COMPOUND_COLOR[car.compound] ?? "#ffd23b";
     const tyres: [number, number][] = [[23, 47], [77, 47]];
@@ -425,16 +431,49 @@ export class OnboardCam {
 
     // partes paradas (bico, laterais, retrovisores, halo) vêm de uma imagem pronta
     const key = `${W}x${H}|${car.team.id}|${tunnel ? 1 : 0}`;
-    g.drawImage(this.layer("body|" + key, g, W, H, (c) => this.bodyLayer(c, W, H, car, tunnel)), 0, 0, W, H);
+    // a camada do carro é mais larga que a tela: as laterais continuam até os cantos
+    g.drawImage(this.layer("body|" + key, g, W, H, (c) => this.bodyLayer(c, W, H, car, tunnel), BODY_MARGIN), -W * BODY_MARGIN, 0, W * (1 + 2 * BODY_MARGIN), H);
+    // acelerador e freio (estimados pela variação da velocidade)
+    const ped = this.pedals.get(car.id) ?? { v, thr: 0.5, brk: 0 };
+    const dv = dt > 0 ? (v - ped.v) / dt : 0;
+    const thrWant = dv < -3 ? 0 : v > 3 ? Math.max(0.35, Math.min(1, 0.55 + dv / 9)) : 0.3;
+    const brkWant = dv < -3 ? Math.min(1, -dv / 32) : 0;
+    const kk = Math.min(1, dt * 10);
+    ped.thr += (thrWant - ped.thr) * kk;
+    ped.brk += (brkWant - ped.brk) * kk;
+    ped.v = v;
+    this.pedals.set(car.id, ped);
+
     g.save();
-    g.translate(X(50), Y(92));    g.save();
-    g.translate(X(50), Y(92));
-    g.rotate(steer * 0.45);
-    const ww = X(9), wh = Y(9);
+    g.translate(X(50), Y(90));
+    g.rotate(steer * 0.55);
+    const ww = X(12), wh = Y(11);
+    // volante estilo F1: corpo largo com pegadores dos lados
     g.fillStyle = "#16171b";
     g.beginPath();
-    g.roundRect(-ww, -wh, ww * 2, wh * 1.6, u * 1.2);
+    g.moveTo(-ww * 0.62, -wh);
+    g.lineTo(ww * 0.62, -wh);
+    g.quadraticCurveTo(ww * 0.78, -wh, ww * 0.82, -wh * 0.7);
+    g.lineTo(ww * 1.05, -wh * 0.55);
+    g.quadraticCurveTo(ww * 1.22, wh * 0.1, ww * 1.0, wh * 0.75);
+    g.lineTo(ww * 0.55, wh * 0.75);
+    g.lineTo(ww * 0.45, wh * 0.45);
+    g.lineTo(-ww * 0.45, wh * 0.45);
+    g.lineTo(-ww * 0.55, wh * 0.75);
+    g.lineTo(-ww * 1.0, wh * 0.75);
+    g.quadraticCurveTo(-ww * 1.22, wh * 0.1, -ww * 1.05, -wh * 0.55);
+    g.lineTo(-ww * 0.82, -wh * 0.7);
+    g.quadraticCurveTo(-ww * 0.78, -wh, -ww * 0.62, -wh);
+    g.closePath();
     g.fill();
+    // botões coloridos
+    const btn = ["#ff3b3b", "#3b8bff", "#ffd23b", "#3bd16f"];
+    btn.forEach((c, i) => {
+      g.fillStyle = c;
+      g.beginPath();
+      g.arc((i < 2 ? -1 : 1) * ww * 0.7, -wh * 0.35 + (i % 2) * wh * 0.42, Math.max(1, ww * 0.06), 0, Math.PI * 2);
+      g.fill();
+    });
     // telinha
     const kmh = Math.round(v * 3.6);
     const gear = v < 1 ? "N" : String(Math.min(8, 1 + Math.floor(Math.max(0, kmh - 20) / 40)));
@@ -469,21 +508,31 @@ export class OnboardCam {
     }
     g.restore();
 
-    g.drawImage(this.layer("halo|" + key, g, W, H, (c) => this.haloLayer(c, W, H, car, tunnel)), 0, 0, W, H);
+    // barras de freio (vermelha) e acelerador (verde), dos lados do volante
+    const bw = X(2.2), bh = Y(17), by = Y(76);
+    for (const [bx, val, c] of [[X(27), ped.brk, "#ff3b3b"], [X(73) - bw, ped.thr, "#3bd16f"]] as [number, number, string][]) {
+      g.fillStyle = "rgba(0,0,0,.55)";
+      g.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      g.fillStyle = "#1d2027";
+      g.fillRect(bx, by, bw, bh);
+      g.fillStyle = c;
+      g.fillRect(bx, by + bh * (1 - val), bw, bh * val);
+    }
+
   }
 
   private layers = new Map<string, HTMLCanvasElement>();
 
   /** camada guardada (desenhada uma vez na resolução da tela) */
-  private layer(key: string, g: CanvasRenderingContext2D, W: number, H: number, paint: (c: CanvasRenderingContext2D) => void) {
+  private layer(key: string, g: CanvasRenderingContext2D, W: number, H: number, paint: (c: CanvasRenderingContext2D) => void, margin = 0) {
     let cv = this.layers.get(key);
     if (!cv) {
       const sc = g.getTransform().a || 1;
       cv = document.createElement("canvas");
-      cv.width = Math.max(1, Math.round(W * sc));
+      cv.width = Math.max(1, Math.round(W * (1 + 2 * margin) * sc));
       cv.height = Math.max(1, Math.round(H * sc));
       const c = cv.getContext("2d")!;
-      c.setTransform(sc, 0, 0, sc, 0, 0);
+      c.setTransform(sc, 0, 0, sc, W * margin * sc, 0);
       paint(c);
       if (this.layers.size > 24) this.layers.clear();
       this.layers.set(key, cv);
@@ -527,9 +576,34 @@ export class OnboardCam {
       const pod = g.createLinearGradient(0, Y(62), 0, Y(100));
       pod.addColorStop(0, shade(col, 0.1 + light));
       pod.addColorStop(1, shade(col, -0.4 + light));
-      shape([[sx(0), 74], [sx(12), 68], [sx(30), 64], [sx(44), 63], [sx(43), 100], [sx(0), 100]], pod);
-      // faixa de cor da equipe na lateral
-      shape([[sx(0), 84], [sx(22), 77], [sx(40), 74], [sx(40), 78], [sx(22), 81], [sx(0), 89]], shade(acc, -0.1 + light));
+      // a lateral continua pra fora da tela (o cockpit é desenhado menor) descendo em curva suave
+      g.fillStyle = pod;
+      g.beginPath();
+      g.moveTo(X(sx(44)), Y(63));
+      g.bezierCurveTo(X(sx(30)), Y(63.5), X(sx(10)), Y(66), X(sx(-6)), Y(72));
+      g.bezierCurveTo(X(sx(-20)), Y(77), X(sx(-32)), Y(86), X(sx(-40)), Y(100));
+      g.lineTo(X(sx(43)), Y(100));
+      g.closePath();
+      g.fill();
+      // borda clara no alto da lateral (dá volume)
+      g.strokeStyle = shade(col, 0.35 + light);
+      g.lineWidth = Math.max(1, u * 0.5);
+      g.beginPath();
+      g.moveTo(X(sx(43)), Y(63.3));
+      g.bezierCurveTo(X(sx(30)), Y(63.8), X(sx(10)), Y(66.3), X(sx(-6)), Y(72.3));
+      g.bezierCurveTo(X(sx(-20)), Y(77.3), X(sx(-32)), Y(86.3), X(sx(-40)), Y(100));
+      g.stroke();
+      // faixa de cor da equipe acompanhando a curva
+      g.fillStyle = shade(acc, -0.1 + light);
+      g.beginPath();
+      g.moveTo(X(sx(40)), Y(74));
+      g.bezierCurveTo(X(sx(22)), Y(75), X(sx(2)), Y(79), X(sx(-14)), Y(86));
+      g.bezierCurveTo(X(sx(-24)), Y(91), X(sx(-30)), Y(96), X(sx(-33)), Y(100));
+      g.lineTo(X(sx(-27)), Y(100));
+      g.bezierCurveTo(X(sx(-22)), Y(95), X(sx(-14)), Y(91), X(sx(-6)), Y(87));
+      g.bezierCurveTo(X(sx(6)), Y(82), X(sx(24)), Y(78.5), X(sx(40)), Y(78));
+      g.closePath();
+      g.fill();
       // retrovisor
       const mx = sx(8);
       const housing = g.createLinearGradient(0, Y(62), 0, Y(72));
@@ -564,38 +638,43 @@ export class OnboardCam {
     g.stroke();
   }
 
-  private haloLayer(g: CanvasRenderingContext2D, W: number, H: number, car: CarState, tunnel: boolean) {
+  private wingLayer(g: CanvasRenderingContext2D, W: number, H: number, car: CarState, tunnel: boolean) {
     const X = (p: number) => (p * W) / 100;
     const Y = (p: number) => (p * H) / 100;
     const light = tunnel ? -0.35 : 0;
-    // ---- halo ----
-    const halo = (w: number, c: string) => {
-      g.strokeStyle = c;
-      g.lineWidth = w;
-      g.lineCap = "round";
+    const col = car.team.color, acc = car.team.accent;
+    // três planos empilhados, curvando pra cima nas pontas
+    const flap = (y: number, h: number, fill: string, inset: number) => {
+      g.fillStyle = fill;
       g.beginPath();
-      g.moveTo(X(10), Y(100));
-      g.bezierCurveTo(X(14), Y(62), X(30), Y(49), X(50), Y(48.5));
-      g.bezierCurveTo(X(70), Y(49), X(86), Y(62), X(90), Y(100));
-      g.stroke();
+      g.moveTo(X(6 + inset), Y(y - 1.5));
+      g.quadraticCurveTo(X(50), Y(y + 1.2), X(94 - inset), Y(y - 1.5));
+      g.lineTo(X(94 - inset), Y(y - 1.5 + h));
+      g.quadraticCurveTo(X(50), Y(y + 1.2 + h), X(6 + inset), Y(y - 1.5 + h));
+      g.closePath();
+      g.fill();
     };
-    halo(Math.max(3, Y(5.4)), shade("#141518", light));
-    halo(Math.max(1, Y(1.6)), "rgba(255,255,255,.10)");
-    // pilar do meio
-    g.strokeStyle = shade("#141518", light);
-    g.lineWidth = Math.max(2, X(1.8));
-    g.beginPath();
-    g.moveTo(X(50), Y(49));
-    g.lineTo(X(50), Y(64));
-    g.stroke();
-    // nome da equipe no halo
-    if (W > 300) {
-      g.fillStyle = "rgba(255,255,255,.85)";
-      g.font = `700 ${Math.round(Y(2.6))}px "Silkscreen", monospace`;
-      g.textAlign = "center";
-      g.textBaseline = "middle";
-      g.fillText(car.team.name.toUpperCase(), X(50), Y(48.6));
+    flap(36, 2.2, shade("#15161a", light), 0);
+    flap(38.3, 1.8, shade(col, light), 1.5);
+    flap(40.2, 1.6, shade(acc, light), 3);
+    // placas das pontas
+    for (const x of [5, 93]) {
+      g.fillStyle = shade("#121317", light);
+      g.beginPath();
+      g.roundRect(X(x), Y(32.5), X(2), Y(10), 2);
+      g.fill();
+      g.fillStyle = shade(col, -0.2 + light);
+      g.fillRect(X(x) + 1, Y(33.2), Math.max(1, X(2) - 2), Y(2.4));
     }
+    // suportes até o bico
+    g.strokeStyle = shade("#15161a", light);
+    g.lineWidth = Math.max(1, X(0.6));
+    g.beginPath();
+    g.moveTo(X(47.5), Y(41));
+    g.lineTo(X(46.5), Y(37));
+    g.moveTo(X(52.5), Y(41));
+    g.lineTo(X(53.5), Y(37));
+    g.stroke();
   }
 }
 /** escurece/clareia uma cor #rrggbb */
