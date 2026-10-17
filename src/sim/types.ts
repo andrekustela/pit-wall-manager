@@ -125,7 +125,11 @@ export type Command =
   | { type: "engine"; carId: string; mode: EngineMode }
   | { type: "plan"; carId: string; plan: PlannedStop[] }
   | { type: "repair"; carId: string; parts: Partial<Record<"fw" | "suspF" | "rw" | "suspR", boolean>> }
-  | { type: "engineSave"; carId: string; on: boolean };
+  | { type: "engineSave"; carId: string; on: boolean }
+  | { type: "order"; carId: string; mode: TeamOrder };
+
+/** ordem de equipe: deixar o companheiro passar, manter posições ou livre */
+export type TeamOrder = "none" | "letPass" | "hold";
 
 export type PitPhase = "none" | "entering" | "stopped" | "leaving" | "parked";
 
@@ -156,6 +160,8 @@ export interface CarState {
   pit: PitPhase;
   pitTimer: number;
   pitStops: number;
+  /** ordem de equipe pra esse carro */
+  order: TeamOrder;
 
   lapNoise: number;
   lapStartTime: number;

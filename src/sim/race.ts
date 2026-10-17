@@ -23,6 +23,7 @@ import {
   type Driver,
   type RaceEvent,
   type Team,
+  type TeamOrder,
   type Tuning,
 } from "./types";
 import { makeWeather, rainAt, type WeatherPlan } from "./weather";
@@ -80,7 +81,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -217,6 +218,7 @@ export class Race {
         repair: { fw: true, suspF: true, rw: true, suspR: true },
         engineHealth: 1,
         engineSave: false,
+        order: "none",
         defendTill: 0,
         yieldTill: 0,
         duelAt: 0,
@@ -275,6 +277,9 @@ export class Race {
         break;
       case "repair":
         for (const p of PARTS) if (typeof cmd.parts?.[p.id] === "boolean") car.repair = { ...car.repair, [p.id]: cmd.parts[p.id] };
+        break;
+      case "order":
+        this.teamOrder(car, cmd.mode);
         break;
       case "engineSave":
         car.engineSave = !!cmd.on;
@@ -685,6 +690,22 @@ export class Race {
         // vai pro lado do pit antes da entrada
         if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
         if (c.defendTill > this.time) want = c.defendLat;
+        // ordem de equipe: abre espaço pro companheiro que está chegando
+        if (c.order === "letPass") {
+          const m = this.mate(c);
+          if (!m || m.retired || m.finished || c.finished) c.order = "none";
+          else if (this.dist(m) > this.dist(c) + CAR_L) {
+            c.order = "none";
+            this.log(`${c.driver.short} cumpre a ordem e deixa ${m.driver.short} passar.`, true, c.team.id, "overtake");
+          } else if (m.pit === "none" && !sc.active) {
+            const d = this.dist(c) - this.dist(m);
+            // até ~3 s atrás: tira o pé pra ele chegar; colado: abre a faixa e deixa passar
+            if (d > 0 && d < 220) {
+              myT *= d < 40 ? 0.9 : 0.95;
+              if (d < 70) want = Math.abs(c.lateral) > 1 ? Math.sign(c.lateral) * LANE_STEP : LANE_STEP;
+            }
+          }
+        }
         // retardatário: abre espaço pra quem vai colocar volta
         for (const o of this.cars) {
           if (o === c || o.finished || o.retired || o.pit !== "none") continue;
@@ -726,7 +747,7 @@ export class Race {
             const delta = o.targetLap - c.targetLap;
             // ultrapassador x muralha
             const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.002;
-            const p = Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside + craft - this.wet * 0.05));
+            const p = o.order === "letPass" && o.team.id === c.team.id ? 1 : Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside + craft - this.wet * 0.05));
             if (this.rng.chance(p)) {
               o.yieldTill = this.time + 1.6; // segurou a freada e passou
             } else {
@@ -748,10 +769,13 @@ export class Race {
         if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20 && !opening) {
           const slow = blocker.v < myT * 0.7 || blocker.spin > 0 || blocker.retired || blocker.finished;
           const lapping = this.dist(blocker) < this.dist(c) - this.track.L / 2;
-          let go = slow || lapping;
+          const sameTeam = blocker.team.id === c.team.id;
+          // companheiro mandado abrir: passa sem briga; "manter posições": não ataca o companheiro
+          let go = slow || lapping || (sameTeam && blocker.order === "letPass");
+          const held = sameTeam && c.order === "hold" && !go;
           // 1ª volta: briga em qualquer lugar, não só nas retas
           const firstLap = c.lap <= 0;
-          if (!go && myT > blocker.v * 1.003 && (firstLap || this.track.isStraight(c.s)) && this.dist(c) >= c.nextAttemptS) {
+          if (!go && !held && myT > blocker.v * 1.003 && (firstLap || this.track.isStraight(c.s)) && this.dist(c) >= c.nextAttemptS) {
             const delta = blocker.targetLap - c.targetLap;
             // na chuva o spray atrapalha: tenta menos
             // piloto agressivo tenta muito mais
@@ -1078,6 +1102,30 @@ export class Race {
       return score(b) - score(a);
     });
     sorted.forEach((c, i) => (c.position = i + 1));
+  }
+
+  private mate(c: CarState): CarState | null {
+    return this.cars.find((o) => o !== c && o.team.id === c.team.id) ?? null;
+  }
+
+  /** ordens de equipe: "letPass" no carro da frente; "hold" vale pros dois */
+  private teamOrder(car: CarState, mode: TeamOrder) {
+    const mate = this.mate(car);
+    if (!mate || car.retired || car.finished) return;
+    const name = (x: CarState) => x.driver.name.split(" ").slice(-1)[0];
+    if (mode === "letPass") {
+      if (mate.retired || mate.finished || this.dist(mate) >= this.dist(car)) return;
+      car.order = "letPass";
+      if (mate.order !== "none") mate.order = "none";
+      this.log(`Rádio: "${name(car)}, deixa o ${name(mate)} passar."`, true, car.team.id, "radio");
+    } else if (mode === "hold") {
+      car.order = mate.order = "hold";
+      this.log(`Rádio: "Mantenham as posições, sem briga entre vocês."`, true, car.team.id, "radio");
+    } else {
+      const was = car.order !== "none" || mate.order !== "none";
+      car.order = mate.order = "none";
+      if (was) this.log(`Rádio: "Estão liberados pra correr."`, true, car.team.id, "radio");
+    }
   }
 
   private onOvertake(c: CarState, o: CarState) {

@@ -11,6 +11,7 @@ import {
   type EngineMode,
   type PaceMode,
   type PlannedStop,
+  type TeamOrder,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import { confirmDialog } from "./confirm";
@@ -177,6 +178,9 @@ export class Hud {
         <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
           ${(["rich", "normal", "lean"] as EngineMode[]).map((m) => `<button data-engine="${m}">${ENGINE[m].label}</button>`).join("")}
         </div></div>
+        <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
+          <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
+        </div></div>
         <div class="row2"><span class="lbl">Pneu</span><div class="seg next">
           ${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${t}</button>`).join("")}
         </div></div>
@@ -207,6 +211,9 @@ export class Hud {
       );
       card.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) =>
         b.addEventListener("click", () => this.hooks.send({ type: "engine", carId: c.id, mode: b.dataset.engine as EngineMode })),
+      );
+      card.querySelectorAll<HTMLButtonElement>("[data-order]").forEach((b) =>
+        b.addEventListener("click", () => this.hooks.send({ type: "order", carId: c.id, mode: b.dataset.order as TeamOrder })),
       );
       card.querySelectorAll<HTMLButtonElement>("[data-next]").forEach((b) =>
         b.addEventListener("click", () => {
@@ -452,6 +459,13 @@ export class Hud {
         b.classList.toggle("on", b.dataset.engine === c.engine);
         b.disabled = !!c.engineSave && b.dataset.engine === "rich";
         b.title = b.disabled ? "Desligado enquanto poupa o motor" : "";
+      });
+      const mate = race.cars.find((o) => o !== c && o.team.id === c.team.id);
+      const mateBehind = !!mate && !mate.retired && !mate.finished && race.dist(mate) < race.dist(c);
+      card.querySelectorAll<HTMLButtonElement>("[data-order]").forEach((b) => {
+        const m = b.dataset.order;
+        b.classList.toggle("on", m === c.order);
+        b.disabled = c.retired || c.finished || !mate || mate.retired || (m === "letPass" && !mateBehind && c.order !== "letPass");
       });
       const next = c.boxRequest ?? cs.next;
       card.querySelectorAll<HTMLButtonElement>("[data-next]").forEach((b) => b.classList.toggle("on", b.dataset.next === next));
