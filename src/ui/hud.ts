@@ -204,7 +204,7 @@ export class Hud {
     this.closeOnboard();
     const el = document.createElement("div");
     el.className = "onfull";
-    el.innerHTML = `<canvas></canvas><div class="oninfo"></div><button class="btn small onclose">✕ FECHAR (ESC)</button>`;
+    el.innerHTML = `<canvas></canvas><div class="oninfo"></div><button class="btn small onclose">✕ FECHAR (ESC)</button><div class="onpanel"></div>`;
     document.body.appendChild(el);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -216,17 +216,43 @@ export class Hud {
         e.stopPropagation();
         const mine = this.mine();
         const i = mine.findIndex((c) => c.id === this.full?.id);
-        if (this.full && mine.length) this.full.id = mine[(i + 1) % mine.length].id;
+        if (this.full && mine.length) {
+          this.full.id = mine[(i + 1) % mine.length].id;
+          this.dockCard(this.full.id);
+          this.hooks.setFollow(this.full.id);
+        }
       }
     };
     window.addEventListener("keydown", onKey, true);
-    el.addEventListener("click", () => this.closeOnboard());
+    // fecha clicando na imagem ou no botão (o painel do carro funciona normal)
+    el.querySelector("canvas")!.addEventListener("click", () => this.closeOnboard());
+    el.querySelector(".onclose")!.addEventListener("click", () => this.closeOnboard());
     this.full = { el, cv: el.querySelector("canvas")!, id, onKey };
+    this.dockCard(id);
     this.hooks.setFollow(id);
+  }
+
+  /** o card do carro vai pra tela cheia (com todos os controles) e volta depois */
+  private docked: { card: HTMLElement; parent: HTMLElement; next: Node | null } | null = null;
+
+  private dockCard(id: string) {
+    this.undockCard();
+    const card = this.cards.get(id);
+    if (!card || !this.full) return;
+    this.docked = { card, parent: card.parentElement!, next: card.nextSibling };
+    this.full.el.querySelector(".onpanel")!.appendChild(card);
+  }
+
+  private undockCard() {
+    const d = this.docked;
+    if (!d) return;
+    d.parent.insertBefore(d.card, d.next && d.next.parentNode === d.parent ? d.next : null);
+    this.docked = null;
   }
 
   private closeOnboard() {
     if (!this.full) return;
+    this.undockCard();
     window.removeEventListener("keydown", this.full.onKey, true);
     this.full.el.remove();
     this.full = null;

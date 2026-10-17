@@ -569,3 +569,9 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .loginor::before, .loginor::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .googlebtn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: #1f1f1f; border-color: #fff; font-weight: 700; padding: 10px; }
 .googlebtn:hover { background: #f1f3f4; }
+
+/* tela cheia do onboard: painel do carro do lado, com todos os controles */
+.onpanel { position: absolute; right: 16px; top: 56px; max-height: calc(100% - 72px); overflow-y: auto; cursor: default; }
+.onpanel .driver { width: 440px; background: rgba(12, 15, 21, 0.86); backdrop-filter: blur(3px); }
+.onpanel .onbox { display: none; }
+@media (max-width: 900px) { .onpanel { left: 8px; right: 8px; top: auto; bottom: 8px; max-height: 45%; } .onpanel .driver { width: auto; } }
