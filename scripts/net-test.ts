@@ -14,6 +14,7 @@ class Bot {
   practice = 0;
   qualiPole = "";
   ended = false;
+  started = false;
   constructor(readonly name: string) {
     this.ws = new WebSocket(url);
     this.ws.on("message", (raw) => {
@@ -24,6 +25,7 @@ class Bot {
       else if (m.t === "quali") this.qualiPole = m.results[0].carId;
       else if (m.t === "snap") this.snaps++;
       else if (m.t === "end") this.ended = true;
+      else if (m.t === "start") this.started = true;
     });
   }
   open() {
@@ -45,7 +47,7 @@ async function until(cond: () => boolean, what: string, ms = 10000) {
 }
 
 const a = new Bot("Ana");
-const b = new Bot("Beto");
+let b = new Bot("Beto");
 await Promise.all([a.open(), b.open()]);
 a.send({ t: "create", name: "Ana", teamName: "Ana Racing" });
 await until(() => !!a.lobby?.code, "sala criada");
@@ -81,6 +83,17 @@ a.send({ t: "ready", ready: true });
 b.send({ t: "ready", ready: true });
 await until(() => a.lobby?.phase === "race" && a.snaps > 0 && b.snaps > 0, "corrida começou e snapshots chegam pros dois");
 b.send({ t: "speed", speed: 16 }); // Beto não é host: ignorado
+// Beto cai no meio da corrida e volta com a senha
+const tok = b.lobby!.token!;
+b.ws.close();
+await until(() => a.lobby?.players.find((p) => p.name === "Beto")?.connected === false, "Beto caiu (vaga guardada)");
+const b2 = new Bot("Beto2");
+await b2.open();
+b2.send({ t: "rejoin", code: a.lobby!.code, token: "errado" });
+await until(() => b2.log.some((l) => l.includes("voltar")), "senha errada recusada");
+b2.send({ t: "rejoin", code: a.lobby!.code, token: tok });
+await until(() => b2.started && b2.snaps > 0 && b2.lobby?.players.find((p) => p.name === "Beto")?.connected === true, "Beto voltou e recebeu a corrida");
+b = b2;
 a.send({ t: "speed", speed: 16 });
 a.send({ t: "cmd", cmd: { type: "pace", carId: anaCar, mode: "push" } });
 a.send({ t: "cmd", cmd: { type: "repair", carId: anaCar, parts: { fw: false } } });

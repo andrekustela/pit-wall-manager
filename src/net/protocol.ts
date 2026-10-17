@@ -36,6 +36,8 @@ export interface LobbyState {
   code: string;
   solo: boolean;
   you: string;
+  /** senha pra reconectar (só a sua) */
+  token?: string;
   hostId: string;
   phase: Phase;
   laps: number;
@@ -58,6 +60,7 @@ export interface LobbyState {
 export type ClientMsg =
   | { t: "create"; name: string; teamName: string }
   | { t: "join"; code: string; name: string; teamName: string }
+  | { t: "rejoin"; code: string; token: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
   | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; realDrivers?: boolean }

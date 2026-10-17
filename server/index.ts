@@ -94,6 +94,19 @@ wss.on("connection", (ws: WebSocket) => {
       return;
     }
     try {
+      if (msg.t === "rejoin") {
+        if (room) return;
+        const r = rooms.get(String(msg.code ?? "").toUpperCase().trim());
+        if (!r) return reply({ t: "error", msg: "A sala não existe mais." });
+        // registra o socket antes, porque o rejoin já manda o lobby e a corrida
+        const target = [...r.players.values()].find((p) => p.token === msg.token);
+        if (!target) return reply({ t: "error", msg: "Não deu pra voltar pra essa sala." });
+        sockets.set(`${r.code}:${target.id}`, ws);
+        r.rejoin(msg.token);
+        room = r;
+        pid = target.id;
+        return;
+      }
       if (msg.t === "create" || msg.t === "join") {
         if (room) return;
         const r = msg.t === "create" ? makeRoom() : rooms.get(String(msg.code ?? "").toUpperCase().trim());
@@ -115,7 +128,27 @@ wss.on("connection", (ws: WebSocket) => {
     }
   });
 
-  ws.on("close", leave);
+  // conexão caiu: guarda a vaga por 10 min (dá pra voltar); "leave" é saída de verdade
+  ws.on("close", () => {
+    if (!room || !pid) return;
+    const r = room;
+    sockets.delete(`${r.code}:${pid}`);
+    r.disconnect(pid);
+    room = null;
+    pid = null;
+    if (r.isEmpty()) {
+      r.dispose();
+      rooms.delete(r.code);
+    } else if (r.isAbandoned()) {
+      setTimeout(() => {
+        if (r.isAbandoned() && rooms.get(r.code) === r) {
+          r.dispose();
+          rooms.delete(r.code);
+          console.log(`sala ${r.code} fechada (todos saíram)`);
+        }
+      }, 10 * 60 * 1000);
+    }
+  });
 });
 
 http.listen(PORT, () => console.log(`Pit Wall Manager: servidor na porta ${PORT}`));

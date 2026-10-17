@@ -395,3 +395,6 @@ label.fld span { display: block; margin-bottom: 4px; }
 .confirmbox { width: min(460px, 100%) !important; }
 .confirmtext { font-size: 15px; line-height: 1.55; margin: 4px 0 16px; }
 .btn.okbtn { background: #1c6ed4; border-color: #6ea8ff; }
+
+.resumerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
+.resumerow + .resumerow { border-top: 1px solid var(--line); }

@@ -1,7 +1,8 @@
 // Conexão do cliente com a sala: local (solo, sala roda no navegador)
 // ou WebSocket (online, sala roda no servidor). A interface é a mesma.
 import type { ClientMsg, ServerMsg } from "./protocol";
-import { Room } from "./room";
+import { Room, type ChampSave } from "./room";
+import { storeSet } from "../ui/common";
 
 export interface Connection {
   send(msg: ClientMsg): void;
@@ -16,10 +17,12 @@ export class LocalConnection implements Connection {
   private room: Room;
   private id: string;
 
-  constructor(name: string, teamName: string) {
+  constructor(name: string, teamName: string, resume?: ChampSave) {
     // entrega assíncrona, igual seria pela rede
     this.room = new Room("SOLO", (_pid, msg) => queueMicrotask(() => this.onMessage(msg)), true);
-    this.id = this.room.join(name, teamName)!;
+    this.room.onSave = (s) => storeSet("pwm.champ", s ? JSON.stringify(s) : "");
+    this.id = this.room.join(resume?.name ?? name, resume?.teamName ?? teamName)!;
+    if (resume) queueMicrotask(() => this.room.resume(this.id, resume));
     // depuração: ?debug expõe a sala no console (window.__room)
     if (location.search.includes("debug")) (window as unknown as { __room: Room }).__room = this.room;
   }

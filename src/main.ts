@@ -6,7 +6,7 @@ import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
 import type { QualiResult } from "./sim/weekend";
-import { toast } from "./ui/common";
+import { storeSet, toast } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
 import { LobbyScreen } from "./ui/lobby";
 import { showMenu, type MenuChoice } from "./ui/menu";
@@ -60,16 +60,34 @@ class App {
     if (AUTO) this.connect({ mode: "solo", name: "Teste", teamName: "Equipe Teste" });
   }
 
-  private connect(c: MenuChoice) {
-    const conn: Connection = c.mode === "solo" ? new LocalConnection(c.name, c.teamName) : new WsConnection();
+  private connect(c: MenuChoice, retry = 0) {
+    const local = c.mode === "solo" || c.mode === "resume";
+    const conn: Connection = local ? new LocalConnection(c.name, c.teamName, c.save) : new WsConnection();
     this.conn = conn;
-    conn.onMessage = (m) => this.onMessage(m);
+    conn.onMessage = (m) => {
+      if (m.t === "lobby" && !m.lobby.solo && m.lobby.token) {
+        retry = 0;
+        storeSet("pwm.session", JSON.stringify({ code: m.lobby.code, token: m.lobby.token }));
+      }
+      this.onMessage(m);
+    };
     conn.onClose = (reason) => {
       if (this.conn !== conn) return;
-      toast(reason);
       this.conn = null;
+      // caiu no meio do fim de semana: tenta voltar sozinho algumas vezes
+      const l = this.lobby;
+      if (l && !l.solo && l.token && l.phase !== "lobby" && retry < 6) {
+        toast(retry === 0 ? "Conexão caiu. Reconectando..." : `Reconectando... (${retry + 1}/6)`);
+        setTimeout(() => this.connect({ mode: "rejoin", name: c.name, teamName: c.teamName, code: l.code, token: l.token }, retry + 1), 1500 + retry * 1000);
+        return;
+      }
+      toast(reason);
+      this.lobby = null;
       this.menu();
     };
+    // telas antigas guardam a conexão velha: redesenha tudo ao voltar
+    if (c.mode === "rejoin") this.screenPhase = null;
+    if (c.mode === "rejoin") conn.send({ t: "rejoin", code: c.code!, token: c.token! });
     if (c.mode === "create") conn.send({ t: "create", name: c.name, teamName: c.teamName });
     if (c.mode === "join") conn.send({ t: "join", code: c.code!, name: c.name, teamName: c.teamName });
   }
@@ -78,6 +96,7 @@ class App {
     const c = this.conn;
     this.conn = null;
     c?.close();
+    if (this.lobby && !this.lobby.solo) storeSet("pwm.session", "");
     this.lobby = null;
     this.menu();
   }
@@ -90,6 +109,7 @@ class App {
     switch (m.t) {
       case "error":
         toast(m.msg);
+        if (/não existe mais|voltar pra essa sala/.test(m.msg)) storeSet("pwm.session", "");
         if (!this.lobby) this.leave();
         break;
       case "lobby":

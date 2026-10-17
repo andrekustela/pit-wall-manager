@@ -35,9 +35,26 @@ interface Player {
   tunings: Record<string, Tuning>;
   practiceCount: Record<string, number>;
   practiceLaps: Record<string, QualiLap[]>;
+  /** senha secreta pra voltar pra sala se a conexão cair */
+  token: string;
 }
 
 export type Send = (playerId: string, msg: ServerMsg) => void;
+
+/** campeonato solo salvo no navegador (pra continuar depois) */
+export interface ChampSave {
+  v: 1;
+  champ: ChampState;
+  lineup: Lineup;
+  reserves: Record<string, string>;
+  swapUsed: string[];
+  laps: number;
+  equalCars: boolean;
+  realDrivers: boolean;
+  teamId: string;
+  name: string;
+  teamName: string;
+}
 
 export class Room {
   readonly players = new Map<string, Player>();
@@ -76,6 +93,46 @@ export class Room {
 
   constructor(readonly code: string, private send: Send, readonly solo = false) {}
 
+  /** chamado no solo depois de cada etapa do campeonato (null = acabou, apaga o save) */
+  onSave: ((s: ChampSave | null) => void) | null = null;
+
+  private saveChamp() {
+    const ch = this.champ;
+    const p = [...this.players.values()][0];
+    if (!this.onSave || !ch || !p?.teamId) return;
+    if (ch.finished) return this.onSave(null);
+    this.onSave({
+      v: 1,
+      champ: ch,
+      lineup: this.lineup,
+      reserves: this.reserves,
+      swapUsed: [...this.swapUsed],
+      laps: this.laps,
+      equalCars: this.equalCars,
+      realDrivers: this.realDrivers,
+      teamId: p.teamId,
+      name: p.name,
+      teamName: p.teamName,
+    });
+  }
+
+  /** continua um campeonato salvo: já começa a próxima etapa */
+  resume(id: string, s: ChampSave) {
+    const p = this.players.get(id);
+    if (!p || this.phase !== "lobby") return;
+    p.teamId = s.teamId;
+    this.laps = s.laps;
+    this.equalCars = s.equalCars;
+    this.realDrivers = s.realDrivers;
+    this.champMode = true;
+    this.lineup = s.lineup;
+    this.reserves = s.reserves;
+    this.swapUsed = new Set(s.swapUsed);
+    this.champ = s.champ;
+    this.champ.round++;
+    this.startWeekend();
+  }
+
   private teamDrivers(teamId: string | null): string[] {
     return teamId ? (this.lineup[teamId] ?? []) : [];
   }
@@ -98,12 +155,50 @@ export class Room {
       tunings: {},
       practiceCount: {},
       practiceLaps: {},
+      token: Math.random().toString(36).slice(2) + Date.now().toString(36),
     };
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
     this.broadcastLobby();
     return p.id;
   }
+
+  /** conexão caiu: no lobby sai; no meio do fim de semana guarda a vaga (a IA assume) */
+  disconnect(id: string) {
+    const p = this.players.get(id);
+    if (!p) return;
+    if (this.phase === "lobby") return this.leave(id);
+    p.connected = false;
+    if (this.race && p.teamId) this.race.setHuman(p.teamId, false);
+    if (this.hostId === id) {
+      const other = [...this.players.values()].find((o) => o.connected);
+      if (other) this.hostId = other.id;
+    }
+    this.checkAdvance();
+    this.broadcastLobby();
+  }
+
+  /** volta pra sala com a senha; devolve o id do jogador */
+  rejoin(token: string): string | null {
+    const p = [...this.players.values()].find((x) => x.token === token);
+    if (!p) return null;
+    p.connected = true;
+    if (this.race && p.teamId) this.race.setHuman(p.teamId, true);
+    if (![...this.players.values()].some((o) => o.connected && o.id === this.hostId)) this.hostId = p.id;
+    this.broadcastLobby();
+    // reenvia o que a tela precisa pra continuar
+    if (this.phase === "practice")
+      for (const [carId, laps] of Object.entries(p.practiceLaps)) laps.forEach((lap, lapIndex) => this.send(p.id, { t: "practice", carId, lapIndex, lap }));
+    if ((this.phase === "quali" || this.phase === "strategy") && this.lastQuali) this.send(p.id, { t: "quali", ...this.lastQuali });
+    if (this.race && this.lastStart) this.send(p.id, { t: "start", opts: this.lastStart, speed: this.speed });
+    return p.id;
+  }
+
+  isAbandoned() {
+    return [...this.players.values()].every((p) => !p.connected);
+  }
+
+  private lastStart: RaceOptions | null = null;
 
   leave(id: string) {
     const p = this.players.get(id);
@@ -311,7 +406,8 @@ export class Room {
   /** avança de fase quando todo mundo (conectado) está pronto */
   private checkAdvance() {
     const ps = [...this.players.values()];
-    if (ps.length === 0 || !ps.every((p) => p.ready)) return;
+    // quem caiu não segura ninguém (conta como pronto)
+    if (ps.length === 0 || !ps.every((p) => p.ready || !p.connected)) return;
     if (this.phase === "practice") this.startQuali();
     else if (this.phase === "quali") this.setPhase("strategy");
     else if (this.phase === "strategy") this.startRace();
@@ -363,6 +459,7 @@ export class Room {
       lineup: w.lineup,
     };
     this.race = new Race(opts);
+    this.lastStart = opts;
     this.speed = 1;
     this.sentEvents = 0;
     this.ticks = 0;
@@ -396,7 +493,10 @@ export class Room {
       this.sentEvents = race.events.length;
     }
     if (done) {
-      if (this.champ) awardPoints(this.champ, race);
+      if (this.champ) {
+        awardPoints(this.champ, race);
+        this.saveChamp();
+      }
       this.dispose();
       this.race = null;
       this.broadcast({ t: "end" });
@@ -417,6 +517,7 @@ export class Room {
       code: this.code,
       solo: this.solo,
       you: id,
+      token: this.players.get(id)?.token,
       hostId: this.hostId,
       phase: this.phase,
       laps: this.laps,
