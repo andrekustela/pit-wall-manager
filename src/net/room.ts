@@ -2,8 +2,8 @@
 // estratégia -> corrida -> pódio). Não sabe nada de rede: no solo roda no
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
-import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, repairEngine, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
+import { drawLineup, drawReserves, poolOf, type Lineup } from "../sim/drivers";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
 import { CREW_DEFAULT } from "../sim/race";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
@@ -177,6 +177,9 @@ export class Room {
     this.champ.crew ??= Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT]));
     this.champ.id ??= Math.random().toString(36).slice(2, 10);
     this.champName = this.champ.name ?? "";
+    // continua da última etapa terminada (o "pronto" da sede avança pra próxima),
+    // mesmo que o save seja do começo do campeonato ou do meio de um fim de semana
+    if (!this.champ.finished) this.champ.round = this.champ.results.length - 1;
   }
 
   private teamDrivers(teamId: string | null): string[] {
@@ -321,6 +324,8 @@ export class Room {
         this.champ = this.champMode ? newChampionship(this.champPct) : null;
         if (this.champ) this.champ.name = this.champName || `Campeonato ${new Date().toLocaleDateString("pt-BR")}`;
         this.startWeekend();
+        // já aparece em "Meus campeonatos" desde o começo (não precisa esperar a 1ª corrida)
+        if (this.champ) this.saveChamp();
         break;
       case "practiceLap": {
         if (this.phase !== "practice" || !this.owns(p, msg.carId)) return;
@@ -436,6 +441,35 @@ export class Room {
         this.broadcastLobby();
         break;
       }
+      case "newSeason": {
+        // carreira: o host começa a próxima temporada (na sede, depois do campeonato acabar)
+        const ch = this.champ;
+        if (!isHost || this.phase !== "hq" || !ch?.finished) return;
+        const humans = new Set([...this.players.values()].map((x) => x.teamId!).filter(Boolean));
+        this.lineup = startNewSeason(ch, this.lineup, humans, poolOf(this.realDrivers).map((d) => d.id), Math.random);
+        ch.round = -1; // o "pronto" da sede avança pra etapa 0
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
+      case "renewDriver": {
+        const ch = this.champ;
+        if (this.phase !== "hq" || !ch?.finished || !p.teamId || !this.owns(p, msg.carId)) return;
+        if (!renewDriver(ch, p.teamId, msg.carId)) return;
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
+      case "signDriver": {
+        const ch = this.champ;
+        if (this.phase !== "hq" || !ch?.finished || !p.teamId || !this.owns(p, msg.outId)) return;
+        const lu = signDriver(ch, this.lineup, p.teamId, msg.outId, msg.inId);
+        if (!lu) return;
+        this.lineup = lu;
+        this.saveChamp();
+        this.broadcastLobby();
+        break;
+      }
       case "upgradeCrew": {
         // treina a equipe de mecânicos (pit stop mais rápido e com menos erro)
         const ch = this.champ;
@@ -484,7 +518,9 @@ export class Room {
     const players = [...this.players.values()];
     const seed = (Math.random() * 2 ** 32) >>> 0;
     // pilotos sorteados agora (depois da escolha das equipes); no campeonato, só na 1ª etapa
-    if (!this.champ || this.champ.round === 0) this.newLineup();
+    // pilotos novos só num jogo novo (ou na 1ª etapa da 1ª temporada); depois valem os contratos
+    if (!this.champ || (this.champ.round === 0 && (this.champ.season ?? 1) === 1 && !this.champ.contracts)) this.newLineup();
+    if (this.champ) initContracts(this.champ, this.lineup, Math.random);
     const human: Record<string, string> = {};
     const teamNames: Record<string, string> = {};
     for (const p of players) {
@@ -635,6 +671,8 @@ export class Room {
       if (this.champ) {
         awardPoints(this.champ, race);
         aiDevelop(this.champ, new Set([...this.players.values()].map((p) => p.teamId!)), Math.random, this.lineup);
+        // fim da temporada: abre o mercado de pilotos
+        if (this.champ.finished) openMarket(this.champ, this.lineup, poolOf(this.realDrivers).map((d) => d.id), Math.random);
         this.saveChamp();
       }
       this.dispose();

@@ -41,7 +41,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     .map((s) => {
       const ch = s.champ;
       const done = ch.results.length;
-      const next = ch.rounds[ch.round + 1];
+      const next = ch.rounds[ch.results.length]; // a próxima é a primeira que ainda não correu
       const when = s.updated ? new Date(s.updated).toLocaleDateString("pt-BR") : "";
       const status = ch.finished
         ? `🏆 Concluído · ${ch.rounds.length} etapas`

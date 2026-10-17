@@ -71,6 +71,9 @@ export type ClientMsg =
   | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "repairEngine"; carId: string }
   | { t: "upgradeCrew" }
+  | { t: "newSeason" }
+  | { t: "renewDriver"; carId: string }
+  | { t: "signDriver"; outId: string; inId: string }
   | { t: "newEngine"; carId: string }
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }

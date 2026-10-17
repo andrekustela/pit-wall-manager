@@ -45,6 +45,135 @@ export interface ChampState {
   /** nome que o jogador deu pro campeonato e um id pra achar o save */
   name?: string;
   id?: string;
+  /** carreira: temporada atual (1, 2, ...) e o resumo das que já acabaram */
+  season?: number;
+  past?: SeasonSummary[];
+  /** temporadas de contrato que faltam pra cada piloto (0 = acaba agora) */
+  contracts?: Record<string, number>;
+  /** pilotos livres no mercado (fim de temporada) */
+  market?: string[];
+}
+
+export interface SeasonSummary {
+  season: number;
+  champion: string; // piloto campeão
+  championTeam: string;
+  /** equipes na ordem final */
+  teamOrder: string[];
+  teamPts: Record<string, number>;
+  rounds: number;
+}
+
+/** custos do mercado (pontos de desenvolvimento) */
+export const RENEW_COST = 2;
+export const SIGN_COST = 3;
+
+/** contratos iniciais: 1 a 3 temporadas pra cada piloto */
+export function initContracts(ch: ChampState, lineup: Record<string, string[]>, rnd: () => number) {
+  ch.contracts ??= {};
+  for (const cars of Object.values(lineup)) for (const id of cars) ch.contracts[id] ??= 1 + Math.floor(rnd() * 3);
+}
+
+/** abre o mercado no fim da temporada: pilotos livres (fora das equipes) */
+export function openMarket(ch: ChampState, lineup: Record<string, string[]>, pool: string[], rnd: () => number) {
+  const used = new Set(Object.values(lineup).flat());
+  const free = pool.filter((id) => !used.has(id)).sort(() => rnd() - 0.5);
+  ch.market = free.slice(0, 6);
+}
+
+/** renova o contrato do piloto por mais 2 temporadas */
+export function renewDriver(ch: ChampState, team: string, id: string): boolean {
+  if ((ch.devPts[team] ?? 0) < RENEW_COST) return false;
+  ch.devPts[team] -= RENEW_COST;
+  ch.contracts ??= {};
+  ch.contracts[id] = (ch.contracts[id] ?? 0) + 2;
+  return true;
+}
+
+/** contrata um piloto livre no lugar de outro da equipe; devolve a escalação nova */
+export function signDriver(ch: ChampState, lineup: Record<string, [string, string]>, team: string, outId: string, inId: string): Record<string, [string, string]> | null {
+  const pair = lineup[team];
+  if (!pair || !pair.includes(outId) || !ch.market?.includes(inId) || (ch.devPts[team] ?? 0) < SIGN_COST) return null;
+  ch.devPts[team] -= SIGN_COST;
+  const np = [...pair] as [string, string];
+  np[np.indexOf(outId)] = inId;
+  ch.market = ch.market.filter((x) => x !== inId).concat(outId); // quem saiu vai pro mercado
+  ch.contracts ??= {};
+  ch.contracts[inId] = 2;
+  delete ch.contracts[outId];
+  return { ...lineup, [team]: np };
+}
+
+/**
+ * Nova temporada: guarda o resumo, sorteia as pistas de novo, zera os pontos,
+ * o carro fica com metade da evolução (regulamento novo), motores e reservas
+ * renovam, mecânicos ficam. Contratos andam: a IA renova ou troca quem acabou;
+ * o jogador que não mexeu tem o piloto renovado por 1 temporada.
+ */
+export function startNewSeason(
+  ch: ChampState,
+  lineup: Record<string, [string, string]>,
+  humanTeams: Set<string>,
+  pool: string[],
+  rnd: () => number,
+): Record<string, [string, string]> {
+  const allIds = Object.values(lineup).flat();
+  const byTeam = (d: string) => Object.entries(lineup).find(([, c]) => c.includes(d))?.[0] ?? "";
+  const drivers = standings(ch.driverPts, allIds, ch.results, byTeam);
+  const teams = standings(ch.teamPts, Object.keys(lineup), ch.results, byTeam, true);
+  (ch.past ??= []).push({
+    season: ch.season ?? 1,
+    champion: drivers[0]?.id ?? "",
+    championTeam: teams[0]?.id ?? "",
+    teamOrder: teams.map((t) => t.id),
+    teamPts: { ...ch.teamPts },
+    rounds: ch.rounds.length,
+  });
+  ch.season = (ch.season ?? 1) + 1;
+  // pistas novas (mesma quantidade de etapas)
+  const all = CIRCUITS.map((_, i) => i).sort(() => rnd() - 0.5);
+  ch.rounds = all.slice(0, ch.rounds.length);
+  ch.round = 0;
+  ch.driverPts = {};
+  ch.teamPts = {};
+  ch.results = [];
+  ch.finished = false;
+  ch.devLog = {};
+  ch.engines = {};
+  ch.gridPen = {};
+  ch.spares = Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(ch.rounds.length)]));
+  // regulamento novo: o carro perde metade da evolução
+  for (const lv of Object.values(ch.dev)) for (const a of DEV_AREAS) lv[a.id] = Math.floor(lv[a.id] / 2);
+  // pontos de desenvolvimento pra começar: quem ficou atrás ganha mais
+  teams.forEach((t, rank) => (ch.devPts[t.id] = (ch.devPts[t.id] ?? 0) + 3 + Math.round((rank / Math.max(1, teams.length - 1)) * 4)));
+  // contratos
+  ch.contracts ??= {};
+  let lu = { ...lineup };
+  const used = new Set(allIds);
+  const free = pool.filter((id) => !used.has(id)).sort(() => rnd() - 0.5);
+  for (const [team, pair] of Object.entries(lu)) {
+    const np = [...pair] as [string, string];
+    np.forEach((id, i) => {
+      const left = (ch.contracts![id] ?? 1) - 1;
+      if (left > 0) {
+        ch.contracts![id] = left;
+        return;
+      }
+      if (humanTeams.has(team) || rnd() < 0.6 || !free.length) {
+        ch.contracts![id] = humanTeams.has(team) ? 1 : 1 + Math.floor(rnd() * 2); // renovou
+        return;
+      }
+      // IA trocou de piloto
+      const nw = free.shift()!;
+      free.push(id);
+      delete ch.contracts![id];
+      ch.contracts![nw] = 1 + Math.floor(rnd() * 3);
+      np[i] = nw;
+    });
+    lu = { ...lu, [team]: np };
+  }
+  ch.market = [];
+  return lu;
 }
 
 /** custo (pontos de desenvolvimento) de subir os mecânicos do nível atual pro próximo */

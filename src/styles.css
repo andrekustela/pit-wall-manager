@@ -712,3 +712,11 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .rankbody { max-height: 70vh; overflow-y: auto; }
 .resumedbox { margin-top: 12px; border-color: #6ea8ff; }
 .onlinetag { font-family: var(--pix); font-size: 9px; color: #6ea8ff; margin-left: 6px; }
+
+/* mercado de pilotos */
+.hqtabs button.hot { color: var(--warn); }
+.mkrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.mkrow .btn { margin-left: auto; }
+.mkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.mkfree { border: 2px solid var(--line); padding: 10px; background: #141924; }
+.mkhead { display: flex; flex-direction: column; gap: 2px; }

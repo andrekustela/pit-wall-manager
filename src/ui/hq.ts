@@ -3,7 +3,7 @@
 // mecânicos, a sala de troféus e os pilotos. Daqui se vai pra próxima etapa.
 import type { Connection } from "../net/connection";
 import type { LobbyState } from "../net/protocol";
-import { POINTS, crewCost, standings } from "../sim/championship";
+import { POINTS, RENEW_COST, SIGN_COST, crewCost, standings } from "../sim/championship";
 import { TEAMS } from "../sim/data";
 import { profileOf } from "../sim/drivers";
 import { CREW_DEFAULT, CREW_MAX, crewErrorChance, crewStopTime, fmtLap } from "../sim/race";
@@ -12,7 +12,7 @@ import { devInner } from "./devPanel";
 import { driverCardHtml } from "./driverCard";
 import { drawTrackThumb, esc, teamDrivers, teamName, teamOfDriver, updateWaitBar } from "./common";
 
-type Tab = "resumo" | "fabrica" | "mecanicos" | "trofeus" | "pilotos";
+type Tab = "resumo" | "fabrica" | "mecanicos" | "trofeus" | "pilotos" | "mercado";
 
 const TABS: [Tab, string][] = [
   ["resumo", "RESUMO"],
@@ -49,6 +49,11 @@ export class HqScreen {
     if (rep && !rep.disabled) this.conn.send({ t: "repairEngine", carId: rep.dataset.repair! });
     const crew = t.closest<HTMLButtonElement>("[data-crew]");
     if (crew && !crew.disabled) this.conn.send({ t: "upgradeCrew" });
+    if (t.closest("#hq-season")) this.conn.send({ t: "newSeason" });
+    const rn = t.closest<HTMLButtonElement>("[data-renew]");
+    if (rn && !rn.disabled) this.conn.send({ t: "renewDriver", carId: rn.dataset.renew! });
+    const sg = t.closest<HTMLButtonElement>("[data-sign]");
+    if (sg && !sg.disabled) this.conn.send({ t: "signDriver", outId: sg.dataset.out!, inId: sg.dataset.sign! });
     if (t.closest("#hq-go")) {
       this.ready = !this.ready;
       this.conn.send({ t: "ready", ready: this.ready });
@@ -79,18 +84,18 @@ export class HqScreen {
     const tcol = TEAMS.find((t) => t.id === team)?.color ?? "#fff";
     const pts = ch.devPts[team] ?? 0;
     const body =
-      this.tab === "resumo" ? this.resumo() : this.tab === "fabrica" ? devInner(l) : this.tab === "mecanicos" ? this.mecanicos() : this.tab === "trofeus" ? this.trofeus() : this.pilotos();
+      this.tab === "resumo" ? this.resumo() : this.tab === "fabrica" ? devInner(l) : this.tab === "mecanicos" ? this.mecanicos() : this.tab === "trofeus" ? this.trofeus() : this.tab === "mercado" ? this.mercado() : this.pilotos();
     this.root.innerHTML = `
       <div class="screen"><div class="wrap hq">
         <div class="hqhead" style="border-left-color:${tcol}">
           <div><div class="hint" style="margin:0">SEDE DA EQUIPE · ${esc(ch.name ?? "Campeonato")}</div>
             <h1 class="title" style="margin:2px 0 0">${esc(teamName(l, team).toUpperCase())}</h1>
-            <div class="hint" style="margin:4px 0 0">${ch.finished ? "Campeonato encerrado" : `Etapa ${ch.results.length} de ${ch.rounds.length} concluída`} · engenheiro ${esc(me.name)}</div></div>
+            <div class="hint" style="margin:4px 0 0">Temporada ${ch.season ?? 1} · ${ch.finished ? "temporada encerrada" : `etapa ${ch.results.length} de ${ch.rounds.length} concluída`} · engenheiro ${esc(me.name)}</div></div>
           <div class="hqpts"><span class="devpts">${pts}</span><span>pontos de<br>desenvolvimento</span></div>
         </div>
-        <div class="seg hqtabs">${TABS.map(([k, n]) => `<button data-hqtab="${k}" class="${k === this.tab ? "on" : ""}">${n}</button>`).join("")}</div>
+        <div class="seg hqtabs">${[...TABS, ...(ch.finished ? ([["mercado", "MERCADO"]] as [Tab, string][]) : [])].map(([k, n]) => `<button data-hqtab="${k}" class="${k === this.tab ? "on" : ""} ${k === "mercado" ? "hot" : ""}">${n}</button>`).join("")}</div>
         <div class="box hqbody">${body}</div>
-        <div class="row-btns" style="margin-top:18px"><button class="go" id="hq-go" style="margin:0"></button></div>
+        <div class="row-btns" style="margin-top:18px;align-items:center">${ch.finished && this.lobby.hostId === this.lobby.you ? `<button class="go" id="hq-season" style="margin:0">🏁 NOVA TEMPORADA ${(ch.season ?? 1) + 1} ▶</button>` : ""}<button class="${ch.finished ? "btn" : "go"}" id="hq-go" style="margin:0"></button></div>
       </div></div>`;
     this.renderGo();
     const cv = this.root.querySelector<HTMLCanvasElement>("canvas.hqtrack");
@@ -103,7 +108,7 @@ export class HqScreen {
     const b = this.root.querySelector<HTMLButtonElement>("#hq-go");
     if (!b) return;
     const next = ch.rounds[ch.round + 1];
-    b.textContent = this.ready ? "PRONTO ✓" : ch.finished ? "ENCERRAR CAMPEONATO ▶" : `IR PRA PRÓXIMA ETAPA: ${(CIRCUITS[next]?.name ?? "").toUpperCase()} ▶`;
+    b.textContent = this.ready ? "PRONTO ✓" : ch.finished ? "ENCERRAR CARREIRA" : `IR PRA PRÓXIMA ETAPA: ${(CIRCUITS[next]?.name ?? "").toUpperCase()} ▶`;
   }
 
   // ---------- abas ----------
@@ -196,7 +201,55 @@ export class HqScreen {
     const tot = (n: number | string, label: string) => `<div><b>${n}</b><span>${label}</span></div>`;
     return `<div class="statsgrid">${tot(wins, "vitórias")}${tot(pods, "pódios")}${tot(poles, "poles")}${tot(fls, "voltas mais rápidas")}</div>
       <p class="hint">${points} pontos marcados pela equipe neste campeonato.</p>
-      <div class="trophies">${cards || `<p class="hint">Nenhuma etapa disputada ainda.</p>`}</div>`;
+      <div class="trophies">${cards || `<p class="hint">Nenhuma etapa disputada ainda.</p>`}</div>
+      ${this.pastSeasons()}`;
+  }
+
+  /** temporadas anteriores (carreira) */
+  private pastSeasons(): string {
+    const l = this.lobby;
+    const past = l.champ!.past ?? [];
+    if (!past.length) return "";
+    const team = this.me().teamId ?? "";
+    const rows = past
+      .map((p) => {
+        const pos = p.teamOrder.indexOf(team) + 1;
+        const champ = p.championTeam === team;
+        return `<tr class="${champ ? "player" : ""}"><td>${p.season}</td><td>${champ ? "🏆 " : ""}${esc(profileOf(p.champion)?.name ?? p.champion)}</td><td>${esc(teamName(l, p.championTeam))}</td><td class="num">${pos ? `${pos}º` : "—"}</td><td class="num">${p.teamPts[team] ?? 0}</td><td class="num">${p.rounds}</td></tr>`;
+      })
+      .join("");
+    return `<h3 style="margin-top:18px">TEMPORADAS ANTERIORES</h3><table class="results"><tr><th>TEMP.</th><th>CAMPEÃO</th><th>EQUIPE CAMPEÃ</th><th>SUA EQUIPE</th><th>PONTOS</th><th>ETAPAS</th></tr>${rows}</table>`;
+  }
+
+  /** fim da temporada: renovar contratos e contratar pilotos livres */
+  private mercado(): string {
+    const l = this.lobby;
+    const ch = l.champ!;
+    const team = this.me().teamId ?? "";
+    const color = TEAMS.find((t) => t.id === team)?.color ?? "#fff";
+    const pts = ch.devPts[team] ?? 0;
+    const mine = teamDrivers(l, team);
+    const myRows = mine
+      .map((d) => {
+        const ct = ch.contracts?.[d.id] ?? 1;
+        const ends = ct <= 1;
+        return `<div class="mkrow"><span class="tdot" style="background:${color}"></span><b>${esc(d.name)}</b><span class="hint" style="margin:0">nota ${d.rating} · ${ends ? "contrato acaba nesta temporada" : `contrato: mais ${ct - 1} temporada(s)`}</span>
+          <button class="btn small ${ends && pts >= RENEW_COST ? "primary" : ""}" data-renew="${d.id}" ${pts >= RENEW_COST ? "" : "disabled"}>RENOVAR +2 TEMP. · ${RENEW_COST} pts</button></div>`;
+      })
+      .join("");
+    const free = (ch.market ?? [])
+      .map((id) => {
+        const p = profileOf(id);
+        if (!p) return "";
+        return `<div class="mkfree"><div class="mkhead"><b>${esc(p.name)}</b><span class="hint" style="margin:0">${esc(p.style)} · nota ${p.rating}</span></div>
+          <div class="row-btns" style="margin:6px 0 0">${mine
+            .map((d) => `<button class="btn small" data-sign="${id}" data-out="${d.id}" ${pts >= SIGN_COST ? "" : "disabled"}>NO LUGAR DE ${esc(d.name.split(" ").slice(-1)[0].toUpperCase())} · ${SIGN_COST} pts</button>`)
+            .join("")}</div></div>`;
+      })
+      .join("");
+    return `<p class="hint" style="margin-top:0">Fim da temporada ${ch.season ?? 1}. Quem tem contrato acabando e não for renovado continua por mais 1 temporada. Na temporada nova o carro fica com metade da evolução, motores e reservas renovam e os mecânicos ficam.</p>
+      <h3>SEUS PILOTOS</h3>${myRows}
+      <h3 style="margin-top:16px">PILOTOS LIVRES NO MERCADO</h3><div class="mkgrid">${free || `<p class="hint">Ninguém livre agora.</p>`}</div>`;
   }
 
   private pilotos(): string {
@@ -209,7 +262,8 @@ export class HqScreen {
         const res = ch.results.map((r) => (r.retired.includes(d.id) ? null : r.order.indexOf(d.id) + 1));
         const finished = res.filter((x): x is number => !!x);
         const best = finished.length ? Math.min(...finished) : null;
-        return `<div><div class="hqdstat"><b>${ch.driverPts[d.id] ?? 0}</b> pontos · melhor resultado ${best ? `${best}º` : "—"} · ${res.filter((x) => x === null).length} abandono(s)</div>${driverCardHtml(d, teamName(l, team), color)}</div>`;
+        const ct = ch.contracts?.[d.id];
+        return `<div><div class="hqdstat"><b>${ch.driverPts[d.id] ?? 0}</b> pontos · melhor resultado ${best ? `${best}º` : "—"} · ${res.filter((x) => x === null).length} abandono(s)${ct !== undefined ? ` · contrato: ${ct} temporada${ct === 1 ? "" : "s"}` : ""}</div>${driverCardHtml(d, teamName(l, team), color)}</div>`;
       })
       .join("")}</div>`;
   }

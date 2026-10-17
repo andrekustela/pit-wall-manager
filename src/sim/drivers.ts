@@ -123,7 +123,8 @@ export const DRIVER_POOL: DriverProfile[] = buildPool();
 export const LEGEND_POOL: DriverProfile[] = buildLegends(styleOf);
 const BY_ID = new Map([...DRIVER_POOL, ...LEGEND_POOL].map((d) => [d.id, d]));
 
-const poolOf = (real?: boolean) => (real ? LEGEND_POOL : DRIVER_POOL);
+/** base de pilotos (lendas reais ou fictícios) */
+export const poolOf = (real?: boolean) => (real ? LEGEND_POOL : DRIVER_POOL);
 
 export function profileOf(id: string): DriverProfile | undefined {
   return BY_ID.get(id);

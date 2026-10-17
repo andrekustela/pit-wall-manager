@@ -225,7 +225,7 @@ class App {
         this.quali = null;
         this.screen = new PracticeScreen(app, conn, l);
         // pilotos acabaram de ser sorteados (fim de semana novo ou 1ª etapa do campeonato)
-        if (l.weekend && this.draftSeen !== l.weekend.seed && (!l.champ || l.champ.round === 0)) {
+        if (l.weekend && this.draftSeen !== l.weekend.seed && (!l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1))) {
           this.draftSeen = l.weekend.seed;
           if (!AUTO) showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
         }
