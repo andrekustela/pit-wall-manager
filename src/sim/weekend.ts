@@ -40,13 +40,27 @@ export function practiceLap(w: WeekendInfo, carId: string, tuning: Tuning, lapIn
 
 export interface QualiResult {
   carId: string;
+  /** tempo que vale pro grid (da última sessão que o carro disputou) */
   time: number;
   tyre: string;
   topSpeed: number;
   tuning: Tuning;
+  /** tempos no Q1, Q2 e Q3 (só das sessões que disputou) */
+  q: number[];
+  /** em que sessão caiu (1 ou 2); 3 = foi até o Q3 */
+  out: 1 | 2 | 3;
 }
 
-/** classificação: uma volta lançada por carro. Retorna o grid e os acertos de todos. */
+/** quantos passam de cada sessão (com 20 carros: 15 pro Q2, 10 pro Q3) */
+export function qualiCuts(n: number): [number, number] {
+  return [Math.max(1, n - 5), Math.max(1, Math.min(10, n - 10))];
+}
+
+/**
+ * Classificação em 3 sessões (Q1, Q2, Q3): cada carro faz uma volta lançada por
+ * sessão, os mais lentos vão caindo. A pista emborracha e melhora a cada sessão.
+ * Retorna o grid e os acertos de todos.
+ */
 export function runQualifying(w: WeekendInfo, humanTunings: Record<string, Tuning>) {
   const track = getTrack(w.trackIndex);
   const { teams, drivers } = buildEntrants(w);
@@ -54,13 +68,32 @@ export function runQualifying(w: WeekendInfo, humanTunings: Record<string, Tunin
   const rng = new Rng(w.seed ^ 0x2545f491);
   const cond = weekendConditions(w);
   const results: QualiResult[] = drivers.map((d) => {
-    const team = teams.find((t) => t.id === d.teamId)!;
-    const eng = w.engineers[team.id];
+    const eng = w.engineers[d.teamId];
     const tuning = clampTuning(humanTunings[d.id] ?? aiTuning(track, eng?.quality ?? 0.6, rng, cond, d));
-    const lap = qualiLap(track, team, d, tuning, wet, rng, 8, cond);
-    return { carId: d.id, time: lap.time, tyre: lap.tyre, topSpeed: lap.topSpeed, tuning };
+    return { carId: d.id, time: 0, tyre: "S", topSpeed: 0, tuning, q: [], out: 3 };
   });
-  results.sort((a, b) => a.time - b.time);
+  const cuts = qualiCuts(results.length);
+  let alive = results;
+  for (let session = 0; session < 3; session++) {
+    for (const r of alive) {
+      const d = drivers.find((x) => x.id === r.carId)!;
+      const team = teams.find((t) => t.id === d.teamId)!;
+      const lap = qualiLap(track, team, d, r.tuning, wet, rng, 8, cond);
+      const t = lap.time - session * 0.12; // pista emborrachando
+      r.q.push(t);
+      r.time = t;
+      r.tyre = lap.tyre;
+      r.topSpeed = lap.topSpeed;
+    }
+    alive.sort((a, b) => a.time - b.time);
+    if (session < 2) {
+      const keep = cuts[session];
+      for (const r of alive.slice(keep)) r.out = (session + 1) as 1 | 2;
+      alive = alive.slice(0, keep);
+    }
+  }
+  // grid: quem foi mais longe na frente; dentro da sessão, pelo tempo dela
+  results.sort((a, b) => b.out - a.out || a.time - b.time);
   const tunings: Record<string, Tuning> = {};
   for (const r of results) tunings[r.carId] = r.tuning;
   return { results, tunings, grid: results.map((r) => r.carId), wet };
