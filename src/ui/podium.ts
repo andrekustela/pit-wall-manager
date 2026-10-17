@@ -5,6 +5,7 @@ import type { Race } from "../sim/race";
 import type { CarState } from "../sim/types";
 import { esc, updateWaitBar } from "./common";
 import { resultsTable } from "./results";
+import { bindTelemetry, telemetryHtml } from "./telemetry";
 import { POINTS, standings } from "../sim/championship";
 import { CIRCUITS } from "../sim/track";
 
@@ -44,8 +45,10 @@ export class PodiumScreen {
         ${champSection(race, lobby)}
         <h2>RESULTADO COMPLETO · ${esc(race.track.name)} · ${race.laps} VOLTAS</h2>
         ${resultsTable(race, me.teamId ?? "")}
+        ${telemetryHtml(race, me.teamId ?? "")}
         <button class="go" id="pd-go">${goLabel(lobby)}</button>
       </div></div>`;
+    bindTelemetry(root);
     const go = root.querySelector<HTMLButtonElement>("#pd-go")!;
     go.addEventListener("click", () => {
       this.ready = !this.ready;

@@ -499,7 +499,7 @@ export class Room {
       }
       this.dispose();
       this.race = null;
-      this.broadcast({ t: "end" });
+      this.broadcast({ t: "end", tele: race.telemetry });
       this.setPhase("podium");
     }
   }

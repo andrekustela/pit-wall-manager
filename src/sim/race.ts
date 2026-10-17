@@ -28,6 +28,15 @@ import {
 import { makeWeather, rainAt, type WeatherPlan } from "./weather";
 import { ENGINE_SAVE, ENGINE_WEAR_PER_LAP, NO_DAMAGE, PARTS, type PartId } from "./parts";
 
+/** uma volta na telemetria: tempo, posição ao cruzar a linha, pneu, parou no box, safety car */
+export interface LapRec {
+  t: number;
+  p: number;
+  c: Compound;
+  pit: boolean;
+  sc: boolean;
+}
+
 export interface RaceOptions {
   seed: number;
   laps: number;
@@ -120,6 +129,9 @@ export class Race {
   rain = 0;
   sc: SafetyCar = { active: false, onTrack: false, s: 0, v: 0, lapsLeft: 0 };
   fastestLap: { carId: string; time: number } | null = null;
+  /** telemetria volta a volta (só na sala; vai pro cliente no fim da corrida) */
+  telemetry: Record<string, LapRec[]> = {};
+  private teleState: Record<string, { c: Compound; stops: number }> = {};
   /** contadores (pra balancear e pro resumo) */
   stats = { attempts: 0, aborts: 0, noSide: 0, overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0 };
 
@@ -1003,9 +1015,17 @@ export class Race {
     c.lap++;
     // instante exato em que cruzou a linha (s já passou um pouco do zero)
     const crossT = this.time - c.s / Math.max(c.v, 1);
+    const ts = (this.teleState[c.id] ??= { c: c.compound, stops: c.pitStops });
     if (c.lap >= 1) {
       c.tyreLaps++;
       const lt = crossT - c.lapStartTime;
+      (this.telemetry[c.id] ??= []).push({
+        t: Math.round(lt * 1000) / 1000,
+        p: c.position,
+        c: ts.c,
+        pit: c.pitStops > ts.stops,
+        sc: this.sc.active,
+      });
       c.lastLap = lt;
       if (c.bestLap === null || lt < c.bestLap) c.bestLap = lt;
       if (!this.sc.active && (!this.fastestLap || lt < this.fastestLap.time)) {
@@ -1013,6 +1033,8 @@ export class Race {
         if (c.lap > 1) this.log(`Volta mais rápida: ${c.driver.name} ${fmtLap(lt)}`, c.isHuman, c.team.id, "fastest");
       }
     }
+    ts.c = c.compound;
+    ts.stops = c.pitStops;
     c.lapStartTime = crossT;
     c.lapNoise = this.rng.gauss(lapNoiseSd(c.driver));
 

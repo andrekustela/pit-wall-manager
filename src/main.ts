@@ -135,6 +135,7 @@ class App {
         break;
       case "end":
         this.lastRace = this.view?.race ?? null;
+        if (this.lastRace) this.lastRace.telemetry = m.tele;
         break;
     }
   }

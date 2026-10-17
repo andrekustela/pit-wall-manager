@@ -398,3 +398,22 @@ label.fld span { display: block; margin-bottom: 4px; }
 
 .resumerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
 .resumerow + .resumerow { border-top: 1px solid var(--line); }
+
+.tele { margin-bottom: 14px; }
+.teletabs { margin-bottom: 10px; flex-wrap: wrap; }
+.telesvg { width: 100%; height: auto; display: block; }
+.telesvg .ax { fill: var(--muted); font-size: 11px; font-family: var(--mono, monospace); }
+.telesvg .ax.ret { fill: #ff6b6b; }
+.telesvg .gl { stroke: #ffffff10; stroke-width: 1; }
+.telesvg .lbl { font-size: 11px; font-weight: 700; fill: #b7bfd0; }
+.telesvg .lbl.me { fill: #fff; }
+.telesvg .sl { font-size: 10px; font-weight: 700; fill: #111; pointer-events: none; }
+.telesvg .tl polyline { fill: none; stroke-width: 1.4; opacity: 0.4; stroke-linejoin: round; transition: opacity .12s, stroke-width .12s; }
+.telesvg .tl circle { opacity: 0.5; }
+.telesvg .tl.mine polyline { stroke-width: 3; opacity: 1; }
+.telesvg .tl.mine circle { opacity: 1; }
+.telesvg .tl.hl polyline { stroke-width: 4; opacity: 1; }
+.telesvg .tl.hl circle { opacity: 1; }
+.telesvg .srow.hl rect { filter: brightness(1.25); }
+.telesvg .tl { cursor: pointer; }
+.tdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }

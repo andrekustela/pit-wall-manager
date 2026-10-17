@@ -1,7 +1,7 @@
 // Mensagens entre cliente e sala (compartilhado pelos dois lados).
 import type { ChampState } from "../sim/championship";
 import type { Engineer } from "../sim/entrants";
-import type { RaceOptions, Snapshot } from "../sim/race";
+import type { LapRec, RaceOptions, Snapshot } from "../sim/race";
 import type { QualiLap } from "../sim/tuning";
 import type { CarSetup, Command, Tuning } from "../sim/types";
 import type { Forecast } from "../sim/weather";
@@ -85,7 +85,7 @@ export type ServerMsg =
   | { t: "quali"; results: QualiResult[]; wet: number }
   | { t: "start"; opts: RaceOptions; speed: number }
   | { t: "snap"; snap: Snapshot; speed: number }
-  | { t: "end" };
+  | { t: "end"; tele: Record<string, LapRec[]> };
 
 export const MAX_PLAYERS = 10;
 export const LAP_OPTIONS = [10, 20, 30];
