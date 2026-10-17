@@ -6,7 +6,7 @@ import { awardPoints, newChampionship, type ChampState } from "../sim/championsh
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
-import { clampTuning } from "../sim/tuning";
+import { clampTuning, type QualiLap } from "../sim/tuning";
 import { ALL_COMPOUNDS, DEFAULT_TUNING, FUEL_MAX, type CarSetup, type Tuning } from "../sim/types";
 import { PRACTICE_LAPS, practiceLap, runQualifying, weekendWeather, type WeekendInfo } from "../sim/weekend";
 import {
@@ -33,6 +33,7 @@ interface Player {
   setups: Record<string, CarSetup>;
   tunings: Record<string, Tuning>;
   practiceCount: Record<string, number>;
+  practiceLaps: Record<string, QualiLap[]>;
 }
 
 export type Send = (playerId: string, msg: ServerMsg) => void;
@@ -75,6 +76,7 @@ export class Room {
       setups: {},
       tunings: {},
       practiceCount: {},
+      practiceLaps: {},
     };
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
@@ -149,6 +151,7 @@ export class Room {
         p.practiceCount[msg.carId] = n + 1;
         p.tunings[msg.carId] = tuning;
         const lap = practiceLap(this.weekend!, msg.carId, tuning, n);
+        (p.practiceLaps[msg.carId] ??= []).push(lap);
         this.send(id, { t: "practice", carId: msg.carId, lapIndex: n, lap });
         break;
       }
@@ -176,6 +179,24 @@ export class Room {
       case "speed":
         if (isHost && this.race && SPEEDS.includes(msg.speed)) this.speed = msg.speed;
         break;
+      case "back": {
+        // volta uma etapa (host): treino -> lobby, classificação -> treino, estratégia -> classificação
+        if (!isHost) return;
+        if (this.phase === "practice") {
+          this.champ = null;
+          this.setPhase("lobby");
+        } else if (this.phase === "quali") {
+          this.setPhase("practice");
+          // reenvia as voltas de treino já feitas pra tela não perder o histórico
+          for (const pl of this.players.values())
+            for (const [carId, laps] of Object.entries(pl.practiceLaps))
+              laps.forEach((lap, lapIndex) => this.send(pl.id, { t: "practice", carId, lapIndex, lap }));
+        } else if (this.phase === "strategy" && this.lastQuali) {
+          this.setPhase("quali");
+          this.broadcast({ t: "quali", results: this.lastQuali.results, wet: this.lastQuali.wet });
+        }
+        break;
+      }
       case "abort":
         // host encerra o fim de semana/corrida e todo mundo volta pro lobby
         if (!isHost || this.phase === "lobby") return;
@@ -216,6 +237,7 @@ export class Room {
       p.tunings = {};
       p.setups = {};
       p.practiceCount = {};
+      p.practiceLaps = {};
       for (const d of DRIVERS.filter((x) => x.teamId === p.teamId)) p.tunings[d.id] = { ...DEFAULT_TUNING };
     }
     const ch = this.champ;
@@ -253,6 +275,8 @@ export class Room {
     }
   }
 
+  private lastQuali: { results: ReturnType<typeof runQualifying>["results"]; wet: number } | null = null;
+
   private startQuali() {
     const tunings: Record<string, Tuning> = {};
     for (const p of this.players.values()) Object.assign(tunings, p.tunings);
@@ -260,6 +284,7 @@ export class Room {
     this.qualiGrid = q.grid;
     this.qualiTunings = q.tunings;
     this.setPhase("quali");
+    this.lastQuali = { results: q.results, wet: q.wet };
     this.broadcast({ t: "quali", results: q.results, wet: q.wet });
   }
   private qualiGrid: string[] = [];

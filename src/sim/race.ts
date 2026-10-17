@@ -204,7 +204,8 @@ export class Race {
         position: i + 1,
         penalty: 0,
         targetLap: 0,
-        launch: this.rng.range(0.82, 1.12),
+        // arrancada: uns largam muito bem, outros patinam
+        launch: this.rng.range(0.55, 1.4),
         tyreWarn: 0,
         fuelWarn: 0,
         wetWarn: 0,
@@ -421,7 +422,7 @@ export class Race {
         if (c.pitTimer <= 0) this.finishStop(c);
         continue;
       }
-      const launching = this.dist(c) < 250;
+      const launching = this.dist(c) < 400;
       const accMax = Math.max(2, 13 * (1 - c.v / 100)) * (launching ? c.launch : 1) * (1 - this.wet * 0.3);
       if (target > c.v) c.v = Math.min(target, c.v + accMax * dt);
       else c.v = Math.max(target, c.v - (c.spin > 0 ? 70 : 45) * dt);
@@ -638,7 +639,9 @@ export class Race {
 
       // ---- faixa desejada (só na pista) ----
       if (c.pit === "none") {
-        let want = c.finished ? 4 : 0;
+        // largada: cada um segura a sua fila até a primeira curva (chegam lado a lado)
+        const opening = c.lap < 0 || (c.lap === 0 && this.dist(c) < 550);
+        let want = c.finished ? 4 : opening ? Math.round(c.lateral / LANE_STEP) * LANE_STEP : 0;
         // vai pro lado do pit antes da entrada
         if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
         if (c.defendTill > this.time) want = c.defendLat;
@@ -702,11 +705,13 @@ export class Race {
           const slow = blocker.v < myT * 0.7 || blocker.spin > 0 || blocker.retired || blocker.finished;
           const lapping = this.dist(blocker) < this.dist(c) - this.track.L / 2;
           let go = slow || lapping;
-          if (!go && myT > blocker.v * 1.003 && this.track.isStraight(c.s) && this.dist(c) >= c.nextAttemptS) {
+          // 1ª volta: briga em qualquer lugar, não só nas retas
+          const firstLap = c.lap <= 0;
+          if (!go && myT > blocker.v * 1.003 && (firstLap || this.track.isStraight(c.s)) && this.dist(c) >= c.nextAttemptS) {
             const delta = blocker.targetLap - c.targetLap;
             // na chuva o spray atrapalha: tenta menos
-            const p = Math.max(0.1, Math.min(0.92, 0.32 + delta * 0.7 + (gap < 12 ? 0.1 : 0) - this.wet * 0.06));
-            c.nextAttemptS = this.dist(c) + 300;
+            const p = Math.max(0.1, Math.min(0.95, 0.32 + delta * 0.7 + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.3 : 0) - this.wet * 0.06));
+            c.nextAttemptS = this.dist(c) + (firstLap ? 110 : 300);
             go = this.rng.chance(p);
           }
           if (go) {
@@ -791,7 +796,9 @@ export class Race {
           this.maybeContact(a, b, rear, Math.min(0.9, 0.2 + rel * 0.04) * (1 + this.wet));
         } else if (sideBySide && this.track.speedAt(a.s) < 62 && !this.sc.active && !a.finished && !b.finished) {
           // lado a lado na curva: risco de toque
-          if (this.rng.chance(0.008 * (1 + 2 * this.wet) * dt)) this.maybeContact(a, b, rear, 1);
+          // lado a lado na curva tem risco (bem mais na largada, com todo mundo junto)
+          const opening = a.lap <= 0 && b.lap <= 0 ? 2.5 : 1;
+          if (this.rng.chance(0.008 * opening * (1 + 2 * this.wet) * dt)) this.maybeContact(a, b, rear, 1);
         }
       }
     }

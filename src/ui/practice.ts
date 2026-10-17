@@ -7,7 +7,7 @@ import { carProfile, type QualiLap } from "../sim/tuning";
 import { COMPOUNDS, DEFAULT_TUNING, type Tuning } from "../sim/types";
 import { PRACTICE_LAPS } from "../sim/weekend";
 import { forecastText } from "../sim/weather";
-import { champLabel, drawTrackThumb, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, drawTrackThumb, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 type PracticeMsg = Extract<ServerMsg, { t: "practice" }>;
 
@@ -54,6 +54,7 @@ export class PracticeScreen {
         <div class="cols" id="p-cars"></div>
         <div class="row-btns" style="margin-top:20px">
           <button class="go" id="p-ready" style="margin:0">PRONTO PARA A CLASSIFICAÇÃO ▶</button>
+          ${backButtonHtml(lobby, lobby.champ && lobby.champ.round > 0 ? "VOLTAR PRO LOBBY (cancela o campeonato)" : "VOLTAR PRO LOBBY")}
         </div>
       </div></div>`;
 
@@ -86,6 +87,7 @@ export class PracticeScreen {
       requestAnimationFrame(() => drawTrackThumb(el.querySelector("canvas")!, w.trackIndex));
       this.renderPanel(panel);
     }
+    bindBackButton(root, (m) => conn.send(m), "Voltar pro lobby? Dá pra trocar equipe, pista e regras, mas o fim de semana recomeça.");
     root.querySelector("#p-ready")!.addEventListener("click", () => {
       this.ready = !this.ready;
       if (this.ready) for (const p of this.panels) this.sendFinal(p);

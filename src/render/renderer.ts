@@ -1,34 +1,26 @@
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage } from "./carArt";
-import { buildWorld, type World } from "./worldArt";
+import { WorldTiles } from "./worldTiles";
 
 /**
- * Desenha a corrida em duas camadas:
- *  - pista em pixel art (canvas de baixa resolução, ampliado sem suavizar)
- *  - carros, safety car, etiquetas, chuva e luzes numa camada de alta
- *    resolução por cima (carros em vetor, pré-desenhados por equipe)
+ * Desenha a corrida num canvas de alta resolução: a pista em vetor (em tiles,
+ * ver worldVector.ts) e por cima carros, safety car, etiquetas, chuva e luzes.
  * A câmera segue um carro; roda do mouse / +/- dão zoom.
  */
 export class Renderer {
-  private ctx: CanvasRenderingContext2D;
-  private overlay: HTMLCanvasElement;
   private octx: CanvasRenderingContext2D;
-  private world: World;
+  private world: WorldTiles;
   private cam = { x: 0, y: 0, ready: false };
   private drops: { x: number; y: number; l: number }[] = [];
   private screenPos = new Map<string, { x: number; y: number }>();
   private dpr = 1;
   private zoom = 0;
   followId: string;
-  pixelScale = 3;
 
   constructor(private canvas: HTMLCanvasElement, private race: Race, followId: string, onPick: (id: string) => void) {
-    this.ctx = canvas.getContext("2d")!;
-    this.overlay = document.createElement("canvas");
-    this.overlay.id = "view-hd";
-    canvas.after(this.overlay);
-    this.octx = this.overlay.getContext("2d")!;
-    this.world = buildWorld(race.track);
+    this.octx = canvas.getContext("2d")!;
+    canvas.style.imageRendering = "auto";
+    this.world = new WorldTiles(race.opts.trackIndex);
     this.followId = followId;
     this.resize();
     window.addEventListener("resize", this.resize);
@@ -58,14 +50,12 @@ export class Renderer {
 
   destroy() {
     window.removeEventListener("resize", this.resize);
-    this.overlay.remove();
+    this.world.destroy();
   }
 
-  /** zoom em passos inteiros (mantém a pixel art nítida) */
+  /** zoom em passos de 25% */
   setZoom(z: number) {
-    const base = this.baseScale();
-    this.zoom = Math.max(1 - base, Math.min(6, z));
-    this.resize();
+    this.zoom = Math.max(-4, Math.min(8, z));
   }
 
   zoomIn() {
@@ -76,27 +66,18 @@ export class Renderer {
     this.setZoom(this.zoom - 1);
   }
 
-  private baseScale() {
-    // ~200 m de pista visíveis na largura (carros grandes o bastante pra ver os detalhes)
-    return Math.max(1, Math.round(window.innerWidth / (200 * this.world.ppm)));
-  }
-
-  /** metros -> pixels CSS na tela */
+  /** metros -> pixels CSS na tela (~200 m visíveis na largura sem zoom) */
   private m2css() {
-    return this.world.ppm * this.pixelScale;
+    return (window.innerWidth / 200) * Math.pow(1.25, this.zoom);
   }
 
   private resize = () => {
     const w = window.innerWidth, h = window.innerHeight;
-    this.pixelScale = Math.max(1, this.baseScale() + this.zoom);
-    this.canvas.width = Math.ceil(w / this.pixelScale) + 2;
-    this.canvas.height = Math.ceil(h / this.pixelScale) + 2;
-    this.canvas.style.width = `${this.canvas.width * this.pixelScale}px`;
-    this.canvas.style.height = `${this.canvas.height * this.pixelScale}px`;
-    this.ctx.imageSmoothingEnabled = false;
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.overlay.width = Math.round(w * this.dpr);
-    this.overlay.height = Math.round(h * this.dpr);
+    this.canvas.width = Math.round(w * this.dpr);
+    this.canvas.height = Math.round(h * this.dpr);
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
   };
 
   /** um estado conhecido do carro (vindo da simulação) */
@@ -185,21 +166,18 @@ export class Renderer {
     return h[h.length - 1];
   }
 
+  /** posição na pista em metros */
   private px(s: number, lat: number) {
-    const p = this.race.track.pose(s, lat);
-    return { x: (p.x - this.world.minX) * this.world.ppm, y: (p.y - this.world.minY) * this.world.ppm, h: p.h };
+    return this.race.track.pose(s, lat);
   }
 
   private pos = new Map<string, { x: number; y: number; h: number }>();
 
   draw(realDt: number, speed: number) {
-    const g = this.ctx;
     const race = this.race;
-    const cw = this.canvas.width, ch = this.canvas.height;
     const L = race.track.L;
     const W = window.innerWidth, H = window.innerHeight;
-    const ps = this.pixelScale;
-    void speed;
+    const m = this.m2css();
 
     // posições interpoladas (em pixels do mundo)
     const rt = this.renderTime(realDt);
@@ -233,28 +211,23 @@ export class Renderer {
     this.cam = { x: cx, y: cy, ready: true };
     void realDt;
 
-    // canto da tela em pixels do mundo, com fração (rolagem sub-pixel)
-    const viewX = cx - W / ps / 2, viewY = cy - H / ps / 2;
-    const ox = Math.floor(viewX), oy = Math.floor(viewY);
-    this.canvas.style.transform = `translate(${(-(viewX - ox) * ps).toFixed(2)}px, ${(-(viewY - oy) * ps).toFixed(2)}px)`;
-
-    // ---- camada 1: pista em pixel art ----
-    g.fillStyle = race.track.def.grass[0];
-    g.fillRect(0, 0, cw, ch);
-    g.drawImage(this.world.canvas, ox, oy, cw, ch, 0, 0, cw, ch);
+    // ---- pista (vetor, em tiles) ----
+    const o = this.octx;
+    const viewX = cx - W / m / 2, viewY = cy - H / m / 2;
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    // câmera rápida (8x/16x): tiles mais leves (LOD)
+    const lod = speed >= 8 ? 0.25 : speed >= 4 ? 0.5 : 1;
+    this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, lod);
+    o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    o.imageSmoothingEnabled = true;
+    o.imageSmoothingQuality = "medium";
     if (race.wet > 0.02) {
-      g.fillStyle = `rgba(20,40,75,${(race.wet * 0.3).toFixed(3)})`;
-      g.fillRect(0, 0, cw, ch);
+      o.fillStyle = `rgba(20,40,75,${(race.wet * 0.3).toFixed(3)})`;
+      o.fillRect(0, 0, W, H);
     }
 
-    // ---- camada 2: alta resolução ----
-    const o = this.octx;
-    o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    o.clearRect(0, 0, W, H);
-    o.imageSmoothingEnabled = true;
-    o.imageSmoothingQuality = "high";
-    const m = this.m2css();
-    const toCss = (p: { x: number; y: number }) => ({ x: (p.x - viewX) * ps, y: (p.y - viewY) * ps });
+    // ---- carros e o resto por cima ----
+    const toCss = (p: { x: number; y: number }) => ({ x: (p.x - viewX) * m, y: (p.y - viewY) * m });
 
     this.screenPos.clear();
     const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;

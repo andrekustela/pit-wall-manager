@@ -6,7 +6,7 @@ import { CIRCUITS } from "../sim/track";
 import { ALL_COMPOUNDS, COMPOUNDS, DRY, FUEL_MAX, bestForWet, isWetTyre, type CarSetup, type Compound } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import type { QualiResult } from "../sim/weekend";
-import { champLabel, esc, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, esc, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 /**
  * Na tela o combustível é escolhido em VOLTAS (proporcional ao tamanho da
@@ -54,7 +54,7 @@ export class StrategyScreen {
           O plano é um lembrete: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você (e dá pra mudar as paradas na corrida).</div>
         </div>
         <div class="cols" id="s-cars"></div>
-        <button class="go" id="s-go">IR PARA O GRID ▶</button>
+        <div class="row-btns" style="align-items:center;margin-top:28px"><button class="go" id="s-go" style="margin:0">IR PARA O GRID ▶</button>${backButtonHtml(lobby, "VOLTAR PRA CLASSIFICAÇÃO")}</div>
       </div></div>`;
 
     const wrap = root.querySelector("#s-cars")!;
@@ -68,6 +68,7 @@ export class StrategyScreen {
       el.dataset.title = `${d.name.toUpperCase()} · LARGA EM P${q + 1}`;
       this.render(p);
     }
+    bindBackButton(root, (m) => this.conn.send(m));
     root.querySelector("#s-go")!.addEventListener("click", () => {
       this.ready = !this.ready;
       this.flush();

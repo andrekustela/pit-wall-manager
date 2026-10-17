@@ -78,14 +78,17 @@ export class LobbyScreen {
       const taken = o && !mine;
       const name = mine && me.teamName ? me.teamName : o?.teamName || t.name;
       return `<button class="teamcard ${mine ? "on" : ""}" data-team="${t.id}" ${taken ? "disabled" : ""}>
-        <canvas data-sprite="${t.id}" width="150" height="60"></canvas>
+        <canvas data-sprite="${t.id}" width="200" height="80"></canvas>
         <div><div class="tn">${esc(name)}</div><div class="st">${
           taken ? `de ${esc(o!.name)}` : lobby.equalCars ? "Carro igual pra todos" : `Carro ${stars(t.carPace)}`
         }</div></div></button>`;
     }).join("");
     teams.querySelectorAll<HTMLCanvasElement>("canvas[data-sprite]").forEach((cv) => {
+      // mesma imagem da corrida, sem esticar (mantém a proporção)
       const img = carImage(TEAMS.find((t) => t.id === cv.dataset.sprite)!).canvas;
-      cv.getContext("2d")!.drawImage(img, 0, 0, cv.width, cv.height);
+      const k = Math.min(cv.width / img.width, cv.height / img.height);
+      const w = img.width * k, h = img.height * k;
+      cv.getContext("2d")!.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
     });
     teams.querySelectorAll<HTMLButtonElement>("[data-team]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "team", teamId: b.dataset.team! })),

@@ -5,7 +5,7 @@ import { fmtLap } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
 import type { Compound } from "../sim/types";
 import type { QualiResult } from "../sim/weekend";
-import { champLabel, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
+import { backButtonHtml, bindBackButton, champLabel, esc, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 export class QualiScreen {
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -34,7 +34,7 @@ export class QualiScreen {
             .join("")}
         </div>
         <div class="polebanner" id="q-pole"></div>
-        <button class="go" id="q-go" style="margin-top:8px">IR PARA A ESTRATÉGIA ▶</button>
+        <div class="row-btns" style="align-items:center"><button class="go" id="q-go" style="margin:0">IR PARA A ESTRATÉGIA ▶</button>${backButtonHtml(lobby, "VOLTAR PRO TREINO")}</div>
       </div></div>`;
 
     // revela do último pro primeiro
@@ -47,6 +47,7 @@ export class QualiScreen {
         root.querySelector("#q-pole")!.textContent = `POLE POSITION: ${d.name} · ${fmtLap(pole)}`;
       }, 400 + order.length * 220),
     );
+    bindBackButton(root, (m) => conn.send(m));
     const go = root.querySelector<HTMLButtonElement>("#q-go")!;
     go.addEventListener("click", () => {
       rows.forEach((r) => r.classList.add("show"));

@@ -97,7 +97,7 @@ button { font-family: var(--font); color: inherit; cursor: pointer; }
 .teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .teamcard { text-align: left; background: var(--panel-solid); border: 2px solid var(--line); padding: 10px; display: flex; gap: 10px; align-items: center; }
 .teamcard.on { border-color: #fff; background: #1f2737; }
-.teamcard canvas { width: 75px; height: 30px; }
+.teamcard canvas { width: 100px; height: 40px; }
 .teamcard .tn { font-weight: 600; }
 .teamcard .st { color: var(--muted); font-size: 12px; }
 .opts { display: flex; gap: 24px; flex-wrap: wrap; }
@@ -299,3 +299,5 @@ label.fld span { display: block; margin-bottom: 4px; }
 @media (max-width: 900px) { .driver { width: auto; } }
 #view-hd { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; display: block; }
 .helpbtns .fps { align-self: center; min-width: 64px; text-align: center; font-family: var(--num); font-size: 18px; background: #1d2331; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; padding: 4px 6px; display: none; }
+.back-btn { margin-left: 4px; }
+.row-btns .go { margin-top: 0; }

@@ -111,3 +111,16 @@ export function champLabel(lobby: LobbyState | null): string {
   const ch = lobby?.champ;
   return ch ? `Campeonato · Etapa ${ch.round + 1} de ${ch.rounds.length} · ` : "";
 }
+
+/** botão "← VOLTAR" (só pro host/solo): volta uma etapa do fim de semana */
+export function backButtonHtml(lobby: LobbyState, label: string): string {
+  if (lobby.hostId !== lobby.you) return "";
+  return `<button class="btn back-btn" data-back>← ${esc(label)}</button>`;
+}
+
+export function bindBackButton(root: HTMLElement, send: (msg: { t: "back" }) => void, confirmText?: string) {
+  root.querySelector("[data-back]")?.addEventListener("click", () => {
+    if (confirmText && !confirm(confirmText)) return;
+    send({ t: "back" });
+  });
+}

@@ -63,6 +63,7 @@ export type ClientMsg =
   | { t: "speed"; speed: number }
   | { t: "skip" }
   | { t: "abort" }
+  | { t: "back" }
   | { t: "leave" };
 
 export type ServerMsg =

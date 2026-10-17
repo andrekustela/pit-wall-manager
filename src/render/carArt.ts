@@ -243,34 +243,147 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   }
 }
 
+/** safety car: esportivo amarelo (estilo superesportivo italiano), giroflex no teto */
 function drawSafetyCar(g: CanvasRenderingContext2D, lightOn: boolean) {
+  // sombra
   g.save();
   g.shadowColor = "rgba(0,0,0,0.55)";
-  g.shadowBlur = 0.25 * RES;
+  g.shadowBlur = 0.3 * RES;
   g.shadowOffsetX = 0.12 * RES;
   g.shadowOffsetY = 0.16 * RES;
-  rr(g, -2.4, -0.95, 4.8, 1.9, 0.5);
-  const grad = g.createLinearGradient(0, -0.95, 0, 0.95);
-  grad.addColorStop(0, "#f1f3f6");
-  grad.addColorStop(0.5, "#c9ced6");
-  grad.addColorStop(1, "#8d939c");
-  g.fillStyle = grad;
+  rr(g, -2.55, -0.95, 5.1, 1.9, 0.6);
+  g.fillStyle = "rgba(0,0,0,0.4)";
   g.fill();
   g.restore();
-  // vidros e teto
-  rr(g, -0.9, -0.72, 1.9, 1.44, 0.3);
-  g.fillStyle = "#18202c";
+
+  // carroceria: frente fina e arredondada, traseira larga (paralamas)
+  const body = new Path2D();
+  body.moveTo(2.62, 0);
+  body.bezierCurveTo(2.62, -0.45, 2.45, -0.78, 2.1, -0.84);
+  body.bezierCurveTo(1.4, -0.9, 0.6, -0.86, -0.1, -0.9);
+  body.bezierCurveTo(-0.8, -0.98, -1.7, -1.0, -2.25, -0.9);
+  body.bezierCurveTo(-2.55, -0.82, -2.62, -0.5, -2.62, 0);
+  body.bezierCurveTo(-2.62, 0.5, -2.55, 0.82, -2.25, 0.9);
+  body.bezierCurveTo(-1.7, 1.0, -0.8, 0.98, -0.1, 0.9);
+  body.bezierCurveTo(0.6, 0.86, 1.4, 0.9, 2.1, 0.84);
+  body.bezierCurveTo(2.45, 0.78, 2.62, 0.45, 2.62, 0);
+  body.closePath();
+  const paint = g.createLinearGradient(0, -1, 0, 1);
+  paint.addColorStop(0, "#fff58a");
+  paint.addColorStop(0.35, "#ffdd1a");
+  paint.addColorStop(0.75, "#e6b800");
+  paint.addColorStop(1, "#a88400");
+  g.fillStyle = paint;
+  g.fill(body);
+  g.strokeStyle = "rgba(90,70,0,0.55)";
+  g.lineWidth = 0.03;
+  g.stroke(body);
+
+  // vincos do capô
+  g.strokeStyle = "rgba(150,115,0,0.45)";
+  g.lineWidth = 0.025;
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(1.15, 0.42 * s);
+    g.quadraticCurveTo(1.9, 0.5 * s, 2.45, 0.3 * s);
+    g.stroke();
+  }
+  // entradas de ar na frente
+  for (const s of [-1, 1]) {
+    rr(g, 2.38, 0.25 * s - (s < 0 ? 0.22 : 0), 0.14, 0.22, 0.05);
+    g.fillStyle = "#1a1a1a";
+    g.fill();
+  }
+  // faróis (alongados, nas pontas)
+  for (const s of [-1, 1]) {
+    g.save();
+    g.translate(2.2, 0.62 * s);
+    g.rotate(-0.55 * s);
+    g.beginPath();
+    g.ellipse(0, 0, 0.28, 0.08, 0, 0, Math.PI * 2);
+    g.fillStyle = "#f4f6f8";
+    g.fill();
+    g.strokeStyle = "#333";
+    g.lineWidth = 0.02;
+    g.stroke();
+    g.restore();
+  }
+
+  // para-brisa
+  const glass = g.createLinearGradient(0.5, 0, 1.3, 0);
+  glass.addColorStop(0, "#2b2f36");
+  glass.addColorStop(1, "#5d6470");
+  g.beginPath();
+  g.moveTo(0.5, -0.58);
+  g.lineTo(1.28, -0.5);
+  g.quadraticCurveTo(1.36, 0, 1.28, 0.5);
+  g.lineTo(0.5, 0.58);
+  g.closePath();
+  g.fillStyle = glass;
   g.fill();
-  rr(g, -0.55, -0.62, 1.1, 1.24, 0.2);
-  g.fillStyle = "#d4d8de";
+  // teto
+  rr(g, -0.4, -0.56, 0.92, 1.12, 0.18);
+  g.fillStyle = "#f2cc00";
   g.fill();
-  // giroflex
-  g.fillStyle = lightOn ? "#ffb000" : "#6b4600";
-  g.fillRect(-0.1, -0.5, 0.22, 0.45);
-  g.fillStyle = lightOn ? "#6b4600" : "#ffb000";
-  g.fillRect(-0.1, 0.05, 0.22, 0.45);
-  // faróis
-  g.fillStyle = "#fff6b0";
-  g.fillRect(2.25, -0.75, 0.12, 0.35);
-  g.fillRect(2.25, 0.4, 0.12, 0.35);
+  // giroflex do safety car (laranja piscando)
+  rr(g, -0.05, -0.48, 0.24, 0.96, 0.06);
+  g.fillStyle = "#222";
+  g.fill();
+  for (let i = 0; i < 4; i++) {
+    const on = (i % 2 === 0) === lightOn;
+    g.fillStyle = on ? "#ffa000" : "#5a3600";
+    g.fillRect(-0.02, -0.44 + i * 0.22, 0.18, 0.18);
+    if (on) {
+      g.save();
+      g.shadowColor = "#ffa000";
+      g.shadowBlur = 0.35 * RES;
+      g.fillRect(-0.02, -0.44 + i * 0.22, 0.18, 0.18);
+      g.restore();
+    }
+  }
+  // vidro traseiro / tampa do motor com aletas
+  g.beginPath();
+  g.moveTo(-0.42, -0.5);
+  g.lineTo(-1.6, -0.42);
+  g.lineTo(-1.6, 0.42);
+  g.lineTo(-0.42, 0.5);
+  g.closePath();
+  g.fillStyle = "#30353d";
+  g.fill();
+  g.strokeStyle = "rgba(255,255,255,0.12)";
+  g.lineWidth = 0.025;
+  for (let i = 0; i < 6; i++) {
+    g.beginPath();
+    g.moveTo(-0.6 - i * 0.17, -0.38);
+    g.lineTo(-0.6 - i * 0.17, 0.38);
+    g.stroke();
+  }
+  // tomadas de ar laterais (atrás das portas)
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(-0.45, 0.82 * s);
+    g.quadraticCurveTo(-0.9, 0.7 * s, -1.3, 0.86 * s);
+    g.strokeStyle = "#222";
+    g.lineWidth = 0.07;
+    g.stroke();
+  }
+  // retrovisores
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.ellipse(0.72, 1.0 * s, 0.13, 0.07, 0.3 * s, 0, Math.PI * 2);
+    g.fillStyle = "#1c1c1c";
+    g.fill();
+  }
+  // lanternas traseiras redondas
+  for (const s of [-1, 1]) {
+    for (const y of [0.42, 0.66]) {
+      g.beginPath();
+      g.arc(-2.5, y * s, 0.09, 0, Math.PI * 2);
+      g.fillStyle = "#d81818";
+      g.fill();
+    }
+  }
+  // difusor
+  g.fillStyle = "#1a1a1a";
+  g.fillRect(-2.64, -0.3, 0.08, 0.6);
 }
