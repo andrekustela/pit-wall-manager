@@ -318,6 +318,7 @@ class App {
         this.soundEvents = race.events.length;
       }
       view.minimap.draw(view.follow);
+      view.hud.drawOnboard(realDt, view.renderer.interp);
       hudT += realDt;
       if (hudT > 0.1) {
         hudT = 0;

@@ -92,7 +92,9 @@ export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
   // fundo: carros passando
   const cv = $<HTMLCanvasElement>(".loginbg");
   const g = cv.getContext("2d")!;
-  const cars = TEAMS.map((t, i) => ({ img: carImage(t).canvas, x: -200 - i * 260, lane: i % 3, v: 520 + (i % 4) * 60 }));
+  // cada faixa tem uma velocidade só (ninguém atravessa ninguém) e os carros voltam com espaço
+  const LANE_V = [560, 470, 640];
+  const cars = TEAMS.map((t, i) => ({ img: carImage(t).canvas, x: -150 - Math.floor(i / 3) * 520 - (i % 3) * 170, lane: i % 3, v: LANE_V[i % 3] }));
   let last = performance.now();
   const frame = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -119,7 +121,10 @@ export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
     for (let x = -((now / 2) % 80); x < W; x += 80) g.fillRect(x, y0 + rh / 2 - 1, 40, 2);
     for (const c of cars) {
       c.x += c.v * dt;
-      if (c.x > W + 200) c.x = -200 - Math.random() * 900;
+      if (c.x > W + 200) {
+        const lastInLane = Math.min(...cars.filter((o) => o.lane === c.lane && o !== c).map((o) => o.x));
+        c.x = Math.min(-150, lastInLane - 260 - Math.random() * 500);
+      }
       const h = 30, w = (c.img.width / c.img.height) * h;
       g.drawImage(c.img, c.x, y0 + 14 + c.lane * 34, w, h);
     }

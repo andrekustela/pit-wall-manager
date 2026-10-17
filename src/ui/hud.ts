@@ -16,6 +16,7 @@ import {
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import { confirmDialog } from "./confirm";
+import { OnboardCam } from "../render/onboard";
 import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
 
@@ -115,7 +116,83 @@ export class Hud {
   }
 
   destroy() {
+    this.closeOnboard();
     this.el.remove();
+  }
+
+  // ---------- câmera onboard ----------
+
+  private cam: OnboardCam | null = null;
+  private full: { el: HTMLElement; cv: HTMLCanvasElement; id: string; onKey: (e: KeyboardEvent) => void } | null = null;
+
+  /** chamado a cada quadro pela tela da corrida */
+  drawOnboard(dt: number, interp: Map<string, { s: number; lat: number }>) {
+    this.cam ??= new OnboardCam(this.race);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const paint = (cv: HTMLCanvasElement, id: string) => {
+      const car = this.race.cars.find((c) => c.id === id);
+      if (!car) return;
+      const w = cv.clientWidth, h = cv.clientHeight;
+      if (!w || !h) return;
+      if (cv.width !== Math.round(w * dpr)) {
+        cv.width = Math.round(w * dpr);
+        cv.height = Math.round(h * dpr);
+      }
+      const g = cv.getContext("2d")!;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const p = interp.get(id);
+      this.cam!.draw(g, w, h, car, p?.s ?? car.s, p?.lat ?? car.lateral, dt, interp);
+    };
+    if (this.full) {
+      paint(this.full.cv, this.full.id);
+      this.fullInfo();
+      return;
+    }
+    if (this.el.querySelector(".team.compact")) return;
+    for (const c of this.mine()) {
+      const cv = this.el.querySelector<HTMLCanvasElement>(`.driver[data-id="${c.id}"] [data-onboard] canvas`);
+      if (cv) paint(cv, c.id);
+    }
+  }
+
+  private openOnboard(id: string) {
+    this.closeOnboard();
+    const el = document.createElement("div");
+    el.className = "onfull";
+    el.innerHTML = `<canvas></canvas><div class="oninfo"></div><button class="btn small onclose">✕ FECHAR (ESC)</button>`;
+    document.body.appendChild(el);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        this.closeOnboard();
+      } else if (e.key === "Tab") {
+        // alterna entre os seus carros
+        e.preventDefault();
+        e.stopPropagation();
+        const mine = this.mine();
+        const i = mine.findIndex((c) => c.id === this.full?.id);
+        if (this.full && mine.length) this.full.id = mine[(i + 1) % mine.length].id;
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    el.addEventListener("click", () => this.closeOnboard());
+    this.full = { el, cv: el.querySelector("canvas")!, id, onKey };
+    this.hooks.setFollow(id);
+  }
+
+  private closeOnboard() {
+    if (!this.full) return;
+    window.removeEventListener("keydown", this.full.onKey, true);
+    this.full.el.remove();
+    this.full = null;
+  }
+
+  private fullInfo() {
+    const f = this.full!;
+    const c = this.race.cars.find((x) => x.id === f.id);
+    if (!c) return;
+    const lap = Math.min(this.race.laps, Math.max(1, c.lap + 1));
+    f.el.querySelector(".oninfo")!.innerHTML = `<b style="border-color:${c.team.color}">P${c.position}</b><span>${esc(c.driver.name)}</span><span>VOLTA ${lap}/${this.race.laps}</span><span>${Math.round(c.v * 3.6)} KM/H</span>${this.mine().length > 1 ? "<span class=hint>Tab troca de carro</span>" : ""}`;
   }
 
   private buildTopbar() {
@@ -157,10 +234,11 @@ export class Hud {
       this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false });
       const card = document.createElement("div");
       card.className = "driver panel";
+      card.dataset.id = c.id;
       card.style.borderTopColor = c.team.color;
       card.title = "Clique no card pra seguir esse piloto";
       card.innerHTML = `
-        <div class="statuscol">${statusSvg()}${partsListHtml()}</div>
+        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}${partsListHtml()}</div>
         <div class="top">
           <div class="p"></div>
           <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)}</small></div>
@@ -199,6 +277,10 @@ export class Hud {
         <div class="planedit" style="display:none"></div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
+      card.querySelector("[data-onboard]")!.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.openOnboard(c.id);
+      });
       const rearm = () => {
         // se já chamou pro box, atualiza o que vai fazer na parada
         if (c.boxRequest && c.pit !== "stopped" && c.pit !== "leaving")
