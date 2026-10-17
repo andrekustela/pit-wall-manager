@@ -713,7 +713,7 @@ export class Race {
             const inside = turn * (c.lateral - o.lateral) > 0 ? 0.15 : -0.1;
             const delta = o.targetLap - c.targetLap;
             // ultrapassador x muralha
-            const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.004;
+            const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.002;
             const p = Math.max(0.12, Math.min(0.9, 0.5 + delta * 0.5 + inside + craft - this.wet * 0.05));
             if (this.rng.chance(p)) {
               o.yieldTill = this.time + 1.6; // segurou a freada e passou
@@ -743,7 +743,7 @@ export class Race {
             const delta = blocker.targetLap - c.targetLap;
             // na chuva o spray atrapalha: tenta menos
             // piloto agressivo tenta muito mais
-            const aggr = ((c.driver.profile?.aggression ?? 55) - 50) * 0.006;
+            const aggr = ((c.driver.profile?.aggression ?? 55) - 50) * 0.003;
             const p = Math.max(0.08, Math.min(0.95, 0.32 + delta * 0.7 + aggr + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.08 : 0) - this.wet * 0.06));
             c.nextAttemptS = this.dist(c) + (firstLap ? 220 : 300);
             go = this.rng.chance(p);
@@ -840,7 +840,7 @@ export class Race {
 
   /** dois agressivos lado a lado = mais chance de toque */
   private aggrRisk(a: CarState, b: CarState): number {
-    const f = (c: CarState) => 0.6 + ((c.driver.profile?.aggression ?? 55) / 100) * 0.8;
+    const f = (c: CarState) => 0.8 + ((c.driver.profile?.aggression ?? 55) / 100) * 0.4;
     return (f(a) + f(b)) / 2;
   }
 

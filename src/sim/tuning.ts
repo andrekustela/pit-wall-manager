@@ -78,13 +78,13 @@ export function idealStiff(cond: Conditions, d?: Driver): number {
 export function physics(track: Track, t: Tuning, cond: Conditions = NEUTRAL, d?: Driver): { latAcc: number; vmax: number } {
   const D = downforce(t);
   const bal = balanceError(track, t, cond, d);
-  const balFactor = Math.max(0.82, 1 - 0.009 * bal * bal);
+  const balFactor = Math.max(0.78, 1 - 0.022 * bal * bal);
   const h = click(t.h);
   const minH = minHeight(track, cond);
   let hg = 1 + (0.05 * (11 - h)) / 10;
-  if (h < minH) hg -= 0.035 * (minH - h);
+  if (h < minH) hg -= 0.06 * (minH - h);
   const sDev = (t.sf + t.sr) / 2 - idealStiff(cond, d);
-  const sg = Math.max(0.9, 1 - 0.00006 * sDev * sDev);
+  const sg = Math.max(0.85, 1 - 0.00016 * sDev * sDev);
   const latAcc = 33 * (0.86 + 0.28 * D) * balFactor * hg * sg;
   const vmax = 100 - 21 * D * cond.drag;
   return { latAcc, vmax };
@@ -119,7 +119,7 @@ export function optimalTuning(track: Track, cond: Conditions = NEUTRAL, d?: Driv
 export function aiTuning(track: Track, quality: number, rng: Rng, cond?: Conditions, d?: Driver): Tuning {
   const opt = optimalTuning(track, cond, d).tuning;
   const fb = (d?.profile?.feedback ?? 70) / 100;
-  const err = (0.3 + (1 - quality) * 1.3 + (1 - fb) * 0.6) * 10;
+  const err = (0.3 + (1 - quality) * 0.75 + (1 - fb) * 0.35) * 10;
   const hErr = rng.gauss(err * 0.6);
   return clampTuning({
     fw: opt.fw + rng.gauss(err),
@@ -193,12 +193,12 @@ export function qualiTyre(wet: number): Compound {
 
 /** chuva: piloto bom na chuva perde menos (multiplicador do tempo perdido) */
 export function wetSkillFactor(d?: Driver): number {
-  return 1.25 - ((d?.profile?.wet ?? 60) / 100) * 0.5;
+  return 1.15 - ((d?.profile?.wet ?? 60) / 100) * 0.3;
 }
 
 /** variação volta a volta (piloto consistente varia menos) */
 export function lapNoiseSd(d?: Driver): number {
-  return 0.12 + (1 - (d?.profile?.consistency ?? 65) / 100) * 0.3;
+  return 0.12 + (1 - (d?.profile?.consistency ?? 65) / 100) * 0.16;
 }
 
 /** tempo de uma volta lançada (pneu novo, pouco combustível) */
