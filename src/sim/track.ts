@@ -23,6 +23,8 @@ export interface TrackDef {
   grass: [string, string];
   /** circuito de rua: muro colado na pista, prédios em vez de árvores, sem brita */
   street?: boolean;
+  /** corrida de noite, com a pista iluminada por refletores */
+  night?: boolean;
   /** facilidade de ultrapassar (1 = normal; Mônaco é bem menos) */
   overtake?: number;
 }

@@ -15,6 +15,7 @@ interface Extra {
   street?: boolean;
   ov?: number;
   fig8?: boolean;
+  night?: boolean;
   grass?: [string, string];
 }
 
@@ -33,6 +34,7 @@ function P(name: string, blurb: string, shape: string, x: Extra): TrackDef {
     rainChance: x.rain,
     grass,
     street: x.street,
+    night: x.night,
     overtake: x.ov ?? (x.street ? 0.6 : 1),
     ...turtle(shape, { figure8: x.fig8 }),
   };
@@ -71,10 +73,10 @@ export const REAL_CIRCUITS: TrackDef[] = [
     { h: 4, b: 0, rain: 0.3 }),
   P("Bahrein", "No deserto, de noite. Freadas fortes, asfalto abrasivo e areia que voa pra pista.",
     "S1000 R110/30 L40/60 R50/80 S500 R130/30 S300 L60/40 R50/50 S500 L120/40 S200 R100/50 S300 L60/50 R40/100 S600 R90/40 S400 R0/50",
-    { h: 3, b: 0, rain: 0.03, grass: DESERT }),
+    { night: true, h: 3, b: 0, rain: 0.03, grass: DESERT }),
   P("Jeddah", "Circuito de rua mais rápido do mundo, à beira do Mar Vermelho. Muro colado e muita curva cega.",
     "S700 L80/30 R60/30 S300 L30/150 R30/150 L30/150 R30/150 S300 L40/100 S200 R40/100 L40/100 S400 L30/200 S500 L120/40 S600 R30/200 L30/200 S700 L50/150 S400 L60/60 S300 L0/30",
-    { h: 3, b: -1, rain: 0.03, street: true, ov: 0.9 }),
+    { night: true, h: 3, b: -1, rain: 0.03, street: true, ov: 0.9 }),
   P("Baku", "Rua na cidade velha: a reta mais longa do ano e o castelo, onde só passa um carro.",
     "S2000 L90/20 S300 L90/20 S250 R90/20 S250 L90/20 S150 R90/20 S400 L90/25 R70/20 L60/15 R40/20 S300 L90/25 S200 L60/50 R40/50 S600 L40/80 R40/80 L0/30",
     { h: 4, b: -1, rain: 0.1, street: true, ov: 0.9 }),
@@ -89,16 +91,16 @@ export const REAL_CIRCUITS: TrackDef[] = [
     { h: 4, b: 1, rain: 0.2, grass: DRY }),
   P("Las Vegas", "Pela Strip, de madrugada e no frio. Retas enormes entre os cassinos.",
     "S1200 L90/30 R60/40 L60/40 S300 L90/30 S500 R90/30 S300 L90/40 S1900 L90/30 S300 R40/50 L40/50 S600 L0/40",
-    { h: 3, b: -2, rain: 0.03, street: true, ov: 1.1 }),
+    { night: true, h: 3, b: -2, rain: 0.03, street: true, ov: 1.1 }),
   P("Yas Marina", "Abu Dhabi, de dia pra noite: hotel por cima da pista e duas retas longas.",
     "S500 L90/40 L40/90 S400 R90/30 L100/25 S1200 L150/25 S900 L90/40 R90/40 S200 L60/50 R60/50 L90/40 S300 R90/40 L60/35 S300 L0/50",
-    { h: 3, b: 0, rain: 0.02, grass: DESERT }),
+    { night: true, h: 3, b: 0, rain: 0.02, grass: DESERT }),
   P("Lusail", "Catar, de noite. Curvas rápidas uma atrás da outra, quase sem freada forte.",
     "S1000 R90/80 L40/100 S300 R60/90 L60/90 R70/80 S400 R50/120 L40/120 R60/100 S300 R90/60 S250 L30/150 R60/100 R60/100 S400 R0/90",
-    { h: 3, b: 1, rain: 0.02, grass: DESERT }),
+    { night: true, h: 3, b: 1, rain: 0.02, grass: DESERT }),
   P("Marina Bay", "Singapura, de noite: rua com curvas de 90°, calor e umidade. A corrida mais cansativa.",
     "S600 L90/25 R90/25 L60/40 S500 R90/30 S600 L90/30 S300 R90/30 S400 L90/30 S300 L90/25 R90/25 S350 L90/25 S250 R90/25 S300 L90/30 S400 L90/30 R60/30 L60/30 S300 L0/30",
-    { h: 6, b: 2, rain: 0.4, street: true, ov: 0.5 }),
+    { night: true, h: 6, b: 2, rain: 0.4, street: true, ov: 0.5 }),
   P("Xangai", "Curva 1 em caracol que vai fechando e uma das maiores retas do campeonato.",
     "S800 R200/45 L70/30 S350 L90/40 R60/80 S400 R120/30 S300 L60/30 R40/80 S300 R40/120 S1100 R150/20 S300 L50/40 R0/50",
     { h: 4, b: 0, rain: 0.35 }),

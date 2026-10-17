@@ -97,8 +97,13 @@ export class OnboardCam {
       const x = ((s % L) + L) % L;
       return a < b ? x >= a && x <= b : x >= a || x <= b;
     };
+    const night = !!t.def.night;
     const sky = g.createLinearGradient(0, 0, 0, horizon);
-    if (wet > 0.15) {
+    if (night) {
+      sky.addColorStop(0, "#03050d");
+      sky.addColorStop(0.75, "#0e1630");
+      sky.addColorStop(1, "#2a2f4a");
+    } else if (wet > 0.15) {
       sky.addColorStop(0, "#4a5260");
       sky.addColorStop(1, "#8f97a3");
     } else {
@@ -110,7 +115,7 @@ export class OnboardCam {
     g.fillRect(0, 0, W, horizon + 2);
     // nuvens
     g.fillStyle = wet > 0.15 ? "rgba(70,76,88,.55)" : "rgba(255,255,255,.75)";
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < (night ? 0 : 6); i++) {
       const ang = (i * 61 + 20) * (Math.PI / 180);
       let rel = ang - h0;
       rel = Math.atan2(Math.sin(rel), Math.cos(rel));
@@ -276,6 +281,18 @@ export class OnboardCam {
     others.sort((a, b) => b.d - a.d);
     for (const o of others) this.drawCar(g, o.p, o.c, wet);
 
+    // noite: escurece o mundo (a pista fica iluminada pelos refletores) e acende as estrelas
+    if (night) {
+      g.fillStyle = "rgba(3, 5, 18, 0.45)";
+      g.fillRect(0, 0, W, H);
+      g.fillStyle = "rgba(255,255,255,.8)";
+      for (let i = 0; i < 60; i++) {
+        const sx = ((i * 7919 + Math.floor(h0 * 900)) % 1000) / 1000 * W;
+        const sy = ((i * 104729) % 1000) / 1000 * horizon * 0.85;
+        g.fillRect(sx, sy, i % 7 === 0 ? 2 : 1, i % 7 === 0 ? 2 : 1);
+      }
+    }
+
     // ---- cockpit ----
     // cockpit menor e embaixo: sobra mais pista à vista
     g.save();
@@ -283,7 +300,7 @@ export class OnboardCam {
     g.translate(W / 2, H);
     g.scale(ck, ck);
     g.translate(-W / 2, -H);
-    this.cockpit(g, W, H, car, s0, dt, inTunnel(s0));
+    this.cockpit(g, W, H, car, s0, dt, inTunnel(s0) || night);
     g.restore();
 
     // chuva na viseira

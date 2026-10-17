@@ -512,6 +512,45 @@ export class VectorWorld {
     }
     g.setLineDash([]);
     for (const sh of this.shapes) if (hits(sh.box, x0, y0, x1, y1)) sh.draw(g);
+    if (this.track.def.night) this.drawNight(g, x0, y0, x1, y1);
+  }
+
+  /** postes de refletor ao longo da pista (só nas corridas de noite) */
+  private lights: { x: number; y: number }[] = [];
+
+  /** noite: escurece tudo e acende os refletores (fica pronto no tile, sem custo por quadro) */
+  private drawNight(g: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+    if (!this.lights.length) {
+      const t = this.track;
+      for (let s = 0, i = 0; s < t.L; s += 42, i++) {
+        const p = t.pose(s, (i % 2 ? 1 : -1) * (TRACK_WIDTH / 2 + 7));
+        this.lights.push({ x: p.x, y: p.y });
+      }
+    }
+    g.save();
+    g.fillStyle = "rgba(4, 7, 20, 0.74)";
+    g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    g.globalCompositeOperation = "lighter";
+    const R = 34;
+    for (const l of this.lights) {
+      if (l.x < x0 - R || l.x > x1 + R || l.y < y0 - R || l.y > y1 + R) continue;
+      const gr = g.createRadialGradient(l.x, l.y, 0, l.x, l.y, R);
+      gr.addColorStop(0, "rgba(255, 228, 170, 0.44)");
+      gr.addColorStop(0.5, "rgba(255, 214, 150, 0.2)");
+      gr.addColorStop(1, "rgba(255, 210, 140, 0)");
+      g.fillStyle = gr;
+      g.fillRect(l.x - R, l.y - R, R * 2, R * 2);
+    }
+    g.globalCompositeOperation = "source-over";
+    // o poste em si (pontinho claro)
+    g.fillStyle = "#fff6d8";
+    for (const l of this.lights) {
+      if (l.x < x0 - 2 || l.x > x1 + 2 || l.y < y0 - 2 || l.y > y1 + 2) continue;
+      g.beginPath();
+      g.arc(l.x, l.y, 0.9, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
   }
 
   /** mapa inteiro em baixa resolução (aparece enquanto um tile não fica pronto) */
