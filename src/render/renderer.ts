@@ -175,6 +175,8 @@ export class Renderer {
   }
 
   private pos = new Map<string, { x: number; y: number; h: number }>();
+  /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
+  readonly interp = new Map<string, { s: number; lat: number }>();
 
   draw(realDt: number, speed: number) {
     const race = this.race;
@@ -189,7 +191,9 @@ export class Renderer {
     for (const c of race.cars) {
       const smp = this.sample(this.hist.get(c.id), rt);
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
-      pos.set(c.id, this.px(s, smp ? smp.lat : c.lateral));
+      const lat = smp ? smp.lat : c.lateral;
+      pos.set(c.id, this.px(s, lat));
+      this.interp.set(c.id, { s, lat });
     }
     let scPos: { x: number; y: number; h: number } | null = null;
     if (race.sc.active && race.sc.onTrack) {

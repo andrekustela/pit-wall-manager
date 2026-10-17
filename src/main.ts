@@ -16,7 +16,7 @@ import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
 import { ChatWidget } from "./ui/chat";
-import { account, accountsEnabled } from "./net/account";
+import { account } from "./net/account";
 import { showLogin } from "./ui/login";
 import { POINTS, standings } from "./sim/championship";
 
@@ -64,8 +64,8 @@ class App {
   menu() {
     this.teardown();
     // com contas ligadas, pede login (ou "jogar sem conta")
-    // ?login mostra a tela mesmo sem Supabase configurado (pra ver como fica)
-    if ((accountsEnabled() || params.has("login")) && !account.user && !this.guest && !AUTO) {
+    // tela de entrada logo de cara (login ou "jogar sem conta")
+    if (!account.user && !this.guest && !AUTO) {
       this.screenPhase = "menu";
       showLogin(app, (guest) => {
         this.guest = guest;

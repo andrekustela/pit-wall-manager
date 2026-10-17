@@ -1,6 +1,6 @@
 // Tela de entrada: login por e-mail e senha (Supabase), criar conta, esqueci a
 // senha ou jogar sem conta. Ao fundo, carros passando numa reta.
-import { account } from "../net/account";
+import { account, accountsEnabled } from "../net/account";
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { esc } from "./common";
@@ -61,6 +61,7 @@ export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
     const name = $<HTMLInputElement>("#lg-name").value.trim();
     const team = $<HTMLInputElement>("#lg-team").value.trim();
     const go = $<HTMLButtonElement>("#lg-go");
+    if (!accountsEnabled()) return msg("As contas ainda não estão ligadas neste servidor. Use \"jogar sem conta\" por enquanto.");
     if (!email) return msg("Coloque seu e-mail.");
     if (mode !== "reset" && pass.length < 6) return msg("A senha precisa ter pelo menos 6 caracteres.");
     if (mode === "up" && !name) return msg("Coloque o nome do engenheiro.");
