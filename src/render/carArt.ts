@@ -3,7 +3,7 @@
 import type { Team } from "../sim/types";
 
 /** tamanho real do carro (m) */
-export const CAR_LEN_M = 4.8;
+export const CAR_LEN_M = 4.3;
 /** o desenho foi feito com 5,6 m; encolhe no comprimento pra não parecer espichado */
 const SQUASH = CAR_LEN_M / 5.6;
 export const CAR_WID_M = 2.0;

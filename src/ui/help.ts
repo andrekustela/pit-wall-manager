@@ -84,7 +84,7 @@ export class HelpWidget {
   constructor(private currentTab: () => Tab) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><input class="vol" type="range" min="0" max="100" title="Volume">`;
+    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
     this.el.querySelector("[data-help]")!.addEventListener("click", () => this.open(this.currentTab()));
     this.el.querySelector("[data-mute]")!.addEventListener("click", () => sound.toggleMute());
@@ -125,3 +125,31 @@ export class HelpWidget {
 }
 
 export type HelpTab = Tab;
+
+// ---------- contador de FPS (ao lado do som) ----------
+let frames = 0;
+let since = 0;
+let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** chamado a cada frame da corrida; atualiza o contador 2x por segundo */
+export function reportFrame(now: number) {
+  frames++;
+  if (!since) since = now;
+  const el = document.querySelector<HTMLElement>(".helpbtns .fps");
+  if (!el) return;
+  if (now - since >= 500) {
+    const fps = Math.round((frames * 1000) / (now - since));
+    el.textContent = `${fps} FPS`;
+    el.style.color = fps >= 55 ? "var(--ok)" : fps >= 40 ? "var(--warn)" : "var(--soft)";
+    el.style.display = "inline-block";
+    frames = 0;
+    since = now;
+  }
+  // fora da corrida (sem frames) o contador some
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    el.style.display = "none";
+    since = 0;
+    frames = 0;
+  }, 1000);
+}

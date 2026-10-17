@@ -52,7 +52,7 @@ const MANDATORY_PENALTY = 30;
 const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
-const CAR_L = 4.9;
+const CAR_L = 4.4;
 const CAR_W = 2.3;
 /** distância lateral entre "faixas" numa disputa */
 const LANE_STEP = 3.4;

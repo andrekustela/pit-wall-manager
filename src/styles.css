@@ -298,3 +298,4 @@ label.fld span { display: block; margin-bottom: 4px; }
 .team.compact .driver .carstatus .tlabel { display: none; }
 @media (max-width: 900px) { .driver { width: auto; } }
 #view-hd { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; display: block; }
+.helpbtns .fps { align-self: center; min-width: 64px; text-align: center; font-family: var(--num); font-size: 18px; background: #1d2331; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; padding: 4px 6px; display: none; }

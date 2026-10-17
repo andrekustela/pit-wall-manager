@@ -1,6 +1,6 @@
 import "./styles.css";
 import { sound } from "./audio/sound";
-import { HelpWidget, type HelpTab } from "./ui/help";
+import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
 import { LocalConnection, WsConnection, type Connection } from "./net/connection";
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
@@ -108,6 +108,7 @@ class App {
         if (this.view) {
           this.view.race.applySnapshot(m.snap);
           this.view.speed = m.speed;
+          this.view.renderer.onSnapshot(m.speed);
         }
         break;
       case "end":
@@ -220,6 +221,7 @@ class App {
       // o safety car saiu da pista: câmera volta pro líder
       if (view.follow === "SC" && !(race.sc.active && race.sc.onTrack)) setFollow(race.leader().id);
       view.renderer.draw(realDt, view.speed);
+      reportFrame(now);
       sound.update(race, view.follow, view.speed);
       if (race.events.length > this.soundEvents) {
         // voltando de aba minimizada (frame muito atrasado): não despeja os sons acumulados
@@ -239,6 +241,8 @@ class App {
     sound.startRace();
     view.raf = requestAnimationFrame(frame);
     this.view = view;
+    // depuração: ?debug expõe a corrida na tela (window.__view)
+    if (params.has("debug")) (window as unknown as { __view: RaceView }).__view = view;
     if (AUTO && params.get("speed")) setSpeed(Number(params.get("speed")));
   }
 

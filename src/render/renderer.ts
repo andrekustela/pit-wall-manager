@@ -2,11 +2,6 @@ import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage } from "./carArt";
 import { buildWorld, type World } from "./worldArt";
 
-interface Disp {
-  s: number;
-  lat: number;
-}
-
 /**
  * Desenha a corrida em duas camadas:
  *  - pista em pixel art (canvas de baixa resolução, ampliado sem suavizar)
@@ -20,8 +15,6 @@ export class Renderer {
   private octx: CanvasRenderingContext2D;
   private world: World;
   private cam = { x: 0, y: 0, ready: false };
-  private disp = new Map<string, Disp>();
-  private scDisp: Disp | null = null;
   private drops: { x: number; y: number; l: number }[] = [];
   private screenPos = new Map<string, { x: number; y: number }>();
   private dpr = 1;
@@ -96,40 +89,100 @@ export class Renderer {
   private resize = () => {
     const w = window.innerWidth, h = window.innerHeight;
     this.pixelScale = Math.max(1, this.baseScale() + this.zoom);
-    this.canvas.width = Math.ceil(w / this.pixelScale);
-    this.canvas.height = Math.ceil(h / this.pixelScale);
+    this.canvas.width = Math.ceil(w / this.pixelScale) + 2;
+    this.canvas.height = Math.ceil(h / this.pixelScale) + 2;
+    this.canvas.style.width = `${this.canvas.width * this.pixelScale}px`;
+    this.canvas.style.height = `${this.canvas.height * this.pixelScale}px`;
     this.ctx.imageSmoothingEnabled = false;
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.overlay.width = Math.round(w * this.dpr);
     this.overlay.height = Math.round(h * this.dpr);
   };
 
+  /** um estado conhecido do carro (vindo da simulação) */
+  private hist = new Map<string, { t: number; d: number; lat: number }[]>();
+  private scHist: { t: number; d: number; lat: number }[] = [];
+  private snapT = 0;
+  private snapReal = 0;
+  private interval = 0.05; // s reais entre estados (média)
+  private simSpeed = 1;
+  private camFrom: { x: number; y: number; t: number } | null = null;
+  private lastFollow = "";
+
   /**
-   * A simulação anda em passos de 1/20 s (e, online, chega 10x por segundo).
-   * Aqui o carro é extrapolado pela velocidade e corrigido aos poucos em
-   * direção à posição real, então o movimento fica liso a 60 fps.
+   * Chamado a cada estado novo da simulação. Guarda um histórico curto de
+   * posições; a tela desenha um instantinho atrás e desliza entre dois
+   * estados conhecidos (interpolação) — liso, sem tremer e sem voltar.
    */
-  private smooth(id: string, s: number, lat: number, v: number, simDt: number, realDt: number, snap: boolean): Disp {
-    const L = this.race.track.L;
-    let d = this.disp.get(id);
-    if (!d || snap) {
-      d = { s, lat };
-      this.disp.set(id, d);
-      return d;
+  onSnapshot(speed: number) {
+    const race = this.race;
+    const now = performance.now();
+    const t = race.time;
+    if (t < this.snapT - 1e-6) {
+      // o relógio da corrida zerou (largada): recomeça o histórico
+      this.hist.clear();
+      this.scHist = [];
+      this.clock = t;
     }
-    // prevê pela velocidade e corrige aos poucos, mas NUNCA anda pra trás
-    // (se a previsão passou do ponto, o carro só "espera" a simulação alcançar)
-    let err = s - d.s;
-    if (err > L / 2) err -= L;
-    if (err < -L / 2) err += L;
-    if (Math.abs(err) > 80) d.s = s;
-    else {
-      const step = v * simDt + err * Math.min(1, realDt * 6);
-      d.s += Math.max(0, step);
+    const gap = (now - this.snapReal) / 1000;
+    if (this.snapReal && gap < 1) this.interval = this.interval * 0.85 + gap * 0.15;
+    this.snapReal = now;
+    this.snapT = t;
+    this.simSpeed = speed;
+    for (const c of race.cars) {
+      let h = this.hist.get(c.id);
+      if (!h) this.hist.set(c.id, (h = []));
+      h.push({ t, d: race.dist(c), lat: c.lateral });
+      if (h.length > 6) h.shift();
     }
-    d.s = ((d.s % L) + L) % L;
-    d.lat += (lat - d.lat) * Math.min(1, realDt * 10);
-    return d;
+    if (race.sc.active && race.sc.onTrack) {
+      const L = race.track.L;
+      const last = this.scHist[this.scHist.length - 1];
+      let d = race.sc.s;
+      if (last) {
+        let delta = race.sc.s - (((last.d % L) + L) % L);
+        if (delta < -L / 2) delta += L;
+        if (delta > L / 2) delta -= L;
+        d = last.d + delta;
+      }
+      this.scHist.push({ t, d, lat: 0 });
+      if (this.scHist.length > 6) this.scHist.shift();
+    } else this.scHist = [];
+  }
+
+  private clock = 0;
+
+  /**
+   * Relógio da tela (tempo de corrida mostrado): anda sozinho no ritmo real e
+   * só se ajusta aos poucos pro alvo (um pouco atrás do último estado). Nunca
+   * volta — é isso que deixa o movimento liso mesmo com estados chegando
+   * adiantados ou atrasados.
+   */
+  private renderTime(realDt: number): number {
+    if (this.race.phase !== "racing" || this.simSpeed === 0 || !this.snapReal) {
+      if (this.clock > this.snapT + 1e-6 || this.clock < this.snapT - 2) this.clock = this.snapT;
+      return Math.min(this.clock, this.snapT);
+    }
+    const delay = Math.max(0.05, this.interval * 1.5) * this.simSpeed;
+    const target = this.snapT + ((performance.now() - this.snapReal) / 1000) * this.simSpeed - delay;
+    const err = target - this.clock;
+    if (Math.abs(err) > 2 * this.simSpeed + 1) this.clock = target; // muito longe: pula
+    else this.clock += realDt * this.simSpeed * (1 + Math.max(-0.25, Math.min(0.25, err / (0.25 * this.simSpeed + 1e-6))));
+    this.clock = Math.min(this.clock, this.snapT);
+    return this.clock;
+  }
+
+  private sample(h: { t: number; d: number; lat: number }[] | undefined, rt: number) {
+    if (!h || h.length === 0) return null;
+    if (rt <= h[0].t) return h[0];
+    for (let i = 0; i < h.length - 1; i++) {
+      const a = h[i], b = h[i + 1];
+      if (rt <= b.t) {
+        const k = b.t > a.t ? (rt - a.t) / (b.t - a.t) : 1;
+        return { t: rt, d: a.d + (b.d - a.d) * k, lat: a.lat + (b.lat - a.lat) * k };
+      }
+    }
+    return h[h.length - 1];
   }
 
   private px(s: number, lat: number) {
@@ -137,40 +190,53 @@ export class Renderer {
     return { x: (p.x - this.world.minX) * this.world.ppm, y: (p.y - this.world.minY) * this.world.ppm, h: p.h };
   }
 
+  private pos = new Map<string, { x: number; y: number; h: number }>();
+
   draw(realDt: number, speed: number) {
     const g = this.ctx;
     const race = this.race;
     const cw = this.canvas.width, ch = this.canvas.height;
-    const simDt = race.phase === "racing" ? realDt * speed : 0;
+    const L = race.track.L;
+    const W = window.innerWidth, H = window.innerHeight;
+    const ps = this.pixelScale;
+    void speed;
 
-    // posições suavizadas (em pixels do mundo)
-    const pos = new Map<string, { x: number; y: number; h: number }>();
+    // posições interpoladas (em pixels do mundo)
+    const rt = this.renderTime(realDt);
+    const pos = this.pos;
+    pos.clear();
     for (const c of race.cars) {
-      const jump = c.pit === "stopped" || c.pit === "parked";
-      const d = this.smooth(c.id, c.s, c.lateral, c.v, simDt, realDt, jump);
-      pos.set(c.id, this.px(d.s, d.lat));
+      const smp = this.sample(this.hist.get(c.id), rt);
+      const s = smp ? (((smp.d % L) + L) % L) : c.s;
+      pos.set(c.id, this.px(s, smp ? smp.lat : c.lateral));
     }
-    const scOn = race.sc.active && race.sc.onTrack;
     let scPos: { x: number; y: number; h: number } | null = null;
-    if (scOn) {
-      if (!this.scDisp) this.scDisp = { s: race.sc.s, lat: 0 };
-      const d = this.smoothSc(race.sc.s, race.sc.v, simDt, realDt);
-      scPos = this.px(d.s, 0);
-    } else this.scDisp = null;
-
-    const tp = (this.followId === "SC" ? scPos : pos.get(this.followId)) ?? pos.get(race.leader().id)!;
-    if (!this.cam.ready) {
-      this.cam = { x: tp.x, y: tp.y, ready: true };
-    } else {
-      const k = 1 - Math.exp(-realDt * 6);
-      this.cam.x += (tp.x - this.cam.x) * k;
-      this.cam.y += (tp.y - this.cam.y) * k;
-      const maxOff = Math.min(cw, ch) * 0.3;
-      this.cam.x = Math.max(tp.x - maxOff, Math.min(tp.x + maxOff, this.cam.x));
-      this.cam.y = Math.max(tp.y - maxOff, Math.min(tp.y + maxOff, this.cam.y));
+    if (race.sc.active && race.sc.onTrack) {
+      const smp = this.sample(this.scHist, rt);
+      scPos = this.px(smp ? (((smp.d % L) + L) % L) : race.sc.s, 0);
     }
-    const ox = Math.round(this.cam.x - cw / 2);
-    const oy = Math.round(this.cam.y - ch / 2);
+
+    // câmera presa no carro seguido (transição suave quando troca de carro)
+    const tp = (this.followId === "SC" ? scPos : pos.get(this.followId)) ?? pos.get(race.leader().id)!;
+    if (this.followId !== this.lastFollow) {
+      if (this.cam.ready) this.camFrom = { x: this.cam.x, y: this.cam.y, t: performance.now() };
+      this.lastFollow = this.followId;
+    }
+    let cx = tp.x, cy = tp.y;
+    if (this.camFrom) {
+      const k = Math.min(1, (performance.now() - this.camFrom.t) / 600);
+      const e = 1 - Math.pow(1 - k, 3);
+      cx = this.camFrom.x + (tp.x - this.camFrom.x) * e;
+      cy = this.camFrom.y + (tp.y - this.camFrom.y) * e;
+      if (k >= 1) this.camFrom = null;
+    }
+    this.cam = { x: cx, y: cy, ready: true };
+    void realDt;
+
+    // canto da tela em pixels do mundo, com fração (rolagem sub-pixel)
+    const viewX = cx - W / ps / 2, viewY = cy - H / ps / 2;
+    const ox = Math.floor(viewX), oy = Math.floor(viewY);
+    this.canvas.style.transform = `translate(${(-(viewX - ox) * ps).toFixed(2)}px, ${(-(viewY - oy) * ps).toFixed(2)}px)`;
 
     // ---- camada 1: pista em pixel art ----
     g.fillStyle = race.track.def.grass[0];
@@ -183,14 +249,12 @@ export class Renderer {
 
     // ---- camada 2: alta resolução ----
     const o = this.octx;
-    const W = window.innerWidth, H = window.innerHeight;
     o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     o.clearRect(0, 0, W, H);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = "high";
-    const ps = this.pixelScale;
     const m = this.m2css();
-    const toCss = (p: { x: number; y: number }) => ({ x: (p.x - ox) * ps, y: (p.y - oy) * ps });
+    const toCss = (p: { x: number; y: number }) => ({ x: (p.x - viewX) * ps, y: (p.y - viewY) * ps });
 
     this.screenPos.clear();
     const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
@@ -240,18 +304,6 @@ export class Renderer {
     o.globalAlpha = alpha;
     o.drawImage(img.canvas, (-img.wM / 2) * m, (-img.hM / 2) * m, img.wM * m, img.hM * m);
     o.restore();
-  }
-
-  private smoothSc(s: number, v: number, simDt: number, realDt: number): Disp {
-    const L = this.race.track.L;
-    const d = this.scDisp!;
-    let err = s - d.s;
-    if (err > L / 2) err -= L;
-    if (err < -L / 2) err += L;
-    if (Math.abs(err) > 80) d.s = s;
-    else d.s += Math.max(0, v * simDt + err * Math.min(1, realDt * 6));
-    d.s = ((d.s % L) + L) % L;
-    return d;
   }
 
   private label(o: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string, placed: { x: number; y: number; w: number }[]) {
