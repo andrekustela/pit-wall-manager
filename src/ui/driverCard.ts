@@ -81,7 +81,7 @@ function careerHtml(p: DriverProfile): string {
   if (!c) return "";
   return `<div class="dcareer">
     <div class="dct">CARREIRA NA F1 · ${esc(c.years)}</div>
-    <div class="dcstats"><span><b>${c.titles ? c.titles.split(",").length : 0}</b> título(s)</span><span><b>${esc(c.wins)}</b> vitórias</span></div>
+    <div class="dcstats"><span><b>${esc(c.starts)}</b> corridas</span><span><b>${c.titles ? c.titles.split(",").length : 0}</b> título(s)</span><span><b>${esc(c.wins)}</b> vitórias</span></div>
     ${c.titles ? `<div class="dcrow">🏆 ${esc(c.titles)}</div>` : ""}
     <div class="dcrow">Equipes: ${esc(c.teams)}</div>
     <div class="dcnote">${esc(c.note)}</div>

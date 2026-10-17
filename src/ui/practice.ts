@@ -122,9 +122,7 @@ O reserva é surpresa: pode ser melhor ou pior. Só dá pra trocar UMA vez${lobb
     const notes = weekendConditions(w).notes;
     const NL = "\n";
     const trackTip = notes.length
-      ? "Neste fim de semana:" + NL + NL +
-        notes.map((n) => `${n.icon} ${n.title}${NL}→ ${n.hint}`).join(NL + NL) + NL + NL +
-        "O acerto ideal também depende do gosto de cada piloto (veja a ficha)."
+      ? "Neste fim de semana:" + NL + NL + notes.map((n) => `${n.icon} ${n.title}`).join(NL)
       : "Condições normais de pista neste fim de semana.";
     const item = (icon: string, title: string, sub: string, tip: string) =>
       `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
