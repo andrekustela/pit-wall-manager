@@ -17,7 +17,7 @@ export class PodiumScreen {
   private raf = 0;
   private ready = false;
 
-  constructor(root: HTMLElement, conn: Connection, race: Race, lobby: LobbyState) {
+  constructor(root: HTMLElement, conn: Connection, race: Race, lobby: LobbyState, onReplay?: () => void) {
     const top = race.ordered().filter((c) => !c.retired).slice(0, 3);
     const winner = top[0];
     const eng = race.engineers[winner.team.id];
@@ -49,7 +49,7 @@ export class PodiumScreen {
         <h2>RESULTADO COMPLETO · ${esc(race.track.name)} · ${race.laps} VOLTAS</h2>
         ${resultsTable(race, me.teamId ?? "")}
         ${telemetryHtml(race, me.teamId ?? "")}
-        <button class="go" id="pd-go">${goLabel(lobby)}</button>
+        <div class="row-btns" style="align-items:center"><button class="go" id="pd-go" style="margin:0">${goLabel(lobby)}</button>${onReplay ? `<button class="btn" id="pd-replay">🎬 REPLAYS / MELHORES MOMENTOS</button>` : ""}</div>
       </div></div>`;
     bindTelemetry(root);
     root.addEventListener("click", (e) => {
@@ -59,6 +59,7 @@ export class PodiumScreen {
       if (r && !r.disabled) conn.send({ t: "repairEngine", carId: r.dataset.repair! });
     });
 
+    root.querySelector("#pd-replay")?.addEventListener("click", () => onReplay?.());
     const go = root.querySelector<HTMLButtonElement>("#pd-go")!;
     go.addEventListener("click", () => {
       this.ready = !this.ready;

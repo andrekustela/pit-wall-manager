@@ -257,4 +257,6 @@ export interface RaceEvent {
   kind?: string;
   /** volta do líder quando aconteceu (histórico da corrida) */
   lap?: number;
+  /** carro envolvido (a câmera do replay segue ele) */
+  carId?: string;
 }

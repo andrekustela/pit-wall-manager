@@ -17,6 +17,7 @@ import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
 import { HqScreen } from "./ui/hq";
+import { ReplayRecorder, showReplay } from "./render/replay";
 import { ChatWidget } from "./ui/chat";
 import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
@@ -57,6 +58,9 @@ class App {
   private soundEvents = 0;
   private draftSeen = -1;
   private chat: ChatWidget | null = null;
+  /** gravação da corrida em andamento (replay) e a da última corrida */
+  private replay = new ReplayRecorder();
+  private lastReplay: ReplayRecorder | null = null;
   /** escolheu jogar sem conta nesta visita */
   private guest = false;
   private recorded = -1;
@@ -181,11 +185,13 @@ class App {
           this.view.race.applySnapshot(m.snap);
           this.view.speed = m.speed;
           this.view.renderer.onSnapshot(m.speed);
+          this.replay.add(this.view.race); // grava pro replay
         }
         break;
       case "end":
         this.lastRace = this.view?.race ?? null;
         if (this.lastRace) this.lastRace.telemetry = m.tele;
+        this.lastReplay = this.replay;
         break;
     }
   }
@@ -230,7 +236,8 @@ class App {
       case "podium":
         if (this.lastRace) {
           this.recordStats(l, this.lastRace);
-          this.screen = new PodiumScreen(app, conn, this.lastRace, l);
+          const race = this.lastRace, rec = this.lastReplay;
+          this.screen = new PodiumScreen(app, conn, race, l, rec && rec.frames.length > 4 ? () => showReplay(race, rec, this.myTeam()) : undefined);
           sound.fanfare();
         }
         break;
@@ -270,6 +277,7 @@ class App {
   }
 
   private startRace(opts: RaceOptions, speed: number) {
+    this.replay = new ReplayRecorder();
     music.setPlaying(false); // na corrida, só o som dos carros
     this.teardown();
     this.screenPhase = "race";

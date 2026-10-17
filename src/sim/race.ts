@@ -560,7 +560,7 @@ export class Race {
             if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.5)) this.deploySafetyCar();
           } else {
             c.lateralTarget = c.offSide * (TRACK_WIDTH / 2 - 2);
-            this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off");
+            this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off", c.id);
           }
         }
       }
@@ -619,7 +619,7 @@ export class Race {
       this.stats.spins++;
       c.wear = Math.min(1.2, c.wear + 0.08);
       c.overtaking = null;
-      this.log(`${c.driver.name} rodou!`, c.isHuman, c.isHuman ? c.team.id : undefined, "spin");
+      this.log(`${c.driver.name} rodou!`, c.isHuman, c.isHuman ? c.team.id : undefined, "spin", c.id);
     } else {
       this.retire(c, "Acidente");
       if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
@@ -663,9 +663,9 @@ export class Race {
       const dmg = this.rng.range(0.4, 1.4);
       c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
       c.damage += dmg;
-      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, team, "damage");
+      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
     } else {
-      this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off");
+      this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off", c.id);
     }
   }
 
@@ -845,7 +845,7 @@ export class Race {
           if (!m || m.retired || m.finished || c.finished) c.order = "none";
           else if (this.dist(m) > this.dist(c) + CAR_L) {
             c.order = "none";
-            this.log(`${c.driver.short} cumpre a ordem e deixa ${m.driver.short} passar.`, true, c.team.id, "overtake");
+            this.log(`${c.driver.short} cumpre a ordem e deixa ${m.driver.short} passar.`, true, c.team.id, "overtake", m.id);
           } else if (m.pit === "none" && !sc.active) {
             const d = this.dist(c) - this.dist(m);
             // até ~3 s atrás: tira o pé pra ele chegar; colado: abre a faixa e deixa passar
@@ -1059,7 +1059,7 @@ export class Race {
     b.overtaking = null;
     if (r < 0.6) {
       this.stats.touches++;
-      this.log(`Toque entre ${a.driver.short} e ${b.driver.short}! Seguem na pista.`, !!team, team, "touch");
+      this.log(`Toque entre ${a.driver.short} e ${b.driver.short}! Seguem na pista.`, !!team, team, "touch", a.id);
       // roda encostou na asa do outro: furo
       if (!victim.fault && this.rng.chance(0.18)) this.setFault(victim, "puncture");
     } else if (r < 0.8) {
@@ -1071,11 +1071,11 @@ export class Race {
       victim.damage += dmg;
       this.stats.damages++;
       const name = PARTS.find((x) => x.id === part)!.label.toLowerCase();
-      this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (+${dmg.toFixed(1)}s por volta)`, !!team, team, "damage");
+      this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (+${dmg.toFixed(1)}s por volta)`, !!team, team, "damage", victim.id);
     } else if (r < 0.94) {
       victim.spin = this.rng.range(3, 6);
       this.stats.spins++;
-      this.log(`${victim.driver.name} rodou depois de um toque com ${other.driver.short}!`, !!team, team, "spin");
+      this.log(`${victim.driver.name} rodou depois de um toque com ${other.driver.short}!`, !!team, team, "spin", victim.id);
     } else {
       this.retire(victim, "Acidente");
       if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
@@ -1215,7 +1215,7 @@ export class Race {
             : reason === "Preso na brita" || reason === "Bateu no muro"
               ? `${c.driver.name} ${reason === "Preso na brita" ? "ficou preso na brita" : "bateu no muro"}! Abandono.`
               : `${c.driver.name} abandona: ${reason.toLowerCase()}.`;
-    this.log(msg, true, c.isHuman ? c.team.id : undefined, reason === "Acidente" ? "crash" : "out");
+    this.log(msg, true, c.isHuman ? c.team.id : undefined, reason === "Acidente" ? "crash" : "out", c.id);
   }
 
   private crossLine(c: CarState) {
@@ -1238,7 +1238,7 @@ export class Race {
       if (c.bestLap === null || lt < c.bestLap) c.bestLap = lt;
       if (!this.sc.active && (!this.fastestLap || lt < this.fastestLap.time)) {
         this.fastestLap = { carId: c.id, time: lt };
-        if (c.lap > 1) this.log(`Volta mais rápida: ${c.driver.name} ${fmtLap(lt)}`, c.isHuman, c.team.id, "fastest");
+        if (c.lap > 1) this.log(`Volta mais rápida: ${c.driver.name} ${fmtLap(lt)}`, c.isHuman, c.team.id, "fastest", c.id);
       }
     }
     ts.c = c.compound;
@@ -1358,7 +1358,7 @@ export class Race {
     this.stats.overtakes++;
     if (c.isHuman || o.isHuman || c.position <= 4) {
       const team = c.isHuman ? c.team.id : o.isHuman ? o.team.id : undefined;
-      this.log(`${c.driver.short} passa ${o.driver.short}!`, c.isHuman || o.isHuman, team, "overtake");
+      this.log(`${c.driver.short} passa ${o.driver.short}!`, c.isHuman || o.isHuman, team, "overtake", c.id);
     }
   }
 
@@ -1526,9 +1526,9 @@ export class Race {
     else c.pace = "normal";
   }
 
-  private log(text: string, important: boolean, teamId?: string, kind?: string) {
+  private log(text: string, important: boolean, teamId?: string, kind?: string, carId?: string) {
     const lead = this.cars.length ? Math.max(...this.cars.map((c) => c.lap)) : 0;
-    this.events.push({ time: this.time, text, important, teamId, kind, lap: Math.min(this.laps, Math.max(1, lead + 1)) });
+    this.events.push({ time: this.time, text, important, teamId, kind, lap: Math.min(this.laps, Math.max(1, lead + 1)), carId });
   }
 }
 

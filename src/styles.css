@@ -691,3 +691,20 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .tt.ideal { color: var(--ok); }
 .tt.quente { color: #ff8a1c; }
 .tt.dirty { color: #c9d1e0; }
+
+/* replay em tela cheia */
+.replay { position: fixed; inset: 0; z-index: 75; background: #000; }
+.replay canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rpside { position: absolute; right: 12px; top: 12px; bottom: 76px; width: 330px; display: flex; flex-direction: column; padding: 8px; }
+.rphead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
+.rplist { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.rpitem { display: grid; grid-template-columns: 40px 20px 1fr; gap: 6px; text-align: left; background: transparent; border: 0; color: #c9d1e0; padding: 6px; font-size: 12px; cursor: pointer; align-items: start; }
+.rpitem:hover { background: rgba(255,255,255,.06); }
+.rpitem.on { background: rgba(232,32,42,.2); color: #fff; }
+.rpitem .rpt { font-family: var(--num); color: var(--muted); }
+.rpbar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center; padding: 8px 10px; }
+.rpbar .rpseek { flex: 1; accent-color: var(--accent); }
+.rpbar .rptime { font-family: var(--num); font-size: 14px; min-width: 96px; text-align: center; }
+.rpbar .rpspeed { flex: none; }
+@media (max-width: 800px) { .rpside { left: 12px; width: auto; top: auto; bottom: 76px; height: 38%; } }
+.rpbar .rpspeed button { min-width: 42px; padding: 4px 6px; }
