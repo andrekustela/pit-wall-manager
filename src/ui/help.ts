@@ -1,4 +1,5 @@
 import { sound } from "../audio/sound";
+import { music } from "../audio/music";
 
 type Tab = "jogo" | "treino" | "estrategia" | "corrida" | "atalhos";
 
@@ -85,7 +86,7 @@ export class HelpWidget {
   constructor(private currentTab: () => Tab) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
+    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
     this.el.querySelector("[data-help]")!.addEventListener("click", () => this.open(this.currentTab()));
     this.el.querySelector("[data-mute]")!.addEventListener("click", () => sound.toggleMute());
@@ -101,6 +102,21 @@ export class HelpWidget {
     vol.addEventListener("input", () => sound.setVolume(Number(vol.value) / 100));
     sound.onChange(() => this.renderMute());
     this.renderMute();
+    // música: clique liga/desliga; clique direito pula pra próxima
+    const mb = this.el.querySelector<HTMLButtonElement>("[data-music]")!;
+    mb.addEventListener("click", () => music.toggle());
+    mb.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      music.skip();
+    });
+    const renderMusic = () => {
+      mb.classList.toggle("off", !music.enabled);
+      mb.title = music.enabled
+        ? `Música ligada${music.current ? ` · tocando "${music.current.title}"` : ""}\nClique: desliga · clique direito: próxima`
+        : "Música desligada · clique pra ligar";
+    };
+    music.onChange(renderMusic);
+    renderMusic();
   }
 
   private renderMute() {

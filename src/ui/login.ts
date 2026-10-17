@@ -11,9 +11,11 @@ export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
   root.innerHTML = `
     <div class="loginscreen">
       <canvas class="loginbg"></canvas>
+      <div class="loginhero">
+        <img class="loginlogo" src="/brand/logo.png" alt="Pit Wall Manager">
+        <p class="loginslogan">A estratégia de corrida é sua. Você é o engenheiro-chefe.</p>
+      </div>
       <div class="loginbox panel">
-        <h1 class="title" style="text-align:center;margin:0">PIT WALL <span>MANAGER</span></h1>
-        <p class="sub" style="text-align:center;margin:6px 0 18px">Você é o engenheiro-chefe.</p>
         <div class="seg logintabs"><button data-mode="in" class="on">ENTRAR</button><button data-mode="up">CRIAR CONTA</button></div>
         <form class="loginform">
           <label class="fld" data-only="up"><span>Nome do engenheiro</span><input class="txt" id="lg-name" maxlength="18" placeholder="Ex.: André" autocomplete="nickname"></label>

@@ -23,6 +23,12 @@ const MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".webmanifest": "application/manifest+json",
+  ".json": "application/json; charset=utf-8",
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+  ".jpg": "image/jpeg",
+  ".webp": "image/webp",
   ".ico": "image/x-icon",
 };
 

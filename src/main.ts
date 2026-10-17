@@ -1,5 +1,6 @@
 import "./styles.css";
 import { sound } from "./audio/sound";
+import { music } from "./audio/music";
 import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
 import { LocalConnection, WsConnection, type Connection } from "./net/connection";
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
@@ -64,6 +65,7 @@ class App {
 
   menu() {
     this.teardown();
+    music.setPlaying(true);
     // com contas ligadas, pede login (ou "jogar sem conta")
     // tela de entrada logo de cara (login ou "jogar sem conta")
     if (!account.user && !this.guest && !AUTO) {
@@ -187,6 +189,7 @@ class App {
     if (l.phase === "quali" && !this.quali) return; // espera os tempos
     this.teardown();
     this.screenPhase = l.phase;
+    music.setPlaying(true); // fora da corrida: trilha tocando
     const conn = this.conn!;
     switch (l.phase) {
       case "lobby":
@@ -249,6 +252,7 @@ class App {
   }
 
   private startRace(opts: RaceOptions, speed: number) {
+    music.setPlaying(false); // na corrida, só o som dos carros
     this.teardown();
     this.screenPhase = "race";
     app.innerHTML = `<canvas id="view"></canvas>`;
@@ -365,6 +369,7 @@ class App {
   // áudio só é liberado depois de um clique; aproveita pra fazer o "tic" dos botões
   document.addEventListener("pointerdown", (e) => {
     sound.unlock();
+    music.unlock();
     if ((e.target as HTMLElement).closest("button")) sound.click();
   }, true);
   appInst.menu();

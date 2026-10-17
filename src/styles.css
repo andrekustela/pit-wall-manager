@@ -607,3 +607,15 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .menuhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .installbtn { background: #1c6ed4; border-color: #6ea8ff; color: #fff; }
 .installbtn:hover { background: #2a7ee6; }
+.helpbtns .hbtn.off { opacity: .4; text-decoration: line-through; }
+
+/* logo na entrada e no menu */
+.loginscreen { gap: 56px; flex-wrap: wrap; }
+.loginhero { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 420px; }
+.loginlogo { width: min(400px, 80vw); height: auto; display: block; filter: drop-shadow(0 12px 30px rgba(0,0,0,.6)); }
+.loginslogan { margin: 0; text-align: center; font-family: var(--pix); font-size: 13px; color: #c9d1e0; letter-spacing: .04em; text-shadow: 0 2px 6px #000; }
+.menulogo { width: 220px; height: auto; display: block; }
+@media (max-width: 900px) {
+  .loginscreen { flex-direction: column; gap: 18px; }
+  .loginlogo { width: min(240px, 60vw); }
+}
