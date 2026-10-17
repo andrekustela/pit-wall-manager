@@ -21,8 +21,12 @@ export interface TrackDef {
   grass: [string, string];
 }
 
-export const TRACK_WIDTH = 14;
+export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
+/** lateral (beira da pista, lado do box) onde o carro entra/sai do pit lane */
+export const PIT_MERGE = TRACK_WIDTH / 2 - 3;
+/** a vaga da garagem fica ao lado do pit lane, pra quem passa não atravessar quem está parado */
+export const BOX_SHIFT = 3;
 
 export const CIRCUITS: TrackDef[] = [
   {
@@ -277,7 +281,7 @@ export class Track {
     const d1 = this.wrap(s - this.pitEntryS);
     const d2 = this.wrap(this.pitExitS - s);
     const k = Math.min(1, d1 / ramp, d2 / ramp);
-    return PIT_LATERAL * Math.max(0, k);
+    return PIT_MERGE + (PIT_LATERAL - PIT_MERGE) * Math.max(0, k);
   }
 }
 

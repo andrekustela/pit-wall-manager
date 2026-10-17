@@ -78,7 +78,7 @@ export class LobbyScreen {
       const taken = o && !mine;
       const name = mine && me.teamName ? me.teamName : o?.teamName || t.name;
       return `<button class="teamcard ${mine ? "on" : ""}" data-team="${t.id}" ${taken ? "disabled" : ""}>
-        <canvas data-sprite="${t.id}" width="12" height="6"></canvas>
+        <canvas data-sprite="${t.id}" width="16" height="7"></canvas>
         <div><div class="tn">${esc(name)}</div><div class="st">${
           taken ? `de ${esc(o!.name)}` : lobby.equalCars ? "Carro igual pra todos" : `Carro ${stars(t.carPace)}`
         }</div></div></button>`;

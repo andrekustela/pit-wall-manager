@@ -1,7 +1,7 @@
 import { TEAMS } from "./data";
 import { buildEntrants, type Engineer } from "./entrants";
 import { Rng } from "./rng";
-import { Track, getTrack } from "./track";
+import { BOX_SHIFT, PIT_MERGE, TRACK_WIDTH, Track, getTrack } from "./track";
 import { BASE_SLACK, aiTuning, carProfile, clampTuning } from "./tuning";
 import {
   COMPOUNDS,
@@ -51,6 +51,12 @@ const PIT_SPEED = 22; // m/s (~80 km/h)
 const MANDATORY_PENALTY = 30;
 const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
+/** tamanho do carro pra colisão (m) */
+const CAR_L = 5.6;
+const CAR_W = 2.3;
+/** distância lateral entre "faixas" numa disputa */
+const LANE_STEP = 3.4;
+const LANE_EDGE = TRACK_WIDTH / 2 - 1.6;
 
 /** consumo por volta em modo normal */
 export function fuelPerLap(laps: number): number {
@@ -61,7 +67,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "spin", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "spin", "damage", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -108,6 +114,8 @@ export class Race {
   rain = 0;
   sc: SafetyCar = { active: false, onTrack: false, s: 0, v: 0, lapsLeft: 0 };
   fastestLap: { carId: string; time: number } | null = null;
+  /** contadores (pra balancear e pro resumo) */
+  stats = { overtakes: 0, touches: 0, damages: 0, spins: 0, crashes: 0, safetyCars: 0 };
 
   private rng: Rng;
   private wearScale: number;
@@ -160,7 +168,7 @@ export class Race {
         s: this.track.L - 14 - i * 8,
         lap: -1,
         v: 0,
-        lateral: i % 2 === 0 ? -3 : 3,
+        lateral: i % 2 === 0 ? -LANE_STEP : LANE_STEP,
         lateralTarget: 0,
         compound: "M",
         wear: 0,
@@ -185,6 +193,9 @@ export class Race {
         retired: false,
         retireReason: null,
         spin: 0,
+        damage: 0,
+        defendTill: 0,
+        defendLat: 0,
         position: i + 1,
         penalty: 0,
         targetLap: 0,
@@ -440,13 +451,7 @@ export class Race {
 
       this.updatePit(c, prevS, ds);
 
-      if (c.pit === "none") {
-        if (c.spin > 0) c.lateralTarget = -9;
-        else if (c.finished) c.lateralTarget = 4; // abre caminho pra quem ainda corre
-        else if (!c.overtaking) c.lateralTarget = 0;
-        const dl = c.lateralTarget - c.lateral;
-        c.lateral += Math.max(-3 * dt, Math.min(3 * dt, dl));
-      }
+      if (c.pit === "none") this.moveLateral(c, dt);
 
       if (c.s >= L) {
         c.s -= L;
@@ -458,6 +463,7 @@ export class Race {
       if (!this.trace.has(bucket) && !c.finished) this.trace.set(bucket, this.time);
     }
 
+    this.resolveContacts(dt);
     this.updatePositions();
     const allIn = this.cars.every((c) => c.retired || c.pit === "parked");
     const timeout = this.checkeredTime !== null && this.time - this.checkeredTime > COOLDOWN_TIMEOUT;
@@ -493,6 +499,7 @@ export class Race {
 
     if (this.rng.chance(0.55)) {
       c.spin = this.rng.range(3.5, 8);
+      this.stats.spins++;
       c.wear = Math.min(1.2, c.wear + 0.08);
       c.overtaking = null;
       this.log(`${c.driver.name} rodou!`, c.isHuman, c.isHuman ? c.team.id : undefined, "spin");
@@ -513,6 +520,7 @@ export class Race {
       lapsLeft: Math.max(2, Math.round(this.laps * 0.1)) + (this.rng.chance(0.4) ? 1 : 0),
     };
     for (const c of this.cars) c.overtaking = null;
+    this.stats.safetyCars++;
     this.log("SAFETY CAR na pista! Proibido ultrapassar.", true, undefined, "sc");
   }
 
@@ -553,7 +561,7 @@ export class Race {
     const cold = c.tyreLaps === 0 && c.pitStops > 0 ? 1.0 : 0;
     return (
       c.team.carPace + c.driver.skill + spec.offset + wetPenalty(c.compound, this.wet) + wearPen + fuel +
-      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold
+      PACE[c.pace].offset + ENGINE[c.engine].offset + c.lapNoise + cold + c.damage
     );
   }
 
@@ -580,91 +588,219 @@ export class Race {
     return v;
   }
 
-  private resolveTraffic(targets: Map<string, number>) {
-    const L = this.track.L;
-    const sc = this.sc;
-    const obstacle = (o: CarState) => o.pit === "none" && !o.retired && o.spin <= 0 && !o.finished;
-    for (const c of this.cars) {
-      if (c.pit !== "none" || c.finished || c.retired || c.spin > 0) continue;
-      let ahead: CarState | null = null;
-      let gap = Infinity;
-      for (const o of this.cars) {
-        if (o === c || !obstacle(o)) continue;
-        const g = this.track.wrap(o.s - c.s);
-        if (g > 0 && g < 45 && g < gap) {
-          gap = g;
-          ahead = o;
-        }
-      }
+  // ---------- tráfego e colisão ----------
+  // Cada carro é um retângulo (CAR_L x CAR_W) numa posição s (ao longo da
+  // pista) e lateral. Ninguém atravessa ninguém: quem está atrás na mesma
+  // faixa segue o da frente; pra passar, precisa ir pra uma faixa livre.
 
-      // safety car: fila indiana, ninguém passa
-      if (sc.active) {
-        c.overtaking = null;
-        const myT = targets.get(c.id)!;
-        if (sc.onTrack) {
-          const g = this.track.wrap(sc.s - c.s);
-          if (g < 60 && g < gap) {
-            targets.set(c.id, Math.min(myT, g < 35 ? sc.v * 0.95 : sc.v + 4));
-            continue;
+  /** em que "área" o carro está: pista, pit lane ou fora (não interage) */
+  private zone(c: CarState): "track" | "pit" | "off" {
+    if (c.pit !== "none") return Math.abs(c.lateral) > TRACK_WIDTH / 2 + 0.5 ? "pit" : "track";
+    return Math.abs(c.lateral) > TRACK_WIDTH / 2 + 0.8 ? "off" : "track";
+  }
+
+  /** distância ao longo da pista de a até b (negativa = b está atrás) */
+  private rel(a: CarState, b: CarState): number {
+    let d = this.track.wrap(b.s - a.s);
+    if (d > this.track.L / 2) d -= this.track.L;
+    return d;
+  }
+
+  /** faixa livre ao lado do carro da frente (ou null) */
+  private freeSide(c: CarState, blocker: CarState): number | null {
+    const cands = [blocker.lateral - LANE_STEP, blocker.lateral + LANE_STEP]
+      .filter((x) => Math.abs(x) <= LANE_EDGE)
+      .sort((x, y) => Math.abs(x) - Math.abs(y));
+    for (const lat of cands) {
+      const busy = this.cars.some((o) => {
+        if (o === c || o === blocker || o.pit === "parked" || this.zone(o) !== "track") return false;
+        const d = this.rel(c, o);
+        return d > -10 && d < 18 && Math.abs(o.lateral - lat) < CAR_W + 0.6;
+      });
+      if (!busy) return lat;
+    }
+    return null;
+  }
+
+  private resolveTraffic(targets: Map<string, number>) {
+    const sc = this.sc;
+    for (const c of this.cars) {
+      if (c.retired || c.spin > 0 || c.pit === "stopped" || c.pit === "parked") continue;
+      const zone = this.zone(c);
+      let myT = targets.get(c.id)!;
+
+      // ---- faixa desejada (só na pista) ----
+      if (c.pit === "none") {
+        let want = c.finished ? 4 : 0;
+        // vai pro lado do pit antes da entrada
+        if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
+        if (c.defendTill > this.time) want = c.defendLat;
+        // retardatário: abre espaço pra quem vai colocar volta
+        for (const o of this.cars) {
+          if (o === c || o.finished || o.retired || o.pit !== "none") continue;
+          const d = this.rel(c, o);
+          if (d < 0 && d > -35 && this.dist(o) > this.dist(c) + this.track.L / 2) {
+            want = o.lateral >= 0 ? -LANE_STEP : LANE_STEP;
+            myT *= 0.97;
           }
         }
-        if (ahead && gap < 30) targets.set(c.id, Math.min(myT, gap < 14 ? ahead.v * 0.95 : ahead.v + 3));
-        continue;
+
+        // carro na frente, na mesma faixa
+        let blocker: CarState | null = null;
+        let gap = Infinity;
+        for (const o of this.cars) {
+          if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
+          const d = this.rel(c, o);
+          if (d > 0 && d < 45 && d < gap && Math.abs(o.lateral - c.lateral) < CAR_W + 0.4) {
+            gap = d;
+            blocker = o;
+          }
+        }
+
+        if (sc.active && !c.finished) {
+          c.overtaking = null; // safety car: fila indiana
+        } else if (c.overtaking) {
+          const o = this.cars.find((x) => x.id === c.overtaking)!;
+          const d = this.rel(c, o);
+          if (d < -(CAR_L + 2)) {
+            if (!o.finished) this.onOvertake(c, o);
+            c.overtaking = null;
+          } else if (d > 35 || o.retired || this.zone(o) !== "track") {
+            c.overtaking = null; // desistiu
+          } else {
+            want = c.lateralTarget;
+            if (d > 0 && d < 25) myT *= 1.012; // vácuo
+          }
+        }
+        if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20) {
+          const slow = blocker.v < myT * 0.7 || blocker.spin > 0 || blocker.retired || blocker.finished;
+          const lapping = this.dist(blocker) < this.dist(c) - this.track.L / 2;
+          let go = slow || lapping;
+          if (!go && myT > blocker.v * 1.003 && this.track.isStraight(c.s) && this.dist(c) >= c.nextAttemptS) {
+            const delta = blocker.targetLap - c.targetLap;
+            // na chuva o spray atrapalha: tenta menos
+            const p = Math.max(0.03, Math.min(0.85, 0.1 + delta * 0.45 + (gap < 12 ? 0.08 : 0) - this.wet * 0.06));
+            c.nextAttemptS = this.dist(c) + 650;
+            go = this.rng.chance(p);
+          }
+          if (go) {
+            const side = this.freeSide(c, blocker);
+            if (side !== null) {
+              c.overtaking = blocker.id;
+              want = side;
+              // quem está na frente às vezes fecha a porta (se ainda não emparelharam)
+              const q = this.quality(blocker.team.id);
+              if (!slow && !lapping && !blocker.isHuman && gap > CAR_L + 1 && this.rng.chance(0.15 + 0.2 * q)) {
+                blocker.defendTill = this.time + 2.5;
+                blocker.defendLat = Math.max(-LANE_EDGE, Math.min(LANE_EDGE, side));
+              }
+            }
+          }
+        }
+        c.lateralTarget = want;
       }
 
-      if (c.overtaking) {
-        const o = this.cars.find((x) => x.id === c.overtaking)!;
-        const behindBy = this.track.wrap(o.s - c.s);
-        // passou (o outro ficou 10 m atrás) ou desistiu
-        const passed = behindBy > L / 2 && behindBy < L - 10;
-        const fellBack = behindBy > 30 && behindBy <= L / 2;
-        if (passed || fellBack || !obstacle(o)) {
-          if (passed && !o.finished) this.onOvertake(c, o);
-          c.overtaking = null;
-        } else {
-          targets.set(c.id, targets.get(c.id)! * 1.012); // vácuo
-          continue;
+      // ---- não encosta no da frente (mesma faixa) ----
+      for (const o of this.cars) {
+        if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
+        const d = this.rel(c, o);
+        if (d <= 0 || d > 40 || Math.abs(o.lateral - c.lateral) >= CAR_W + 0.3) continue;
+        const net = d - CAR_L;
+        const desired = net < 0.5 ? o.v * 0.85 : o.v + 0.9 * (net - 2.5);
+        myT = Math.min(myT, Math.max(0, desired));
+      }
+      // safety car na frente
+      if (sc.active && sc.onTrack && zone === "track" && !c.finished) {
+        const g = this.track.wrap(sc.s - c.s);
+        if (g < 60) myT = Math.min(myT, g < 35 ? sc.v * 0.95 : sc.v + 4);
+      }
+      targets.set(c.id, myT);
+    }
+  }
+
+  /** move pro lado sem fechar quem está emparelhado */
+  private moveLateral(c: CarState, dt: number) {
+    if (c.spin > 0) {
+      c.lateral += Math.max(-3 * dt, Math.min(3 * dt, -9 - c.lateral)); // rodando, escorrega pra fora
+      return;
+    }
+    const step = Math.max(-2.6 * dt, Math.min(2.6 * dt, c.lateralTarget - c.lateral));
+    if (step === 0) return;
+    const next = c.lateral + step;
+    for (const o of this.cars) {
+      if (o === c || o.pit === "parked" || this.zone(o) !== "track") continue;
+      if (Math.abs(this.rel(c, o)) > CAR_L + 0.8) continue;
+      const now = Math.abs(c.lateral - o.lateral);
+      const after = Math.abs(next - o.lateral);
+      if (after < CAR_W + 0.25 && after < now) return; // tem carro do lado: espera
+    }
+    c.lateral = Math.max(-LANE_EDGE - 0.5, Math.min(LANE_EDGE + 0.5, next));
+  }
+
+  /** carros que se encostaram: separa e às vezes vira batida */
+  private resolveContacts(dt: number) {
+    if (this.phase !== "racing") return;
+    const cars = this.cars.filter((c) => c.pit !== "parked" && c.pit !== "stopped" && this.zone(c) === "track");
+    for (let i = 0; i < cars.length; i++) {
+      for (let j = i + 1; j < cars.length; j++) {
+        const a = cars[i], b = cars[j];
+        const d = this.rel(a, b);
+        if (Math.abs(d) > CAR_L + 1) continue;
+        const dl = b.lateral - a.lateral;
+        const overlap = Math.abs(d) < CAR_L * 0.92 && Math.abs(dl) < CAR_W * 0.88;
+        const sideBySide = !overlap && Math.abs(d) < CAR_L && Math.abs(dl) < CAR_W + 1.2;
+        const front = d > 0 ? b : a;
+        const rear = front === a ? b : a;
+        if (overlap) {
+          // separa
+          const push = (CAR_W * 0.88 - Math.abs(dl)) / 2 + 0.05;
+          const dir = dl >= 0 ? 1 : -1;
+          if (!a.retired) a.lateral = Math.max(-LANE_EDGE - 0.5, a.lateral - push * dir);
+          if (!b.retired) b.lateral = Math.min(LANE_EDGE + 0.5, b.lateral + push * dir);
+          rear.v = Math.min(rear.v, front.v * 0.95);
+          const rel = Math.abs(a.v - b.v);
+          this.maybeContact(a, b, rear, Math.min(0.9, 0.2 + rel * 0.04) * (1 + this.wet));
+        } else if (sideBySide && this.track.speedAt(a.s) < 62 && !this.sc.active && !a.finished && !b.finished) {
+          // lado a lado na curva: risco de toque
+          if (this.rng.chance(0.008 * (1 + 2 * this.wet) * dt)) this.maybeContact(a, b, rear, 1);
         }
       }
+    }
+  }
 
-      if (!ahead || gap > 16) continue;
-      const myT = targets.get(c.id)!;
-      const theirV = ahead.v;
-      if (myT <= theirV) continue;
+  private contactCooldown = new Map<string, number>();
+  private damageWarned = new Set<string>();
 
-      const lapped = this.dist(ahead) < this.dist(c) - L / 2;
-      const side = ahead.lateral > 0 ? -3.6 : 3.6;
-      if (lapped) {
-        c.overtaking = ahead.id;
-        c.lateralTarget = side;
-        continue;
-      }
-
-      if (this.track.isStraight(c.s) && this.dist(c) >= c.nextAttemptS) {
-        const delta = ahead.targetLap - c.targetLap;
-        // na chuva o spray atrapalha: ultrapassar fica mais difícil
-        const p = Math.max(0.03, Math.min(0.85, 0.12 + delta * 0.5 + (gap < 10 ? 0.08 : 0) - this.wet * 0.06));
-        c.nextAttemptS = this.dist(c) + 450;
-        if (this.rng.chance(p)) {
-          c.overtaking = ahead.id;
-          c.lateralTarget = side;
-          continue;
-        }
-        // disputa que deu errado: toque
-        if (this.rng.chance(0.003 + this.wet * 0.012)) {
-          const victim = this.rng.chance(0.5) ? c : ahead;
-          this.log(`Toque entre ${c.driver.short} e ${ahead.driver.short}!`, c.isHuman || ahead.isHuman, undefined, "crash");
-          if (this.rng.chance(0.35)) {
-            this.retire(victim, "Acidente");
-            if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
-          } else victim.spin = this.rng.range(3, 6);
-          continue;
-        }
-      }
-
-      if (Math.abs(c.lateral - ahead.lateral) < 2.8 || gap < 7) {
-        targets.set(c.id, Math.min(myT, gap < 9 ? theirV * 0.97 : theirV));
-      }
+  private maybeContact(a: CarState, b: CarState, rear: CarState, p: number) {
+    if (this.checkered || a.retired || b.retired) return;
+    const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    if ((this.contactCooldown.get(key) ?? -1) > this.time) return;
+    this.contactCooldown.set(key, this.time + 4);
+    if (!this.rng.chance(p)) return;
+    // quem vem atrás costuma levar a pior
+    const victim = this.rng.chance(0.65) ? rear : rear === a ? b : a;
+    const other = victim === a ? b : a;
+    const team = victim.isHuman ? victim.team.id : other.isHuman ? other.team.id : undefined;
+    const r = this.rng.next();
+    a.v *= 0.92;
+    b.v *= 0.92;
+    a.overtaking = null;
+    b.overtaking = null;
+    if (r < 0.6) {
+      this.stats.touches++;
+      this.log(`Toque entre ${a.driver.short} e ${b.driver.short}! Seguem na pista.`, !!team, team, "touch");
+    } else if (r < 0.8) {
+      const dmg = this.rng.range(0.6, 1.4);
+      victim.damage += dmg;
+      this.stats.damages++;
+      this.log(`${victim.driver.name} danificou a asa no toque com ${other.driver.short}! (+${dmg.toFixed(1)}s por volta)`, !!team, team, "damage");
+    } else if (r < 0.94) {
+      victim.spin = this.rng.range(3, 6);
+      this.stats.spins++;
+      this.log(`${victim.driver.name} rodou depois de um toque com ${other.driver.short}!`, !!team, team, "spin");
+    } else {
+      this.retire(victim, "Acidente");
+      if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
     }
   }
 
@@ -688,13 +824,16 @@ export class Race {
       }
       return;
     }
-    c.lateral = t.pitLateralAt(c.s);
+    const toBox = t.wrap(this.boxS(c) - c.s);
+    const fromBox = t.wrap(c.s - this.boxS(c));
+    const near = c.pit === "entering" ? toBox : fromBox;
+    c.lateral = t.pitLateralAt(c.s) + BOX_SHIFT * Math.max(0, Math.min(1, 1 - near / 25));
     if (c.pit === "entering") {
-      const remaining = t.wrap(this.boxS(c) - c.s);
+      const remaining = toBox;
       if (remaining < 0.6 || remaining > t.L - 5) {
         c.s = this.boxS(c);
         c.v = 0;
-        c.lateral = t.pitLateralAt(c.s);
+        c.lateral = t.pitLateralAt(c.s) + BOX_SHIFT;
         if (c.finished) {
           c.pit = "parked";
           return;
@@ -706,12 +845,13 @@ export class Race {
         const add = Math.min(c.boxFuel, FUEL_MAX - c.fuel);
         const refuel = add > 0.5 ? add / REFUEL_RATE + this.rng.range(0.4, 0.8) : 0;
         const mate = this.cars.find((o) => o !== c && o.team.id === c.team.id && o.pit === "stopped");
-        c.pitTimer = Math.max(tyres, refuel) + (mate ? mate.pitTimer + 0.8 : 0);
+        const nose = c.damage > 0 ? this.rng.range(4, 6.5) : 0; // trocar a asa dianteira
+        c.pitTimer = Math.max(tyres, refuel) + nose + (mate ? mate.pitTimer + 0.8 : 0);
       }
     } else if (c.pit === "leaving") {
       if (t.wrap(t.pitExitS - prevS) <= ds) {
         c.pit = "none";
-        c.lateral = 0;
+        c.lateral = PIT_MERGE; // sai pela beira e volta pro traçado quando tiver espaço
         c.lateralTarget = 0;
       }
     }
@@ -721,6 +861,11 @@ export class Race {
     const next = c.boxRequest ?? c.compound;
     const add = Math.max(0, Math.min(c.boxFuel, FUEL_MAX - c.fuel));
     c.fuel += add;
+    if (c.damage > 0) {
+      c.damage = 0;
+      this.damageWarned.delete(c.id);
+      this.log(`${c.driver.short}: asa nova colocada.`, c.isHuman, c.team.id, "info");
+    }
     c.compound = next;
     c.wear = 0;
     c.tyreLaps = 0;
@@ -745,6 +890,7 @@ export class Race {
   private retire(c: CarState, reason: string) {
     c.retired = true;
     c.retireReason = reason;
+    if (reason === "Acidente") this.stats.crashes++;
     c.boxRequest = null;
     c.overtaking = null;
     c.spin = 0;
@@ -818,6 +964,7 @@ export class Race {
 
   private onOvertake(c: CarState, o: CarState) {
     if (this.dist(c) - this.dist(o) > this.track.L / 2) return; // retardatário
+    this.stats.overtakes++;
     if (c.isHuman || o.isHuman || c.position <= 4) {
       const team = c.isHuman ? c.team.id : o.isHuman ? o.team.id : undefined;
       this.log(`${c.driver.short} passa ${o.driver.short}!`, c.isHuman || o.isHuman, team, "overtake");
@@ -851,6 +998,10 @@ export class Race {
 
   private radio(c: CarState) {
     const say = (txt: string) => this.log(`Rádio ${c.driver.short}: "${txt}"`, true, c.team.id, "radio");
+    if (c.damage > 0 && !this.damageWarned.has(c.id)) {
+      this.damageWarned.add(c.id);
+      say(`A asa está quebrada, estou perdendo uns ${c.damage.toFixed(1)}s por volta. Box pra trocar?`);
+    }
     if (c.pit === "none" && !c.boxRequest) {
       if (c.wear > 0.85 && c.tyreWarn < 2) {
         c.tyreWarn = 2;
@@ -941,10 +1092,14 @@ export class Race {
 
     // clima: troca se o pneu certo ganhar bastante tempo (engenheiro ruim demora a reagir)
     const best = bestForWet(this.wet);
-    const want: Compound = best === "dry" ? this.aiDryFor(lapsLeft) : best;
+    // temporal forte chegando: engenheiro bom já vai direto pro pneu de chuva
+    const want: Compound = best === "dry" ? this.aiDryFor(lapsLeft) : best === "I" && this.rain > 0.75 && q > 0.5 ? "W" : best;
     const current = isWetTyre(c.compound) ? c.compound : "dry";
     const threshold = 1.0 + (1 - q) * 2.5;
-    const weatherSwap = current !== best && wetPenalty(c.compound, this.wet) - wetPenalty(want, this.wet) > threshold && lapsLeft > 1;
+    const gain = wetPenalty(c.compound, this.wet) - wetPenalty(want, this.wet);
+    // histerese: não fica trocando de pneu toda volta quando a pista está no meio-termo
+    const trend = best === "dry" ? this.rain === 0 : this.rain > 0 || this.wet > 0.35;
+    const weatherSwap = current !== best && gain > threshold && lapsLeft > 1 && trend && (c.tyreLaps >= 2 || gain > 4);
 
     const nextIdx = c.pitStops + 1;
     const plannedDry =
@@ -956,11 +1111,12 @@ export class Race {
     const planDue = best === "dry" && nextPlanned !== undefined && c.lap + 1 >= nextPlanned && (lapsLeft > 3 || needsRule);
     const lastChance = needsRule && lapsLeft <= 2;
     const lowFuel = fuelLaps < 1.6 && fuelLaps < this.lapsLeft(c);
+    const damaged = c.damage > 0.5 && lapsLeft > 3;
     // safety car = parada mais barata; engenheiro esperto aproveita
     const scChance =
       this.sc.active && q > 0.35 && lapsLeft > 3 && best === "dry" &&
       ((nextPlanned !== undefined && nextPlanned - c.lap <= this.laps * 0.25) || c.wear > 0.5);
-    if (lapsLeft >= 1 && (weatherSwap || wornOut || planDue || lastChance || lowFuel || scChance)) {
+    if (lapsLeft >= 1 && (weatherSwap || wornOut || planDue || lastChance || lowFuel || scChance || damaged)) {
       const after = c.aiPlan[c.pitStops + 1];
       const until = after !== undefined && after > c.lap + 2 ? after : this.laps;
       const atStop = Math.max(0, c.fuel - cons * 0.5);

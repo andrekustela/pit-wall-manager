@@ -1,6 +1,6 @@
 import type { Race } from "../sim/race";
 import { CAR_LEN, CAR_WID, carSprite, safetyCarSprite } from "./sprites";
-import { PPM, buildWorld, type World } from "./worldArt";
+import { buildWorld, type World } from "./worldArt";
 
 interface Disp {
   s: number;
@@ -48,7 +48,9 @@ export class Renderer {
 
   private resize = () => {
     const w = window.innerWidth, h = window.innerHeight;
-    this.pixelScale = w < 700 ? 2 : h > 1100 ? 4 : 3;
+    // ~280 m de pista visíveis na largura, com escala inteira (pixel art nítida)
+    this.pixelScale = Math.max(1, Math.round(w / (280 * this.world.ppm)));
+    void h;
     this.canvas.width = Math.ceil(w / this.pixelScale);
     this.canvas.height = Math.ceil(h / this.pixelScale);
     this.ctx.imageSmoothingEnabled = false;
@@ -80,7 +82,7 @@ export class Renderer {
 
   private px(s: number, lat: number) {
     const p = this.race.track.pose(s, lat);
-    return { x: (p.x - this.world.minX) * PPM, y: (p.y - this.world.minY) * PPM, h: p.h };
+    return { x: (p.x - this.world.minX) * this.world.ppm, y: (p.y - this.world.minY) * this.world.ppm, h: p.h };
   }
 
   draw(realDt: number, speed: number) {
@@ -146,7 +148,9 @@ export class Renderer {
       if (c.retired) g.globalAlpha = 0.65;
       g.fillStyle = "rgba(0,0,0,0.35)";
       g.fillRect(-CAR_LEN / 2 + 1, -CAR_WID / 2 + 1, CAR_LEN, CAR_WID);
-      g.drawImage(carSprite(c.team), -CAR_LEN / 2, -CAR_WID / 2);
+      // na chuva a luz vermelha traseira pisca, como na F1
+      const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
+      g.drawImage(carSprite(c.team, rainLight), -CAR_LEN / 2, -CAR_WID / 2);
       g.restore();
       if (c.retired) this.smoke(g, x, y);
     }
@@ -159,7 +163,7 @@ export class Renderer {
       g.save();
       g.translate(Math.round(x), Math.round(y));
       g.rotate(p.h);
-      g.drawImage(safetyCarSprite(Math.floor(performance.now() / 250) % 2 === 0), -6, -3);
+      g.drawImage(safetyCarSprite(Math.floor(performance.now() / 250) % 2 === 0), -CAR_LEN / 2, -CAR_WID / 2);
       g.restore();
       this.label(g, Math.round(x), Math.round(y) - 8, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111");
     }

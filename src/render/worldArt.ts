@@ -3,14 +3,17 @@ import { TEAMS } from "../sim/data";
 import { Rng } from "../sim/rng";
 import { PIT_LATERAL, TRACK_WIDTH, Track } from "../sim/track";
 
-export const PPM = 2; // pixels por metro
-const MARGIN = 160; // m
+const MARGIN = 90; // m
+/** maior canvas que todo navegador aguenta (iOS: ~16,7 M pixels) */
+const MAX_AREA = 16e6;
 
 export interface World {
   canvas: HTMLCanvasElement;
-  /** offset do mundo (m) -> pixel: (x - minX) * PPM */
+  /** offset do mundo (m) -> pixel: (x - minX) * ppm */
   minX: number;
   minY: number;
+  /** pixels por metro (3 quando cabe; pista muito grande usa menos) */
+  ppm: number;
 }
 
 export function buildWorld(track: Track): World {
@@ -20,6 +23,10 @@ export function buildWorld(track: Track): World {
     maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
   }
   minX -= MARGIN; minY -= MARGIN; maxX += MARGIN; maxY += MARGIN;
+  const area = (k: number) => (maxX - minX) * k * (maxY - minY) * k;
+  const PPM = [3, 2.5, 2].find((k) => area(k) <= MAX_AREA) ?? 2;
+  /** passo (m) pra preencher pixel a pixel sem buracos */
+  const ST = 0.85 / PPM;
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil((maxX - minX) * PPM);
   canvas.height = Math.ceil((maxY - minY) * PPM);
@@ -37,9 +44,10 @@ export function buildWorld(track: Track): World {
   // ---- grama com faixas de corte ----
   g.fillStyle = track.def.grass[0];
   g.fillRect(0, 0, canvas.width, canvas.height);
-  for (let y = 0; y < canvas.height; y += 48) {
-    g.fillStyle = (y / 48) % 2 ? track.def.grass[0] : track.def.grass[1];
-    g.fillRect(0, y, canvas.width, 48);
+  const band = Math.round(24 * PPM);
+  for (let y = 0, i = 0; y < canvas.height; y += band, i++) {
+    g.fillStyle = i % 2 ? track.def.grass[0] : track.def.grass[1];
+    g.fillRect(0, y, canvas.width, band);
   }
   speckle(g, rng, 0, 0, canvas.width, canvas.height, ["#367c33", "#4a9a45", "#2f7330"], 0.05);
 
@@ -65,22 +73,24 @@ export function buildWorld(track: Track): World {
     const side = track.curvature[s] > 0 ? -1 : 1; // lado de fora
     const [x, y] = P(s, side * (TRACK_WIDTH / 2 + 9));
     g.fillStyle = "#b8a77a";
-    g.fillRect(x - 18, y - 18, 36, 36);
+    g.fillRect(x - 9 * PPM, y - 9 * PPM, 18 * PPM, 18 * PPM);
   }
-  speckleTrackBand(g, track, P, rng);
+  speckleTrackBand(g, track, P, rng, ST);
 
   // borda escura + asfalto
   strokeAlong(0, TRACK_WIDTH + 3, "#2a2a2e");
   strokeAlong(0, TRACK_WIDTH, "#55565c");
   // textura do asfalto
-  for (let s = 0; s < track.L; s += 0.5) {
-    const lat = rng.range(-TRACK_WIDTH / 2 + 0.5, TRACK_WIDTH / 2 - 0.5);
-    const [x, y] = P(s, lat);
-    g.fillStyle = rng.chance(0.5) ? "#4d4e54" : "#5e5f66";
-    g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+  for (let s = 0; s < track.L; s += ST) {
+    for (let j = 0; j < 3; j++) {
+      const lat = rng.range(-TRACK_WIDTH / 2 + 0.5, TRACK_WIDTH / 2 - 0.5);
+      const [x, y] = P(s, lat);
+      g.fillStyle = rng.chance(0.5) ? "#4d4e54" : "#5e5f66";
+      g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+    }
   }
   // linha de borracha (traçado)
-  for (let s = 0; s < track.L; s += 0.5) {
+  for (let s = 0; s < track.L; s += ST) {
     const lat = track.curvature[Math.floor(s)] * 900 + rng.gauss(0.8);
     const l = Math.max(-TRACK_WIDTH / 2 + 2, Math.min(TRACK_WIDTH / 2 - 2, lat));
     const [x, y] = P(s, l);
@@ -90,7 +100,7 @@ export function buildWorld(track: Track): World {
 
   // linhas brancas de borda
   for (const side of [-1, 1]) {
-    for (let s = 0; s < track.L; s += 0.5) {
+    for (let s = 0; s < track.L; s += ST) {
       const [x, y] = P(s, side * (TRACK_WIDTH / 2 - 0.4));
       g.fillStyle = "#e8e8e8";
       g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
@@ -98,12 +108,12 @@ export function buildWorld(track: Track): World {
   }
 
   // zebras nas curvas
-  for (let s = 0; s < track.L; s += 0.5) {
+  for (let s = 0; s < track.L; s += ST) {
     const k = Math.abs(track.curvature[Math.floor(s)]);
     if (k < 1 / 300) continue;
     const red = Math.floor(s / 3) % 2 === 0;
     for (const side of [-1, 1]) {
-      for (let d = 0; d < 1.5; d += 0.5) {
+      for (let d = 0; d < 1.5; d += ST) {
         const [x, y] = P(s, side * (TRACK_WIDTH / 2 + d));
         g.fillStyle = red ? "#d42a2a" : "#f2f2f2";
         g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
@@ -114,17 +124,18 @@ export function buildWorld(track: Track): World {
   // ---- pit lane ----
   const entry = track.pitEntryS;
   const exit = track.pitExitS + track.L;
-  for (let s = entry; s <= exit; s += 0.5) {
+  for (let s = entry; s <= exit; s += ST) {
     const lat = track.pitLateralAt(s);
-    for (let d = -4.5; d <= 4.5; d += 0.5) {
+    for (let d = -4.5; d <= 4.5; d += ST) {
+      if (lat + d < TRACK_WIDTH / 2 + 0.3) continue;
       const [x, y] = P(s, lat + d);
       g.fillStyle = Math.abs(d) > 4 ? "#2a2a2e" : rng.chance(0.15) ? "#4a4b51" : "#56575d";
       g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
     }
   }
   // muro do pit (entre pista e pit lane) na parte reta
-  for (let s = entry + 80; s <= exit - 80; s += 0.5) {
-    for (let d = 0; d < 1.5; d += 0.5) {
+  for (let s = entry + 80; s <= exit - 80; s += ST) {
+    for (let d = 0; d < 1.5; d += ST) {
       const [x, y] = P(s, TRACK_WIDTH / 2 + 3 + d);
       g.fillStyle = Math.floor(s / 6) % 2 ? "#cfcfcf" : "#9a9a9a";
       g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
@@ -135,8 +146,8 @@ export function buildWorld(track: Track): World {
   TEAMS.forEach((team, i) => {
     const center = track.pitBoxStart + (span * (i + 0.5)) / TEAMS.length;
     const half = (span / TEAMS.length) * 0.42;
-    for (let s = center - half; s <= center + half; s += 0.5) {
-      for (let d = 5; d <= 16; d += 0.5) {
+    for (let s = center - half; s <= center + half; s += ST) {
+      for (let d = 5; d <= 16; d += ST) {
         const [x, y] = P(s, PIT_LATERAL + d);
         let col = d < 6 ? team.color : d > 15 ? "#20242c" : "#3a3f4a";
         if (d >= 6 && d < 8) col = "#5b616e";
@@ -151,10 +162,10 @@ export function buildWorld(track: Track): World {
   });
 
   // ---- largada/chegada (quadriculado) ----
-  for (let d = -TRACK_WIDTH / 2; d < TRACK_WIDTH / 2; d += 0.5) {
-    for (let k = 0; k < 4; k++) {
-      const [x, y] = P(k * 0.5, d);
-      const on = (Math.floor(d * 2) + k) % 2 === 0;
+  for (let d = -TRACK_WIDTH / 2; d < TRACK_WIDTH / 2; d += ST) {
+    for (let k = 0; k < 6; k++) {
+      const [x, y] = P(k * 0.4, d);
+      const on = (Math.floor(d * 2.5) + k) % 2 === 0;
       g.fillStyle = on ? "#f5f5f5" : "#141414";
       g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
     }
@@ -162,8 +173,8 @@ export function buildWorld(track: Track): World {
   // marcas do grid
   for (let i = 0; i < 20; i++) {
     const s = track.L - 14 - i * 8 + 3.5;
-    const lat = i % 2 === 0 ? -3 : 3;
-    for (let d = -1.5; d <= 1.5; d += 0.5) {
+    const lat = i % 2 === 0 ? -3.4 : 3.4;
+    for (let d = -1.5; d <= 1.5; d += ST) {
       const [x, y] = P(s, lat + d);
       g.fillStyle = "#e8e8e8";
       g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
@@ -171,8 +182,8 @@ export function buildWorld(track: Track): World {
   }
 
   // ---- arquibancadas ao longo da reta principal ----
-  for (let s = track.L - 320; s < track.L + 260; s += 0.5) {
-    for (let d = 0; d < 16; d += 0.5) {
+  for (let s = track.L - 320; s < track.L + 260; s += ST) {
+    for (let d = 0; d < 16; d += ST) {
       const [x, y] = P(s, -(TRACK_WIDTH / 2 + 7 + d));
       let col: string;
       if (d < 1) col = "#9aa0aa"; // grade
@@ -188,8 +199,8 @@ export function buildWorld(track: Track): World {
   // placas de patrocínio na grade
   const signs = ["#e8202a", "#1c6ed4", "#f2c230", "#16c2b0", "#ffffff"];
   for (let s = track.L - 300, i = 0; s < track.L + 240; s += 40, i++) {
-    for (let k = 0; k < 24; k += 0.5) {
-      for (let d = 0; d < 1.5; d += 0.5) {
+    for (let k = 0; k < 24; k += ST) {
+      for (let d = 0; d < 1.5; d += ST) {
         const [x, y] = P(s + k, -(TRACK_WIDTH / 2 + 5 + d));
         g.fillStyle = signs[i % signs.length];
         g.fillRect(Math.floor(x), Math.floor(y), 1, 1);
@@ -212,7 +223,7 @@ export function buildWorld(track: Track): World {
     g.beginPath(); g.arc(px - r * 0.3, py - r * 0.3, r * 0.45, 0, Math.PI * 2); g.fill();
   }
 
-  return { canvas, minX, minY };
+  return { canvas, minX, minY, ppm: PPM };
 }
 
 const CROWD = ["#e8202a", "#f2f2f2", "#1c6ed4", "#f2c230", "#ff8a1c", "#16c2b0", "#d8b48a", "#7b3fe4", "#222"];
@@ -230,9 +241,10 @@ function speckleTrackBand(
   track: Track,
   P: (s: number, lat: number) => readonly [number, number],
   rng: Rng,
+  ST: number,
 ) {
   // pedrisco na brita
-  for (let s = 0; s < track.L; s += 0.5) {
+  for (let s = 0; s < track.L; s += ST) {
     const k = Math.abs(track.curvature[Math.floor(s)]);
     if (k < 1 / 260) continue;
     const side = track.curvature[Math.floor(s)] > 0 ? -1 : 1;

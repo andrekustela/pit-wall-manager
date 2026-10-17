@@ -162,6 +162,11 @@ export interface CarState {
   finishTime: number | null;
   retired: boolean;
   retireReason: string | null;
+  /** segundos por volta perdidos por dano (asa quebrada); conserta no box */
+  damage: number;
+  /** defendendo a posição: fica nessa lateral até esse instante */
+  defendTill: number;
+  defendLat: number;
   /** segundos restantes de uma rodada */
   spin: number;
   position: number;

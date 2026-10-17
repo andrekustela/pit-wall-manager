@@ -97,7 +97,7 @@ button { font-family: var(--font); color: inherit; cursor: pointer; }
 .teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .teamcard { text-align: left; background: var(--panel-solid); border: 2px solid var(--line); padding: 10px; display: flex; gap: 10px; align-items: center; }
 .teamcard.on { border-color: #fff; background: #1f2737; }
-.teamcard canvas { width: 48px; height: 24px; image-rendering: pixelated; }
+.teamcard canvas { width: 64px; height: 28px; image-rendering: pixelated; }
 .teamcard .tn { font-weight: 600; }
 .teamcard .st { color: var(--muted); font-size: 12px; }
 .opts { display: flex; gap: 24px; flex-wrap: wrap; }
