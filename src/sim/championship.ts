@@ -2,6 +2,7 @@
 import type { Engineer } from "./entrants";
 import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type DevArea, type DevLevels } from "./development";
 import type { Race } from "./race";
+import { TEAMS } from "./data";
 import { CIRCUITS } from "./track";
 
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
@@ -29,6 +30,44 @@ export interface ChampState {
   devPts: Record<string, number>;
   /** o que aconteceu nos investimentos desde a última corrida */
   devLog: Record<string, { area: DevArea; gain: number }[]>;
+  /** saúde do motor de cada carro, que passa de uma etapa pra outra */
+  engines: Record<string, number>;
+  /** motores reservas de cada equipe */
+  spares: Record<string, number>;
+  /** posições de punição no grid da próxima corrida (motor novo sem reserva) */
+  gridPen: Record<string, number>;
+}
+
+/** no campeonato o motor gasta menos por corrida (dura umas 6 etapas no ritmo normal) */
+export const CHAMP_ENGINE_WEAR = 0.45;
+/** posições perdidas por usar motor além das reservas */
+export const ENGINE_GRID_PEN = 10;
+
+/** reservas por equipe: 1 a cada 10 corridas (mínimo 1) */
+export function champSpares(rounds: number): number {
+  return Math.max(1, Math.round(rounds / 10));
+}
+
+/** troca o motor do carro: usa reserva ou toma punição no grid. Devolve "spare" ou "penalty" */
+export function swapEngine(ch: ChampState, team: string, carId: string): "spare" | "penalty" {
+  ch.engines[carId] = 1;
+  if ((ch.spares[team] ?? 0) > 0) {
+    ch.spares[team]--;
+    return "spare";
+  }
+  ch.gridPen[carId] = ENGINE_GRID_PEN;
+  return "penalty";
+}
+
+/** motor estourado troca na marra; IA troca motor muito gasto */
+export function engineCheck(ch: ChampState, lineup: Record<string, string[]>, human: Set<string>) {
+  for (const [team, cars] of Object.entries(lineup)) {
+    for (const id of cars) {
+      const h = ch.engines[id] ?? 1;
+      if (h <= 0.02) swapEngine(ch, team, id);
+      else if (!human.has(team) && ((h < 0.3 && (ch.spares[team] ?? 0) > 0) || h < 0.14)) swapEngine(ch, team, id);
+    }
+  }
 }
 
 /** quantas etapas tem um campeonato com essa porcentagem das pistas */
@@ -43,8 +82,9 @@ export function newChampionship(pct = 100, rnd: () => number = Math.random): Cha
     const j = Math.floor(rnd() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];
   }
+  const n = champRounds(pct);
   return {
-    rounds: all.slice(0, champRounds(pct)),
+    rounds: all.slice(0, n),
     round: 0,
     driverPts: {},
     teamPts: {},
@@ -54,6 +94,9 @@ export function newChampionship(pct = 100, rnd: () => number = Math.random): Cha
     dev: {},
     devPts: {},
     devLog: {},
+    engines: {},
+    spares: Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(n)])),
+    gridPen: {},
   };
 }
 
@@ -65,6 +108,8 @@ export function awardPoints(ch: ChampState, race: Race) {
     ch.driverPts[c.id] = (ch.driverPts[c.id] ?? 0) + pts;
     ch.teamPts[c.team.id] = (ch.teamPts[c.team.id] ?? 0) + pts;
   });
+  for (const c of race.cars) ch.engines[c.id] = c.retireReason === "Motor" ? 0 : c.engineHealth;
+  ch.gridPen = {};
   ch.results.push({
     trackIndex: race.opts.trackIndex,
     order: order.map((c) => c.id),

@@ -3,7 +3,7 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, type Lineup } from "../sim/drivers";
-import { aiDevelop, awardPoints, investDev, newChampionship, type ChampState } from "../sim/championship";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, investDev, newChampionship, swapEngine, type ChampState } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -135,6 +135,9 @@ export class Room {
     this.champ.dev ??= {};
     this.champ.devPts ??= {};
     this.champ.devLog ??= {};
+    this.champ.engines ??= {};
+    this.champ.spares ??= {};
+    this.champ.gridPen ??= {};
     this.champ.round++;
     this.startWeekend();
   }
@@ -342,6 +345,15 @@ export class Room {
           laps.forEach((lap, lapIndex) => this.send(id, { t: "practice", carId, lapIndex, lap }));
         break;
       }
+      case "newEngine": {
+        // motor novo antes da corrida (campeonato)
+        const ch = this.champ;
+        if (!ch || !p.teamId || !this.owns(p, msg.carId) || !["practice", "quali", "strategy"].includes(this.phase)) return;
+        if ((ch.engines[msg.carId] ?? 1) >= 0.999) return;
+        swapEngine(ch, p.teamId, msg.carId);
+        this.broadcastLobby();
+        break;
+      }
       case "develop": {
         // investe no carro entre as etapas do campeonato
         const ch = this.champ;
@@ -417,6 +429,7 @@ export class Room {
       lineup: this.lineup,
       dev: ch ? JSON.parse(JSON.stringify(ch.dev)) : undefined,
     };
+    if (ch) engineCheck(ch, this.lineup, new Set(players.map((p) => p.teamId!)));
     this.setPhase("practice");
   }
 
@@ -475,7 +488,21 @@ export class Room {
       engineers: w.engineers,
       lineup: w.lineup,
       dev: w.dev,
+      engineStart: this.champ ? { ...this.champ.engines } : undefined,
+      engineWearMult: this.champ ? CHAMP_ENGINE_WEAR : undefined,
     };
+    // motor novo sem reserva: perde posições no grid
+    const pen = this.champ?.gridPen ?? {};
+    if (Object.keys(pen).length) {
+      const grid = [...opts.grid!];
+      for (const id of Object.keys(pen)) {
+        const i = grid.indexOf(id);
+        if (i < 0) continue;
+        grid.splice(i, 1);
+        grid.splice(Math.min(grid.length, i + pen[id]), 0, id);
+      }
+      opts.grid = grid;
+    }
     this.race = new Race(opts);
     this.lastStart = opts;
     this.speed = 1;

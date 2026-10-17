@@ -21,6 +21,7 @@ const s = JSON.parse(JSON.stringify(save)) as ChampSave;
 r.handle(id, { t: "develop", area: "aero" });
 r.handle(id, { t: "develop", area: "engine" });
 const ch = s.champ;
+console.log("motores", JSON.stringify(Object.fromEntries(Object.entries(ch.engines).slice(0, 6).map(([k, v]) => [k, +v.toFixed(2)]))), "reservas", JSON.stringify(ch.spares).slice(0, 60));
 console.log("pontos dev", JSON.stringify(ch.devPts), "níveis", JSON.stringify(ch.dev));
 console.log("salvo: etapa", s.champ.round, "resultados", s.champ.results.length, "time", s.teamId);
 const r2 = new Room("SOLO", () => {}, true);

@@ -1,4 +1,6 @@
 import type { Connection } from "../net/connection";
+import { ENGINE_GRID_PEN } from "../sim/championship";
+import { confirmDialog } from "./confirm";
 import type { LobbyState, ServerMsg } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { toDriver } from "../sim/drivers";
@@ -77,6 +79,7 @@ export class PracticeScreen {
       el.innerHTML = `
         <h3 style="display:flex;justify-content:space-between;align-items:center"><span>${natBadge(d)} ${esc(d.name.toUpperCase())} · ${esc(d.style)}</span>
           <span><button class="linkbtn" data-ficha>ver ficha</button></span></h3>
+        <div class="engrow" data-engrow></div>
         ${LABELS.map(
           ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
             <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
@@ -95,6 +98,22 @@ export class PracticeScreen {
         }),
       );
       el.querySelector("[data-go]")!.addEventListener("click", () => this.runLap(panel));
+      el.querySelector("[data-engrow]")!.addEventListener("click", async (e) => {
+        if (!(e.target as HTMLElement).closest("[data-neweng]")) return;
+        const ch = this.lobby.champ!;
+        const spares = ch.spares[me.teamId!] ?? 0;
+        const ok = await confirmDialog({
+          title: "Motor novo",
+          icon: "🔧",
+          text: spares > 0
+            ? `Colocar um motor novo no carro de ${d.name}? Usa 1 das ${spares} reserva(s) da equipe.`
+            : `Acabaram as reservas. Um motor novo agora custa ${ENGINE_GRID_PEN} posições no grid de largada.`,
+          ok: spares > 0 ? "TROCAR MOTOR" : "TROCAR E PERDER POSIÇÕES",
+          danger: spares === 0,
+        });
+        if (ok) this.conn.send({ t: "newEngine", carId: d.id });
+      });
+      this.renderEngine(panel);
       requestAnimationFrame(() => drawTrackThumb(el.querySelector("canvas")!, w.trackIndex));
       this.renderPanel(panel);
     }
@@ -232,11 +251,30 @@ export class PracticeScreen {
     requestAnimationFrame(frame);
   }
 
+  /** motor do carro no campeonato (gasto que vem das etapas anteriores) */
+  private renderEngine(p: CarPanel) {
+    const row = p.el.querySelector<HTMLElement>("[data-engrow]")!;
+    const ch = this.lobby.champ;
+    if (!ch?.engines) {
+      row.hidden = true;
+      return;
+    }
+    const me = this.lobby.players.find((x) => x.id === this.lobby.you)!;
+    const h = ch.engines[p.id] ?? 1;
+    const spares = ch.spares[me.teamId!] ?? 0;
+    const pen = ch.gridPen[p.id];
+    const cls = h > 0.6 ? "ok" : h > 0.35 ? "warn" : "bad";
+    row.innerHTML = `<span>Motor</span><div class="engbar"><i class="${cls}" style="width:${Math.round(h * 100)}%"></i></div><b class="${cls}">${Math.round(h * 100)}%</b>
+      <span class="hint" style="margin:0">${spares} reserva${spares === 1 ? "" : "s"} na equipe${pen ? ` · <span style="color:var(--warn)">-${pen} no grid</span>` : ""}</span>
+      ${h < 0.999 ? `<button class="btn small" data-neweng>MOTOR NOVO</button>` : ""}`;
+  }
+
   update(lobby: LobbyState) {
     const before = this.myIds(this.lobby);
     const old = teamDrivers(this.lobby, this.lobby.players.find((p) => p.id === this.lobby.you)!.teamId!);
     this.lobby = lobby;
     updateWaitBar(lobby);
+    for (const p of this.panels) this.renderEngine(p);
     if (this.myIds(lobby) !== before) {
       // trocou pelo reserva: revela a carta e redesenha a tela com o piloto novo
       const me = lobby.players.find((p) => p.id === lobby.you)!;

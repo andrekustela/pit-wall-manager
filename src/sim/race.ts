@@ -57,6 +57,10 @@ export interface RaceOptions {
   engineers?: Record<string, Engineer>;
   lineup?: import("./drivers").Lineup;
   dev?: Record<string, import("./development").DevLevels>;
+  /** campeonato: motor de cada carro já gasto das etapas anteriores */
+  engineStart?: Record<string, number>;
+  /** multiplicador do desgaste do motor (no campeonato gasta menos por corrida) */
+  engineWearMult?: number;
 }
 
 export type RacePhase = "lights" | "racing" | "finished";
@@ -228,7 +232,7 @@ export class Race {
         damage: 0,
         dmg: { ...NO_DAMAGE },
         repair: { fw: true, suspF: true, rw: true, suspR: true },
-        engineHealth: 1,
+        engineHealth: Math.max(0.02, opts.engineStart?.[d.id] ?? 1),
         engineSave: false,
         order: "none",
         defendTill: 0,
@@ -491,7 +495,7 @@ export class Race {
         }
         // motor: desgasta mais na mistura rica/atacando; quase no fim pode quebrar
         const engMult = (c.engine === "rich" ? 2.2 : c.engine === "lean" ? 0.6 : 1) * (c.pace === "push" ? 1.3 : 1) * (c.engineSave ? ENGINE_SAVE.wear : 1);
-        c.engineHealth = Math.max(0, c.engineHealth - (ds / L) * ENGINE_WEAR_PER_LAP * this.wearScale * engMult * (c.team.engineWear ?? 1));
+        c.engineHealth = Math.max(0, c.engineHealth - (ds / L) * ENGINE_WEAR_PER_LAP * this.wearScale * engMult * (c.team.engineWear ?? 1) * (this.opts.engineWearMult ?? 1));
         if (c.engineHealth < 0.3 && !this.checkered && this.rng.chance((0.3 - c.engineHealth) * 0.03 * dt)) {
           this.retire(c, "Motor");
           if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.4)) this.deploySafetyCar();
