@@ -46,10 +46,10 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       const status = ch.finished
         ? `🏆 Concluído · ${ch.rounds.length} etapas`
         : `Etapa ${done} de ${ch.rounds.length} feita · próxima: ${esc(CIRCUITS[next]?.name ?? "")}`;
-      return `<div class="resumerow champrow" data-cid="${esc(ch.id)}"><div><b>${esc(ch.name ?? "Campeonato")}</b>
+      return `<div class="resumerow champrow" data-cid="${esc(ch.id)}"><div><b>${esc(ch.name ?? "Campeonato")}</b>${s.online ? ` <span class="onlinetag">🌐 ONLINE · ${(s.players ?? []).map((p) => esc(p.name)).join(", ")}</span>` : ""}
           <div class="hint" style="margin:2px 0 0">${status} · ${esc(s.name)}${s.teamName ? ` (${esc(s.teamName)})` : ""}${when ? ` · ${when}` : ""}</div></div>
           <div class="row-btns"><button class="btn small" data-crename>RENOMEAR</button><button class="btn small" data-cdel>APAGAR</button>
-          <button class="btn small primary" data-cplay>${ch.finished ? "VER TROFÉUS ▶" : "CONTINUAR ▶"}</button></div></div>`;
+          <button class="btn small primary" data-cplay title="${s.online && !ch.finished ? "Cria uma sala nova com este campeonato; os amigos entram pelo código e voltam pra equipe deles" : ""}">${ch.finished ? "VER TROFÉUS ▶" : s.online ? "CONTINUAR ONLINE ▶" : "CONTINUAR ▶"}</button></div></div>`;
     })
     .join("");
   const cont = `${saves.length ? `<div class="box resumebox" style="margin-top:12px"><h3 style="margin:0 0 4px">MEUS CAMPEONATOS</h3>${champRows}</div>` : ""}

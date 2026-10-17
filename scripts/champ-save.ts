@@ -28,7 +28,7 @@ const r2 = new Room("SOLO", () => {}, true);
 const id2 = r2.join("x", "y")!;
 r2.resume(id2, s);
 const lob = (r2 as unknown as { lobbyFor(i: string): import("../src/net/protocol").LobbyState }).lobbyFor(id2);
-console.log("continuou:", r2.phase, "etapa", lob.champ?.round, "pista", lob.weekend?.trackIndex, "mesmos pilotos", JSON.stringify(lob.lineup) === JSON.stringify(s.lineup));
+console.log("continuou (sede):", r2.phase, "etapa", lob.champ?.round, "pista", lob.weekend?.trackIndex, "mesmos pilotos", JSON.stringify(lob.lineup) === JSON.stringify(s.lineup));
 r.dispose();
 r2.dispose();
 process.exit(0);

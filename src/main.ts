@@ -23,7 +23,7 @@ import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
 import { showLogin } from "./ui/login";
 import { setupInstall } from "./ui/install";
-import { mergeCloudSaves, type SaveMap } from "./ui/saves";
+import { mergeCloudSaves, putSave, type SaveMap } from "./ui/saves";
 import { POINTS, standings } from "./sim/championship";
 
 interface Screen {
@@ -99,7 +99,9 @@ class App {
   }
 
   private connect(c: MenuChoice, retry = 0) {
-    const local = c.mode === "solo" || c.mode === "resume";
+    // campeonato online salvo: cria uma sala nova no servidor com ele (os amigos entram pelo código)
+    const onlineResume = c.mode === "resume" && !!c.save?.online;
+    const local = c.mode === "solo" || (c.mode === "resume" && !onlineResume);
     const conn: Connection = local ? new LocalConnection(c.name, c.teamName, c.save) : new WsConnection();
     this.conn = conn;
     conn.onMessage = (m) => {
@@ -128,7 +130,7 @@ class App {
     // v = versão do jogo: o servidor recusa se estiver desatualizado (evita sala quebrada)
     const v = __BUILD__;
     if (c.mode === "rejoin") conn.send({ t: "rejoin", code: c.code!, token: c.token!, v });
-    if (c.mode === "create") conn.send({ t: "create", name: c.name, teamName: c.teamName, v });
+    if (c.mode === "create" || onlineResume) conn.send({ t: "create", name: c.name, teamName: c.teamName, v, resume: onlineResume ? c.save : undefined });
     if (c.mode === "join") conn.send({ t: "join", code: c.code!, name: c.name, teamName: c.teamName, v });
   }
 
@@ -163,6 +165,10 @@ class App {
         break;
       case "chat":
         this.chat?.add(m.line);
+        break;
+      case "champSave":
+        // campeonato online: o host guarda (dá pra retomar numa sala nova se o servidor reiniciar)
+        putSave(m.save);
         break;
       case "lobby":
         this.lobby = m.lobby;

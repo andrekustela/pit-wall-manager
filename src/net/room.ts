@@ -48,6 +48,9 @@ export interface ChampSave {
   v: 1;
   /** quando foi salvo (ms) */
   updated?: number;
+  /** campeonato online (o host pode retomar numa sala nova) e quem jogava com qual equipe */
+  online?: boolean;
+  players?: { name: string; teamId: string; teamName: string }[];
   champ: ChampState;
   lineup: Lineup;
   reserves: Record<string, string>;
@@ -104,12 +107,15 @@ export class Room {
 
   private saveChamp() {
     const ch = this.champ;
-    const p = [...this.players.values()][0];
+    // o save fica com o host (no online é ele que pode retomar a sala depois)
+    const p = this.players.get(this.hostId) ?? [...this.players.values()][0];
     if (!this.onSave || !ch || !p?.teamId) return;
     // campeonato que acabou também fica salvo (vira histórico de troféus)
     this.onSave({
       v: 1,
       updated: Date.now(),
+      online: !this.solo,
+      players: [...this.players.values()].filter((x) => x.teamId).map((x) => ({ name: x.name, teamId: x.teamId!, teamName: x.teamName })),
       champ: ch,
       lineup: this.lineup,
       reserves: this.reserves,
@@ -128,6 +134,31 @@ export class Room {
     const p = this.players.get(id);
     if (!p || this.phase !== "lobby") return;
     p.teamId = s.teamId;
+    this.loadSave(s);
+    // o save é feito entre uma etapa e outra: volta pra sede (o "pronto" de lá avança a etapa)
+    this.setPhase("hq");
+  }
+
+  /**
+   * Online: retoma um campeonato que o host guardou (sala nova depois de o servidor
+   * reiniciar). Fica no lobby esperando os amigos; cada um volta pra equipe dele.
+   */
+  resumeOnline(hostId: string, s: ChampSave) {
+    const p = this.players.get(hostId);
+    if (!p || this.phase !== "lobby" || !s?.champ) return;
+    p.teamId = s.teamId;
+    this.loadSave(s);
+    this.resumed = true;
+    this.reserved = (s.players ?? []).filter((x) => x.teamId !== s.teamId);
+    this.broadcastLobby();
+  }
+
+  /** campeonato online retomado, esperando os jogadores voltarem */
+  private resumed = false;
+  /** equipes guardadas pros jogadores do campeonato retomado (pelo nome) */
+  private reserved: { name: string; teamId: string; teamName: string }[] = [];
+
+  private loadSave(s: ChampSave) {
     this.laps = s.laps;
     this.equalCars = s.equalCars;
     this.realDrivers = s.realDrivers;
@@ -146,8 +177,6 @@ export class Room {
     this.champ.crew ??= Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT]));
     this.champ.id ??= Math.random().toString(36).slice(2, 10);
     this.champName = this.champ.name ?? "";
-    // o save é feito entre uma etapa e outra: volta pra sede (o "pronto" de lá avança a etapa)
-    this.setPhase("hq");
   }
 
   private teamDrivers(teamId: string | null): string[] {
@@ -160,12 +189,15 @@ export class Room {
     if (this.phase !== "lobby") return null;
     if (this.players.size >= MAX_PLAYERS) return null;
     const used = new Set([...this.players.values()].map((o) => o.teamId));
+    // campeonato retomado: volta pra equipe guardada (mesmo nome) ou pega uma das guardadas
+    const nm = (clean(name, 18) || "Engenheiro").toLowerCase();
+    const back = this.reserved.find((r) => !used.has(r.teamId) && r.name.toLowerCase() === nm) ?? this.reserved.find((r) => !used.has(r.teamId));
     const p: Player = {
       id: `p${this.nextId++}`,
       name: clean(name, 18) || "Engenheiro",
-      teamName: clean(teamName, 24),
+      teamName: clean(teamName, 24) || back?.teamName || "",
       // já entra com uma equipe livre (começando pelas do meio do grid)
-      teamId: [...TEAMS].sort((a, b) => Math.abs(a.carPace - 0.7) - Math.abs(b.carPace - 0.7)).find((t) => !used.has(t.id))?.id ?? null,
+      teamId: back?.teamId ?? [...TEAMS].sort((a, b) => Math.abs(a.carPace - 0.7) - Math.abs(b.carPace - 0.7)).find((t) => !used.has(t.id))?.id ?? null,
       connected: true,
       ready: false,
       setups: {},
@@ -279,6 +311,13 @@ export class Room {
         if (!isHost || this.phase !== "lobby") return;
         if ([...this.players.values()].some((o) => !o.teamId))
           return this.send(id, { t: "error", msg: "Todo mundo precisa escolher uma equipe." });
+        // campeonato retomado: segue de onde parou (vai pra sede e de lá pra próxima etapa)
+        if (this.resumed && this.champ) {
+          this.resumed = false;
+          this.reserved = [];
+          this.setPhase("hq");
+          return;
+        }
         this.champ = this.champMode ? newChampionship(this.champPct) : null;
         if (this.champ) this.champ.name = this.champName || `Campeonato ${new Date().toLocaleDateString("pt-BR")}`;
         this.startWeekend();
@@ -627,6 +666,9 @@ export class Room {
       champMode: this.champMode,
       champPct: this.champPct,
       champName: this.champName,
+      resumed: this.resumed && this.champ
+        ? { name: this.champ.name ?? "Campeonato", done: this.champ.results.length, total: this.champ.rounds.length, waiting: this.reserved.filter((r) => ![...this.players.values()].some((p) => p.teamId === r.teamId)).map((r) => ({ name: r.name, teamId: r.teamId })) }
+        : null,
       realDrivers: this.realDrivers,
       lineup: this.lineup,
       swapUsed: [...this.swapUsed],

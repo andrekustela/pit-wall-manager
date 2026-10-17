@@ -710,3 +710,5 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .rpbar .rpspeed button { min-width: 42px; padding: 4px 6px; }
 .rankbox { width: min(820px, 96vw); }
 .rankbody { max-height: 70vh; overflow-y: auto; }
+.resumedbox { margin-top: 12px; border-color: #6ea8ff; }
+.onlinetag { font-family: var(--pix); font-size: 9px; color: #6ea8ff; margin-left: 6px; }

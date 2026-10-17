@@ -50,6 +50,8 @@ export interface LobbyState {
   champPct: number;
   /** nome do campeonato (o jogador escolhe) */
   champName: string;
+  /** campeonato online retomado (sala nova): quem ainda falta voltar */
+  resumed: { name: string; done: number; total: number; waiting: { name: string; teamId: string }[] } | null;
   /** campeonato em andamento (ou o que acabou de terminar) */
   champ: ChampState | null;
   /** pilotos reais (lendas) em vez dos fictícios */
@@ -63,7 +65,7 @@ export interface LobbyState {
 }
 
 export type ClientMsg =
-  | { t: "create"; name: string; teamName: string; v?: string }
+  | { t: "create"; name: string; teamName: string; v?: string; resume?: import("./room").ChampSave }
   | { t: "join"; code: string; name: string; teamName: string; v?: string }
   | { t: "rejoin"; code: string; token: string; v?: string }
   | { t: "develop"; area: import("../sim/development").DevArea }
@@ -99,6 +101,8 @@ export interface ChatLine {
 export type ServerMsg =
   | { t: "error"; msg: string }
   | { t: "chat"; line: ChatLine }
+  /** campeonato online salvo (só pro host guardar e poder retomar depois) */
+  | { t: "champSave"; save: import("./room").ChampSave }
   | { t: "lobby"; lobby: LobbyState }
   | { t: "practice"; carId: string; lapIndex: number; lap: QualiLap }
   | { t: "quali"; results: QualiResult[]; wet: number }

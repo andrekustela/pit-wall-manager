@@ -58,7 +58,8 @@ const http = createServer((req, res) => {
 
 // ---------- WebSocket ----------
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 });
+// 2 MB: o host manda o campeonato salvo inteiro ao retomar uma sala
+const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 http.on("upgrade", (req, socket, head) => {
   if (!req.url?.startsWith("/ws")) return socket.destroy();
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws));
@@ -73,6 +74,12 @@ function makeRoom(): Room {
     const ws = sockets.get(`${code}:${pid}`);
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   });
+  // campeonato online: o host guarda o save no navegador (as salas somem se o servidor reiniciar)
+  room.onSave = (save) => {
+    if (!save) return;
+    const ws = sockets.get(`${code}:${room.hostId}`);
+    if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: "champSave", save } satisfies ServerMsg));
+  };
   rooms.set(code, room);
   console.log(`sala ${code} criada`);
   return room;
@@ -132,6 +139,8 @@ wss.on("connection", (ws: WebSocket) => {
         pid = id;
         // reenvia o lobby agora que o socket está registrado
         r.handle(id, { t: "profile", name: msg.name, teamName: msg.teamName });
+        // host retomando um campeonato online salvo
+        if (msg.t === "create" && msg.resume?.champ?.rounds) r.resumeOnline(id, msg.resume);
         return;
       }
       if (msg.t === "leave") return leave();

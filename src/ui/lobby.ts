@@ -4,7 +4,7 @@ import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { CIRCUITS } from "../sim/track";
 import { champRounds } from "../sim/championship";
-import { drawTrackThumb, esc } from "./common";
+import { drawTrackThumb, esc, teamName } from "./common";
 
 export class LobbyScreen {
   private el: HTMLElement;
@@ -30,6 +30,7 @@ export class LobbyScreen {
           </div>
           <div class="box" id="l-players" ${lobby.solo ? 'style="display:none"' : ""}></div>
         </div>
+        <div class="box resumedbox" id="l-resumed" hidden></div>
         <h2>EQUIPE</h2>
         <p class="hint" style="margin-top:-4px">Escolha o carro. Os pilotos são sorteados depois, quando o fim de semana começar (de uma base de 100 pilotos, cada um com seu estilo).</p>
         <div class="teams" id="l-teams"></div>
@@ -192,7 +193,14 @@ export class LobbyScreen {
     );
 
     root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? `· campeonato: ${champRounds(lobby.champPct)} pistas sorteadas` : "";
-    root.querySelector("#l-start")!.textContent = lobby.champMode ? "INICIAR CAMPEONATO ▶" : "INICIAR FIM DE SEMANA ▶";
+    root.querySelector("#l-start")!.textContent = lobby.resumed ? "CONTINUAR O CAMPEONATO ▶" : lobby.champMode ? "INICIAR CAMPEONATO ▶" : "INICIAR FIM DE SEMANA ▶";
+    // campeonato online retomado: quem ainda falta voltar
+    const rb = root.querySelector<HTMLElement>("#l-resumed")!;
+    const rs = lobby.resumed;
+    rb.hidden = !rs;
+    if (rs)
+      rb.innerHTML = `<b>🔁 RETOMANDO: ${esc(rs.name)}</b> · ${rs.done} de ${rs.total} etapas feitas. Pontos, evolução do carro, motores e mecânicos continuam de onde pararam.
+        <div class="hint" style="margin:6px 0 0">${rs.waiting.length ? `Esperando voltar: ${rs.waiting.map((w) => `<b>${esc(w.name)}</b> (${esc(teamName(lobby, w.teamId))})`).join(", ")}. Entrando com o mesmo nome, cada um cai na equipe dele.` : "Todo mundo voltou! O host pode continuar."}</div>`;
 
     const start = root.querySelector<HTMLButtonElement>("#l-start")!;
     start.style.display = isHost ? "" : "none";
