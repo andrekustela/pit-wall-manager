@@ -1,5 +1,6 @@
 import { sound } from "../audio/sound";
 import { music } from "../audio/music";
+import { esc } from "./common";
 
 type Tab = "jogo" | "treino" | "estrategia" | "corrida" | "atalhos";
 
@@ -102,18 +103,44 @@ export class HelpWidget {
     vol.addEventListener("input", () => sound.setVolume(Number(vol.value) / 100));
     sound.onChange(() => this.renderMute());
     this.renderMute();
-    // música: clique liga/desliga; clique direito pula pra próxima
+    // música: clique abre o player (lista, anterior/próxima, liga/desliga); clique direito pula
     const mb = this.el.querySelector<HTMLButtonElement>("[data-music]")!;
-    mb.addEventListener("click", () => music.toggle());
+    const player = document.createElement("div");
+    player.className = "musicplayer panel";
+    player.hidden = true;
+    document.body.appendChild(player);
+    mb.addEventListener("click", (e) => {
+      e.stopPropagation();
+      player.hidden = !player.hidden;
+      renderMusic();
+    });
     mb.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       music.skip();
     });
+    document.addEventListener("pointerdown", (e) => {
+      if (!player.hidden && !player.contains(e.target as Node) && e.target !== mb) player.hidden = true;
+    });
+    player.addEventListener("click", (e) => {
+      const t = e.target as HTMLElement;
+      const b = t.closest<HTMLElement>("[data-mp]");
+      if (b?.dataset.mp === "prev") music.prev();
+      else if (b?.dataset.mp === "next") music.skip();
+      else if (b?.dataset.mp === "toggle") music.toggle();
+      const tr = t.closest<HTMLElement>("[data-track]");
+      if (tr) music.pick(tr.dataset.track);
+    });
     const renderMusic = () => {
       mb.classList.toggle("off", !music.enabled);
-      mb.title = music.enabled
-        ? `Música ligada${music.current ? ` · tocando "${music.current.title}"` : ""}\nClique: desliga · clique direito: próxima`
-        : "Música desligada · clique pra ligar";
+      mb.title = music.enabled ? `Música${music.current ? `: "${music.current.title}"` : ""} · clique pra escolher` : "Música desligada · clique pra abrir o player";
+      if (player.hidden) return;
+      const list = music.tracks();
+      player.innerHTML = `<div class="mphead"><b>🎵 MÚSICAS</b><span class="hint" style="margin:0">tocam fora da corrida</span></div>
+        <div class="mpnow">${music.enabled && music.current ? `Tocando: <b>${esc(music.current.title)}</b>` : music.enabled ? "Começa no próximo clique / fora da corrida" : "Música desligada"}</div>
+        <div class="mpbtns"><button class="btn small" data-mp="prev" title="Anterior">⏮</button><button class="btn small ${music.enabled ? "" : "primary"}" data-mp="toggle">${music.enabled ? "DESLIGAR" : "LIGAR"}</button><button class="btn small" data-mp="next" title="Próxima">⏭</button></div>
+        <div class="mplist">${list
+          .map((t, i) => `<button class="mptrack ${music.current?.file === t.file && music.enabled ? "on" : ""}" data-track="${esc(t.file)}"><span>${i + 1}</span>${esc(t.title)}${music.current?.file === t.file && music.enabled ? " <i>♪</i>" : ""}</button>`)
+          .join("")}</div>`;
     };
     music.onChange(renderMusic);
     renderMusic();

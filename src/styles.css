@@ -627,3 +627,17 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .menuhead + .sub { text-align: center; }
 @media (max-width: 700px) { .menuhead { flex-direction: column; } .menuhead #m-install { position: static; } }
 .box.invited { border-color: #6ea8ff; box-shadow: 0 0 0 2px rgba(110, 168, 255, .35); }
+
+/* mini player de música */
+.musicplayer { position: fixed; left: 12px; bottom: 60px; z-index: 46; width: 280px; padding: 10px; }
+.mphead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 12px; }
+.mpnow { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.mpnow b { color: #fff; }
+.mpbtns { display: flex; gap: 6px; margin-bottom: 8px; }
+.mpbtns .btn { flex: 1; }
+.mplist { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.mptrack { display: flex; gap: 8px; align-items: center; text-align: left; background: transparent; border: 0; color: #c9d1e0; padding: 6px 8px; font-size: 13px; cursor: pointer; }
+.mptrack span { color: var(--muted); font-size: 11px; width: 14px; }
+.mptrack:hover { background: rgba(255,255,255,.06); }
+.mptrack.on { background: rgba(232, 32, 42, .18); color: #fff; }
+.mptrack i { font-style: normal; color: var(--accent); margin-left: auto; }

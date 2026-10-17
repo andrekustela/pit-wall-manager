@@ -38,6 +38,7 @@ class Music {
       .then((l: Track[]) => {
         this.list = Array.isArray(l) ? l.filter((t) => t?.file) : [];
         if (this.wantPlay) this.start();
+        this.listeners.forEach((f) => f());
       })
       .catch(() => {});
   }
@@ -98,6 +99,48 @@ class Music {
 
   skip() {
     if (this.playing) this.next();
+    else if (this.enabled) this.pick(this.nextFile(1));
+  }
+
+  /** música anterior da lista */
+  prev() {
+    this.pick(this.nextFile(-1));
+  }
+
+  private nextFile(step: number): string | undefined {
+    if (!this.list.length) return undefined;
+    const i = this.list.findIndex((t) => t.file === this.current?.file);
+    return this.list[(i + step + this.list.length) % this.list.length].file;
+  }
+
+  /** toca essa música agora (e liga a música se estava desligada) */
+  pick(file?: string) {
+    const t = this.list.find((x) => x.file === file);
+    if (!t) return;
+    this.unlocked = true; // escolher no player já é um clique: o navegador libera o som
+    if (!this.enabled) {
+      this.enabled = true;
+      storeSet("pwm.music", "1");
+    }
+    this.queue = this.queue.filter((x) => x.file !== t.file);
+    this.queue.unshift(t);
+    if (this.playing) this.next();
+    else {
+      this.current = null;
+      this.queue.unshift(t);
+      this.queue = this.queue.filter((x, i, a) => a.findIndex((y) => y.file === x.file) === i);
+      if (this.wantPlay) this.start();
+      else this.listeners.forEach((f) => f());
+    }
+  }
+
+  /** lista de músicas (pro player) */
+  tracks(): readonly Track[] {
+    return this.list;
+  }
+
+  isPlaying() {
+    return this.playing;
   }
 
   toggle() {
