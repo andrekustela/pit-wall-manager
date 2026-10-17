@@ -200,6 +200,7 @@ export class Room {
       for (const [carId, laps] of Object.entries(p.practiceLaps)) laps.forEach((lap, lapIndex) => this.send(p.id, { t: "practice", carId, lapIndex, lap }));
     if ((this.phase === "quali" || this.phase === "strategy") && this.lastQuali) this.send(p.id, { t: "quali", ...this.lastQuali });
     if (this.race && this.lastStart) this.send(p.id, { t: "start", opts: this.lastStart, speed: this.speed });
+    for (const line of this.chatLog) this.send(p.id, { t: "chat", line });
     return p.id;
   }
 
@@ -208,6 +209,8 @@ export class Room {
   }
 
   private lastStart: RaceOptions | null = null;
+  private chatLog: import("./protocol").ChatLine[] = [];
+  private lastChat = new Map<string, number>();
 
   leave(id: string) {
     const p = this.players.get(id);
@@ -343,6 +346,18 @@ export class Room {
         // reenvia as voltas do outro piloto (a tela é redesenhada)
         for (const [carId, laps] of Object.entries(p.practiceLaps))
           laps.forEach((lap, lapIndex) => this.send(id, { t: "practice", carId, lapIndex, lap }));
+        break;
+      }
+      case "chat": {
+        if (this.solo) return;
+        const text = String(msg.text ?? "").replace(/[ -]/g, " ").trim().slice(0, 200);
+        const now = Date.now();
+        if (!text || now - (this.lastChat.get(id) ?? 0) < 400) return; // anti-flood
+        this.lastChat.set(id, now);
+        const line = { from: id, name: p.name, teamId: p.teamId, text };
+        this.chatLog.push(line);
+        if (this.chatLog.length > 50) this.chatLog.shift();
+        this.broadcast({ t: "chat", line });
         break;
       }
       case "newEngine": {

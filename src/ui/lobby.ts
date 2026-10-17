@@ -17,7 +17,7 @@ export class LobbyScreen {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
             <h1 class="title">${lobby.solo ? "FIM DE <span>SEMANA</span>" : "SALA <span>ONLINE</span>"}</h1>
-            <p class="sub">Treino livre (5 voltas de teste) → Classificação (volta única) → Estratégia → Corrida</p>
+            <p class="sub">Treino livre (5 voltas de teste) → Classificação (Q1, Q2, Q3) → Estratégia → Corrida</p>
           </div>
           ${lobby.solo ? "" : `<div class="box" style="text-align:center"><div class="hint" style="margin:0">Código da sala</div><div class="code">${esc(lobby.code)}</div></div>`}
         </div>

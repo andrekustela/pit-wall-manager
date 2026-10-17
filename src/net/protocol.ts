@@ -65,6 +65,7 @@ export type ClientMsg =
   | { t: "rejoin"; code: string; token: string }
   | { t: "develop"; area: import("../sim/development").DevArea }
   | { t: "newEngine"; carId: string }
+  | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
   | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; realDrivers?: boolean }
@@ -82,8 +83,17 @@ export type ClientMsg =
   | { t: "swapDriver"; carId: string }
   | { t: "leave" };
 
+/** mensagem do chat (só entre jogadores) */
+export interface ChatLine {
+  from: string;
+  name: string;
+  teamId: string | null;
+  text: string;
+}
+
 export type ServerMsg =
   | { t: "error"; msg: string }
+  | { t: "chat"; line: ChatLine }
   | { t: "lobby"; lobby: LobbyState }
   | { t: "practice"; carId: string; lapIndex: number; lap: QualiLap }
   | { t: "quali"; results: QualiResult[]; wet: number }

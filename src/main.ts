@@ -15,6 +15,7 @@ import { PracticeScreen } from "./ui/practice";
 import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
+import { ChatWidget } from "./ui/chat";
 
 interface Screen {
   update?(lobby: LobbyState): void;
@@ -47,6 +48,7 @@ class App {
   private lastRace: Race | null = null;
   private soundEvents = 0;
   private draftSeen = -1;
+  private chat: ChatWidget | null = null;
 
   helpTab(): HelpTab {
     const p = this.screenPhase;
@@ -97,6 +99,8 @@ class App {
     this.conn = null;
     c?.close();
     if (this.lobby && !this.lobby.solo) storeSet("pwm.session", "");
+    this.chat?.destroy();
+    this.chat = null;
     this.lobby = null;
     this.menu();
   }
@@ -112,8 +116,13 @@ class App {
         if (/não existe mais|voltar pra essa sala/.test(m.msg)) storeSet("pwm.session", "");
         if (!this.lobby) this.leave();
         break;
+      case "chat":
+        this.chat?.add(m.line);
+        break;
       case "lobby":
         this.lobby = m.lobby;
+        // chat só no online
+        if (!m.lobby.solo && !this.chat) this.chat = new ChatWidget((text) => this.conn?.send({ t: "chat", text }), () => this.lobby?.you ?? "");
         this.syncScreen();
         break;
       case "practice":

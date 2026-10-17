@@ -15,6 +15,7 @@ class Bot {
   qualiPole = "";
   ended = false;
   started = false;
+  chats: string[] = [];
   constructor(readonly name: string) {
     this.ws = new WebSocket(url);
     this.ws.on("message", (raw) => {
@@ -26,6 +27,7 @@ class Bot {
       else if (m.t === "snap") this.snaps++;
       else if (m.t === "end") this.ended = true;
       else if (m.t === "start") this.started = true;
+      else if (m.t === "chat") this.chats.push(m.line.name + ": " + m.line.text);
     });
   }
   open() {
@@ -53,6 +55,8 @@ a.send({ t: "create", name: "Ana", teamName: "Ana Racing" });
 await until(() => !!a.lobby?.code, "sala criada");
 b.send({ t: "join", code: a.lobby!.code, name: "Beto", teamName: "Beto GP" });
 await until(() => a.lobby?.players.length === 2 && !!b.lobby, "Beto entrou");
+a.send({ t: "chat", text: "bora, Beto!" });
+await until(() => b.chats.includes("Ana: bora, Beto!") && a.chats.length === 1, "chat chegou pros dois");
 a.send({ t: "team", teamId: "vor" });
 b.send({ t: "team", teamId: "vor" }); // deve dar erro se a Ana já pegou
 await until(() => b.log.some((l) => l.includes("já foi escolhida")) || b.lobby!.players.find((p) => p.name === "Beto")!.teamId !== "vor", "equipe repetida bloqueada");

@@ -17,7 +17,7 @@ const CONTENT: Record<Tab, string> = {
     <p>Um fim de semana tem 4 etapas:</p>
     <ol>
       <li><b>Treino livre:</b> 5 voltas de teste por piloto pra achar o melhor acerto.</li>
-      <li><b>Classificação:</b> uma volta única que define o grid de largada.</li>
+      <li><b>Classificação:</b> Q1, Q2 e Q3. Cada piloto dá uma volta por sessão; os 5 mais lentos caem no Q1 e no Q2, e o Q3 decide a pole.</li>
       <li><b>Estratégia:</b> pneu e combustível de largada e o plano de paradas.</li>
       <li><b>Corrida:</b> você acompanha e muda a estratégia ao vivo.</li>
     </ol>
