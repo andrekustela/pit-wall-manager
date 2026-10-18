@@ -13,6 +13,9 @@ const RES = 40;
 /** sobra em volta (m), pra sombra */
 const PAD = 0.35;
 
+/** número do carro na pintura: desligado por enquanto (o dado continua salvo) */
+const SHOW_NUMBER = false;
+
 function shade(hex: string, amt: number): string {
   const n = parseInt(hex.slice(1), 16);
   const f = (v: number) => Math.max(0, Math.min(255, Math.round(amt >= 0 ? v + (255 - v) * amt : v * (1 + amt))));
@@ -170,8 +173,8 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   g.fillStyle = lv?.patternColor ?? acc;
   g.fill();
   }
-  // número do carro na capa do motor
-  if (lv) {
+  // número do carro na capa do motor (desligado por enquanto)
+  if (lv && SHOW_NUMBER) {
     g.save();
     g.translate(-1.25, 0);
     g.rotate(Math.PI / 2);

@@ -3,7 +3,7 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, poolOf, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, migrateSpares, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -180,6 +180,7 @@ export class Room {
     // saves antigos: evolução e mecânicos eram da equipe; agora são de cada carro
     migratePerCar(this.champ, this.lineup);
     ensureTrophies(this.champ, this.lineup);
+    migrateSpares(this.champ, this.lineup);
     this.champ.id ??= Math.random().toString(36).slice(2, 10);
     this.champName = this.champ.name ?? "";
     // continua da última etapa terminada (o "pronto" da sede avança pra próxima),
@@ -438,7 +439,7 @@ export class Room {
         const ch = this.champ;
         if (!ch || !p.teamId || !this.owns(p, msg.carId) || !["practice", "quali", "strategy"].includes(this.phase)) return;
         if ((ch.engines[msg.carId] ?? 1) >= 0.999) return;
-        swapEngine(ch, p.teamId, msg.carId);
+        swapEngine(ch, msg.carId);
         this.broadcastLobby();
         break;
       }

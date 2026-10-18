@@ -1,5 +1,5 @@
 import type { Connection } from "../net/connection";
-import { ENGINE_GRID_PEN } from "../sim/championship";
+import { ENGINE_GRID_PEN, sparesOf } from "../sim/championship";
 import { confirmDialog } from "./confirm";
 import type { LobbyState, ServerMsg } from "../net/protocol";
 import { TEAMS } from "../sim/data";
@@ -101,12 +101,12 @@ export class PracticeScreen {
       el.querySelector("[data-engrow]")!.addEventListener("click", async (e) => {
         if (!(e.target as HTMLElement).closest("[data-neweng]")) return;
         const ch = this.lobby.champ!;
-        const spares = ch.spares[me.teamId!] ?? 0;
+        const spares = sparesOf(ch, d.id);
         const ok = await confirmDialog({
           title: "Motor novo",
           icon: "🔧",
           text: spares > 0
-            ? `Colocar um motor novo no carro de ${d.name}? Usa 1 das ${spares} reserva(s) da equipe.`
+            ? `Colocar um motor novo no carro de ${d.name}? Usa 1 das ${spares} reserva(s) deste carro.`
             : `Acabaram as reservas. Um motor novo agora custa ${ENGINE_GRID_PEN} posições no grid de largada.`,
           ok: spares > 0 ? "TROCAR MOTOR" : "TROCAR E PERDER POSIÇÕES",
           danger: spares === 0,
@@ -259,13 +259,12 @@ export class PracticeScreen {
       row.hidden = true;
       return;
     }
-    const me = this.lobby.players.find((x) => x.id === this.lobby.you)!;
     const h = ch.engines[p.id] ?? 1;
-    const spares = ch.spares[me.teamId!] ?? 0;
+    const spares = sparesOf(ch, p.id);
     const pen = ch.gridPen[p.id];
     const cls = h > 0.6 ? "ok" : h > 0.35 ? "warn" : "bad";
     row.innerHTML = `<span>Motor</span><div class="engbar"><i class="${cls}" style="width:${Math.round(h * 100)}%"></i></div><b class="${cls}">${Math.round(h * 100)}%</b>
-      <span class="hint" style="margin:0">${spares} reserva${spares === 1 ? "" : "s"} na equipe${pen ? ` · <span style="color:var(--warn)">-${pen} no grid</span>` : ""}</span>
+      <span class="hint" style="margin:0">${spares} reserva${spares === 1 ? "" : "s"} neste carro${pen ? ` · <span style="color:var(--warn)">-${pen} no grid</span>` : ""}</span>
       ${h < 0.999 ? `<button class="btn small" data-neweng>MOTOR NOVO</button>` : ""}`;
   }
 

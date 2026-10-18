@@ -4,7 +4,6 @@ import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type 
 import type { Race } from "./race";
 import { CREW_AREAS, CREW_DEFAULT, CREW_MAX, crewCost, crewOf, normCrew, roundCrewPoints, type Crew, type CrewArea } from "./crew";
 export { crewCost } from "./crew";
-import { TEAMS } from "./data";
 import { CIRCUITS } from "./track";
 
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
@@ -40,6 +39,8 @@ export interface ChampState {
   engines: Record<string, number>;
   /** motores reservas de cada equipe */
   spares: Record<string, number>;
+  /** reservas já são por carro (antes eram da equipe) */
+  sparesPerCar?: boolean;
   /** posições de punição no grid da próxima corrida (motor novo sem reserva) */
   gridPen: Record<string, number>;
   /** mecânicos de cada carro: nível (0..5) de cada especialista */
@@ -121,7 +122,7 @@ export function renewDriver(ch: ChampState, id: string): boolean {
 /** carro (evolução, pontos, mecânicos, motor) passa de um piloto pro outro */
 export function moveCar(ch: ChampState, from: string, to: string) {
   if (from === to) return;
-  for (const m of [ch.dev, ch.devPts, ch.devLog, ch.crew, ch.crewPts, ch.engines, ch.gridPen] as (Record<string, unknown> | undefined)[]) {
+  for (const m of [ch.dev, ch.devPts, ch.devLog, ch.crew, ch.crewPts, ch.engines, ch.spares, ch.gridPen] as (Record<string, unknown> | undefined)[]) {
     if (!m || !(from in m)) continue;
     m[to] = m[from];
     delete m[from];
@@ -207,7 +208,7 @@ export function startNewSeason(
   ch.devLog = {};
   ch.engines = {};
   ch.gridPen = {};
-  ch.spares = Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(ch.rounds.length)]));
+  ch.spares = {}; // cada carro volta a ter as reservas da temporada (sparesOf)
   // regulamento novo: o carro perde metade da evolução
   for (const lv of Object.values(ch.dev)) for (const a of DEV_AREAS) lv[a.id] = Math.floor(lv[a.id] / 2);
   // pontos de desenvolvimento pra começar: quem ficou atrás ganha mais
@@ -271,10 +272,25 @@ export function champSpares(rounds: number): number {
 }
 
 /** troca o motor do carro: usa reserva ou toma punição no grid. Devolve "spare" ou "penalty" */
-export function swapEngine(ch: ChampState, team: string, carId: string): "spare" | "penalty" {
+/** motores reservas que o carro ainda tem */
+export function sparesOf(ch: { spares: Record<string, number>; rounds: number[] }, carId: string): number {
+  return ch.spares[carId] ?? champSpares(ch.rounds.length);
+}
+
+/** saves antigos: as reservas eram da equipe; cada carro fica com o que a equipe tinha */
+export function migrateSpares(ch: ChampState, lineup: Record<string, string[]>) {
+  if (ch.sparesPerCar) return;
+  const old = ch.spares ?? {};
+  ch.spares = {};
+  for (const [team, cars] of Object.entries(lineup)) for (const id of cars) ch.spares[id] = old[team] ?? champSpares(ch.rounds.length);
+  ch.sparesPerCar = true;
+}
+
+export function swapEngine(ch: ChampState, carId: string): "spare" | "penalty" {
   ch.engines[carId] = 1;
-  if ((ch.spares[team] ?? 0) > 0) {
-    ch.spares[team]--;
+  const left = sparesOf(ch, carId);
+  if (left > 0) {
+    ch.spares[carId] = left - 1;
     return "spare";
   }
   ch.gridPen[carId] = ENGINE_GRID_PEN;
@@ -286,8 +302,8 @@ export function engineCheck(ch: ChampState, lineup: Record<string, string[]>, hu
   for (const [team, cars] of Object.entries(lineup)) {
     for (const id of cars) {
       const h = ch.engines[id] ?? 1;
-      if (h <= 0.02) swapEngine(ch, team, id);
-      else if (!human.has(team) && ((h < 0.3 && (ch.spares[team] ?? 0) > 0) || h < 0.14)) swapEngine(ch, team, id);
+      if (h <= 0.02) swapEngine(ch, id);
+      else if (!human.has(team) && ((h < 0.3 && sparesOf(ch, id) > 0) || h < 0.14)) swapEngine(ch, id);
     }
   }
 }
@@ -317,7 +333,8 @@ export function newChampionship(pct = 100, rnd: () => number = Math.random): Cha
     devPts: {},
     devLog: {},
     engines: {},
-    spares: Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(n)])),
+    spares: {},
+    sparesPerCar: true,
     gridPen: {},
     crew: {},
     crewPts: {},

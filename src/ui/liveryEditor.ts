@@ -104,10 +104,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
           ${colorField("base", "Principal", lv.base)}${colorField("accent", "Secundária", lv.accent)}${colorField("patternColor", "Detalhes", lv.patternColor)}${colorField("wing", "Asas", lv.wing)}
         </div>
         <div class="livpal">${PALETTES.map((p, i) => `<button class="livpalb" data-pal="${i}" title="Paleta pronta" style="background:linear-gradient(135deg, ${p[0]} 0 50%, ${p[1]} 50% 80%, ${p[2]} 80%)"></button>`).join("")}</div></div>
-        <div class="livsec"><b>ESTILO DA PINTURA</b><div class="livpats">${PATTERNS.map((p) => `<button class="livpat ${p.id === lv.pattern ? "on" : ""}" data-pat="${p.id}"><canvas data-patcv="${p.id}"></canvas><span>${esc(p.label)}</span></button>`).join("")}</div></div>
-        <div class="livsec"><b>NÚMERO</b><div class="livcols">
-          <label class="livcol"><input class="txt" type="number" min="0" max="99" data-num value="${lv.number}" style="width:80px"><span>Número</span></label>
-          ${colorField("numberColor", "Cor do número", lv.numberColor)}</div></div>`;
+        <div class="livsec"><b>ESTILO DA PINTURA</b><div class="livpats">${PATTERNS.map((p) => `<button class="livpat ${p.id === lv.pattern ? "on" : ""}" data-pat="${p.id}"><canvas data-patcv="${p.id}"></canvas><span>${esc(p.label)}</span></button>`).join("")}</div></div>`;
       // miniaturas de cada estilo (com as cores atuais)
       box.querySelectorAll<HTMLCanvasElement>("[data-patcv]").forEach((cv) => {
         const id = cv.dataset.patcv as Livery["pattern"];

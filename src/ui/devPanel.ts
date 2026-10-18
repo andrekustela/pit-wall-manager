@@ -4,7 +4,7 @@ import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, devLapGain } from "../sim/development";
 import { CIRCUITS, getTrack } from "../sim/track";
-import { ENGINE_REPAIR_COST, ENGINE_REPAIR_GAIN } from "../sim/championship";
+import { ENGINE_REPAIR_COST, ENGINE_REPAIR_GAIN, sparesOf } from "../sim/championship";
 import { profileOf } from "../sim/drivers";
 import { esc, teamName } from "./common";
 
@@ -25,7 +25,8 @@ function engineHtml(lobby: LobbyState, id: string, pts: number): string {
   const can = !full && !dead && pts >= ENGINE_REPAIR_COST;
   const after = Math.min(100, Math.round((h + ENGINE_REPAIR_GAIN) * 100));
   const label = full ? "MOTOR INTEIRO" : dead ? "QUEBRADO (TROCA NO TREINO)" : `REVISAR · ${ENGINE_REPAIR_COST} pts (vai a ${after}%)`;
-  return `<div class="engrow"><span>MOTOR</span><div class="engbar"><i class="${cls}" style="width:${Math.round(h * 100)}%"></i></div><b class="${cls}">${Math.round(h * 100)}%</b>
+  const sp = sparesOf(ch, id);
+  return `<div class="engrow"><span>MOTOR</span><div class="engbar"><i class="${cls}" style="width:${Math.round(h * 100)}%"></i></div><b class="${cls}">${Math.round(h * 100)}%</b><span class="hint" style="margin:0">${sp} reserva${sp === 1 ? "" : "s"}</span>
     <button class="btn small ${can ? "primary" : ""}" data-repair="${id}" ${can ? "" : "disabled"}>${label}</button></div>`;
 }
 
@@ -84,7 +85,7 @@ export function devInner(lobby: LobbyState): string {
         `<div class="${t.id === team ? "mine" : ""}"><span class="tdot" style="background:${t.color}"></span>${esc(profileOf(id)?.name ?? id)} <span class="hint" style="margin:0">${esc(teamName(lobby, t.id))}</span><span class="lv">A${d.aero} M${d.engine} C${d.chassis}</span></div>`,
     )
     .join("");
-  return `<p class="hint" style="margin-top:0">Cada piloto tem o seu carro e os seus pontos. Cada etapa dá de 3 a 6 pontos pra cada carro (quem está atrás no campeonato de pilotos ganha mais). Cada investimento pode subir 1 nível, 2 ou não render nada. Reservas de motor da equipe: ${ch.spares?.[team] ?? 0}.</p>
+  return `<p class="hint" style="margin-top:0">Cada piloto tem o seu carro e os seus pontos. Cada etapa dá de 3 a 6 pontos pra cada carro (quem está atrás no campeonato de pilotos ganha mais). Cada investimento pode subir 1 nível, 2 ou não render nada. Cada carro tem os seus motores reservas.</p>
     <div class="devcars">${cars}</div>
     <details class="devrivals"><summary>Desenvolvimento de todos os carros (A = aerodinâmica, M = motor, C = chassi)</summary><div>${rivals}</div></details>`;
 }
