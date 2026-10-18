@@ -745,3 +745,41 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .livopt { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px; background: #141924; border: 2px solid var(--line); cursor: pointer; font-size: 10px; color: #c9d1e0; min-width: 64px; }
 .emblem { display: inline-block; vertical-align: middle; }
 .accname { display: flex; align-items: center; gap: 12px; }
+
+/* desenvolvimento e mecânicos por carro */
+.devcars { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+.devcar { border-left: 4px solid #fff; padding: 10px 12px; background: #121722; }
+.devcar .devtop { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.devcarname { font-family: var(--pix); font-size: 13px; }
+.devcar .devcards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.devcar .devcard { min-width: 0; padding: 8px; }
+.devcar .devcard .btn { width: 100%; padding-left: 4px; padding-right: 4px; }
+.devcar .engrow { margin-top: 8px; }
+.crewcards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.crewcard { background: #182030; border: 2px solid var(--line); padding: 8px 10px; }
+.crewcard b { display: block; font-size: 12px; }
+.crewcard p { font-size: 11px; color: var(--muted); margin: 4px 0 6px; }
+.crewcard .eff { font-size: 11px; color: #c9d1e0; margin-bottom: 6px; }
+.hqcarpts { display: flex; gap: 14px; }
+.hqcarpts > div { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+.hqcarpts b { color: #fff; font-family: var(--pix); font-size: 11px; }
+.hqcarpts i { font-style: normal; font-size: 18px; }
+.devpts.crewpts { color: #5fd3ff; }
+/* troféus por pista */
+.cup { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.cup img { width: 100%; height: 100%; image-rendering: pixelated; object-fit: contain; position: relative; z-index: 1; }
+.cup em { position: absolute; font-style: normal; font-size: 0.75em; }
+.cup img + em { display: none; }
+.cup em { font-size: 100%; line-height: 1; }
+.cup.gold em { filter: drop-shadow(0 0 6px #ffd23b88); }
+.cuptotals { display: flex; gap: 28px; margin-bottom: 16px; }
+.cuptotals > div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.cuptotals .cup em { font-size: 48px; }
+.cuptotals b { font-family: var(--pix); font-size: 22px; color: #fff; }
+.trackcups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.trackcup { background: #141924; border: 2px solid var(--line); padding: 10px; }
+.trackcup .tn { font-family: var(--pix); font-size: 12px; margin-bottom: 8px; }
+.cups { display: flex; gap: 14px; }
+.cupn { display: flex; flex-direction: column; align-items: center; font-size: 10px; color: var(--muted); }
+.cupn .cup em { font-size: 30px; }
+.cupn b { color: #fff; font-size: 14px; }

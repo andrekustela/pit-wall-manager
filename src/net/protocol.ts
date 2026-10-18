@@ -70,9 +70,9 @@ export type ClientMsg =
   | { t: "create"; name: string; teamName: string; v?: string; resume?: import("./room").ChampSave }
   | { t: "join"; code: string; name: string; teamName: string; v?: string }
   | { t: "rejoin"; code: string; token: string; v?: string }
-  | { t: "develop"; area: import("../sim/development").DevArea }
+  | { t: "develop"; carId: string; area: import("../sim/development").DevArea }
   | { t: "repairEngine"; carId: string }
-  | { t: "upgradeCrew" }
+  | { t: "upgradeCrew"; carId: string; area: import("../sim/crew").CrewArea }
   | { t: "newSeason" }
   | { t: "livery"; livery: import("../sim/livery").Livery | null }
   | { t: "renewDriver"; carId: string }

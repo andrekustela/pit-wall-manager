@@ -3,8 +3,7 @@
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
 import { drawLineup, drawReserves, poolOf, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
-import { CREW_DEFAULT } from "../sim/race";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -177,7 +176,10 @@ export class Room {
     this.champ.engines ??= {};
     this.champ.spares ??= {};
     this.champ.gridPen ??= {};
-    this.champ.crew ??= Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT]));
+    this.champ.crew ??= {};
+    // saves antigos: evolução e mecânicos eram da equipe; agora são de cada carro
+    migratePerCar(this.champ, this.lineup);
+    ensureTrophies(this.champ, this.lineup);
     this.champ.id ??= Math.random().toString(36).slice(2, 10);
     this.champName = this.champ.name ?? "";
     // continua da última etapa terminada (o "pronto" da sede avança pra próxima),
@@ -403,6 +405,12 @@ export class Room {
         this.lineup = { ...this.lineup, [team]: pair };
         if (this.weekend) this.weekend.lineup = this.lineup;
         this.swapUsed.add(team);
+        // o reserva fica com o carro (evolução, pontos, mecânicos e motor) de quem saiu
+        if (this.champ) moveCar(this.champ, msg.carId, res);
+        if (this.weekend?.dev?.[msg.carId]) {
+          this.weekend.dev[res] = this.weekend.dev[msg.carId];
+          delete this.weekend.dev[msg.carId];
+        }
         p.tunings[res] = p.tunings[msg.carId] ?? { ...DEFAULT_TUNING };
         delete p.tunings[msg.carId];
         delete p.practiceCount[msg.carId];
@@ -438,7 +446,7 @@ export class Room {
         // investe no carro entre as etapas do campeonato
         const ch = this.champ;
         if (!this.betweenRounds() || !ch || ch.finished || !p.teamId || !DEV_AREAS.some((a) => a.id === msg.area)) return;
-        if (investDev(ch, p.teamId, msg.area, null, Math.random) === null) return;
+        if (!this.owns(p, msg.carId) || investDev(ch, msg.carId, msg.area, null, Math.random) === null) return;
         this.saveChamp();
         this.broadcastLobby();
         break;
@@ -447,7 +455,7 @@ export class Room {
         // revisa o motor gastando pontos de desenvolvimento (entre as etapas)
         const ch = this.champ;
         if (!this.betweenRounds() || !ch || ch.finished || !p.teamId || !this.owns(p, msg.carId)) return;
-        if (!repairEngine(ch, p.teamId, msg.carId)) return;
+        if (!repairEngine(ch, msg.carId)) return;
         this.saveChamp();
         this.broadcastLobby();
         break;
@@ -466,7 +474,7 @@ export class Room {
       case "renewDriver": {
         const ch = this.champ;
         if (this.phase !== "hq" || !ch?.finished || !p.teamId || !this.owns(p, msg.carId)) return;
-        if (!renewDriver(ch, p.teamId, msg.carId)) return;
+        if (!renewDriver(ch, msg.carId)) return;
         this.saveChamp();
         this.broadcastLobby();
         break;
@@ -484,8 +492,8 @@ export class Room {
       case "upgradeCrew": {
         // treina a equipe de mecânicos (pit stop mais rápido e com menos erro)
         const ch = this.champ;
-        if (!this.betweenRounds() || !ch || ch.finished || !p.teamId) return;
-        if (!upgradeCrew(ch, p.teamId)) return;
+        if (!this.betweenRounds() || !ch || ch.finished || !p.teamId || !this.owns(p, msg.carId)) return;
+        if (!upgradeCrew(ch, msg.carId, msg.area)) return;
         this.saveChamp();
         this.broadcastLobby();
         break;

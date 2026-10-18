@@ -1,5 +1,6 @@
+import { CREW_DEFAULT, crewErrorChance, normCrew, refuelMult, repairMult, type Crew } from "./crew";
 import { TEAMS } from "./data";
-import { buildEntrants, type Engineer } from "./entrants";
+import { buildEntrants, carTeam, type Engineer } from "./entrants";
 import { Rng } from "./rng";
 import { BOX_SHIFT, PIT_MERGE, TRACK_WIDTH, Track, getTrack } from "./track";
 import { BASE_SLACK, aiTuning, carProfile, clampTuning, lapNoiseSd, makeConditions, wetSkillFactor, type Conditions } from "./tuning";
@@ -64,7 +65,7 @@ export interface RaceOptions {
   /** pinturas personalizadas (equipes dos jogadores) */
   liveries?: Record<string, import("./livery").Livery>;
   /** nível da equipe de mecânicos de cada equipe (0..5): pit stop mais rápido e com menos erro */
-  crew?: Record<string, number>;
+  crew?: Record<string, Crew | number>;
 }
 
 export type RacePhase = "lights" | "racing" | "finished";
@@ -89,17 +90,7 @@ export function tyreTempLabel(t: number): "frio" | "ideal" | "quente" {
 }
 
 /** nível padrão da equipe de mecânicos (fora do campeonato ou sem dado) */
-export const CREW_DEFAULT = 2;
-export const CREW_MAX = 5;
-/** chance de dar errado no pit stop por nível de mecânicos (nível 0 ≈ 10%, nível 5 ≈ 1,5%) */
-export function crewErrorChance(level: number): number {
-  return Math.max(0.01, 0.1 - level * 0.017);
-}
-/** tempo médio de troca de pneu (s) por nível */
-export function crewStopTime(level: number): number {
-  const lo = 2.9 - level * 0.18;
-  return lo + (1.0 - level * 0.12) / 2;
-}
+export { CREW_DEFAULT, CREW_MAX, crewErrorChance, crewStopTime } from "./crew";
 const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
 const CAR_L = 4.4;
@@ -204,7 +195,7 @@ export class Race {
       // sem classificação: sorteia pela pace
       order = drivers
         .map((d) => {
-          const team = teams.find((t) => t.id === d.teamId)!;
+          const team = carTeam(teams, d, opts);
           return { id: d.id, q: team.carPace + d.skill + this.rng.gauss(0.22) };
         })
         .sort((a, b) => a.q - b.q)
@@ -213,7 +204,7 @@ export class Race {
 
     order.forEach((id, i) => {
       const d = drivers.find((x) => x.id === id)!;
-      const team = teams.find((t) => t.id === d.teamId)!;
+      const team = carTeam(teams, d, opts);
       const isHuman = opts.humanTeams.includes(team.id);
       const tuning = clampTuning(opts.tunings?.[id] ?? aiTuning(this.track, this.quality(team.id), this.rng, this.cond, d));
       const prof = carProfile(this.track, tuning, this.cond, d);
@@ -1119,12 +1110,12 @@ export class Race {
           return;
         }
         c.pit = "stopped";
-        // troca de pneu e reabastecimento acontecem ao mesmo tempo; a equipe de
-        // mecânicos (nível 0..5) define a velocidade e a chance de erro
-        const crew = this.crewLevel(c.team.id);
-        const lo = 2.9 - crew * 0.18;
-        let tyres = this.rng.range(lo, lo + 1.0 - crew * 0.12);
-        if (this.rng.chance(crewErrorChance(crew))) {
+        // troca de pneu e reabastecimento acontecem ao mesmo tempo; cada
+        // especialista dos mecânicos do carro (nível 0..5) cuida de uma parte
+        const crew = this.crewOfCar(c);
+        const lo = 2.9 - crew.pneus * 0.18;
+        let tyres = this.rng.range(lo, lo + 1.0 - crew.pneus * 0.12);
+        if (this.rng.chance(crewErrorChance(crew.chefe))) {
           const team = c.isHuman ? c.team.id : undefined;
           if (this.rng.chance(0.75)) {
             const lost = this.rng.range(2.5, 6);
@@ -1138,12 +1129,12 @@ export class Race {
           }
         }
         const add = Math.min(c.boxFuel, FUEL_MAX - c.fuel);
-        const refuel = add > 0.5 ? add / REFUEL_RATE + this.rng.range(0.4, 0.8) : 0;
+        const refuel = add > 0.5 ? (add / REFUEL_RATE + this.rng.range(0.4, 0.8)) * refuelMult(crew.gasolina) : 0;
         const mate = this.cars.find((o) => o !== c && o.team.id === c.team.id && o.pit === "stopped");
         // consertos: asa dianteira (bico), asa traseira e suspensão demoram diferente
         // consertos (só das peças marcadas pra trocar); cada peça demora diferente
         let nose = 0;
-        for (const part of PARTS) if (c.dmg[part.id] > 0 && c.repair[part.id]) nose += this.rng.range(part.repair[0], part.repair[1]);
+        for (const part of PARTS) if (c.dmg[part.id] > 0 && c.repair[part.id]) nose += this.rng.range(part.repair[0], part.repair[1]) * repairMult(crew.pecas);
         c.pitTimer = Math.max(tyres, refuel) + nose + (mate ? mate.pitTimer + 0.8 : 0);
       }
     } else if (c.pit === "leaving") {
@@ -1324,11 +1315,12 @@ export class Race {
     }
   }
 
-  private crewLevel(team: string): number {
-    const v = this.opts.crew?.[team];
-    if (v !== undefined) return Math.max(0, Math.min(CREW_MAX, v));
-    const q = this.engineers[team]?.quality;
-    return q === null || q === undefined ? CREW_DEFAULT : Math.round(1 + q * 3);
+  /** mecânicos do carro (no campeonato vêm do save; fora dele, pelo engenheiro da equipe) */
+  private crewOfCar(c: CarState): Crew {
+    const v = this.opts.crew?.[c.id] ?? this.opts.crew?.[c.team.id];
+    if (v !== undefined) return normCrew(v);
+    const q = this.engineers[c.team.id]?.quality;
+    return normCrew(q === null || q === undefined ? CREW_DEFAULT : Math.round(1 + q * 3));
   }
 
   private mate(c: CarState): CarState | null {

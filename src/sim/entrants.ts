@@ -29,22 +29,25 @@ export interface EntrantOptions {
 /** no modo igual todo mundo tem carro e piloto equivalentes */
 const EQUAL_SKILL = 0.25;
 
+/**
+ * Equipe vista por um carro: cada carro tem a sua evolução (chave = id do carro).
+ * Saves antigos guardavam por equipe, então serve de reserva.
+ */
+export function carTeam(teams: Team[], d: { id: string; teamId: string }, opts: Pick<EntrantOptions, "dev" | "trackIndex">): Team {
+  const t = teams.find((x) => x.id === d.teamId)!;
+  const lv = opts.dev?.[d.id] ?? opts.dev?.[t.id];
+  if (!lv) return t;
+  const wear = devWear(lv);
+  return { ...t, carPace: t.carPace - devLapGain(getTrack(opts.trackIndex ?? 0), lv), tyreWear: wear.tyre, engineWear: wear.engine };
+}
+
 export function buildEntrants(opts: EntrantOptions): { teams: Team[]; drivers: Driver[] } {
   const teams = TEAMS.map((t0) => {
     // pintura do jogador: troca as cores da equipe em tudo (carro, tabela, painéis)
     const liv = opts.liveries?.[t0.id];
     const t = liv ? { ...t0, color: liv.base, accent: liv.accent, livery: liv } : t0;
     const base = opts.equalCars ? 0 : t.carPace;
-    const lv = opts.dev?.[t.id];
-    if (!lv) return { ...t, name: opts.teamNames?.[t.id]?.trim() || t.name, carPace: base };
-    const wear = devWear(lv);
-    return {
-      ...t,
-      name: opts.teamNames?.[t.id]?.trim() || t.name,
-      carPace: base - devLapGain(getTrack(opts.trackIndex ?? 0), lv),
-      tyreWear: wear.tyre,
-      engineWear: wear.engine,
-    };
+    return { ...t, name: opts.teamNames?.[t.id]?.trim() || t.name, carPace: base };
   });
   if (opts.lineup) {
     // pilotos da base: no modo "carros iguais" só o carro é igual; o piloto faz a diferença

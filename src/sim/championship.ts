@@ -1,7 +1,9 @@
 // Campeonato: uma etapa em cada pista, pontos estilo F1.
 import type { Engineer } from "./entrants";
 import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type DevArea, type DevLevels } from "./development";
-import { CREW_DEFAULT, CREW_MAX, type Race } from "./race";
+import type { Race } from "./race";
+import { CREW_AREAS, CREW_DEFAULT, CREW_MAX, crewCost, crewOf, normCrew, roundCrewPoints, type Crew, type CrewArea } from "./crew";
+export { crewCost } from "./crew";
 import { TEAMS } from "./data";
 import { CIRCUITS } from "./track";
 
@@ -28,9 +30,9 @@ export interface ChampState {
   /** engenheiros sorteados no início, valem pro campeonato todo */
   engineers: Record<string, Engineer> | null;
   finished: boolean;
-  /** níveis de desenvolvimento de cada equipe */
+  /** níveis de desenvolvimento de cada carro (chave = id do carro/piloto) */
   dev: Record<string, DevLevels>;
-  /** pontos de desenvolvimento pra gastar */
+  /** pontos de desenvolvimento pra gastar, de cada carro */
   devPts: Record<string, number>;
   /** o que aconteceu nos investimentos desde a última corrida */
   devLog: Record<string, { area: DevArea; gain: number }[]>;
@@ -40,8 +42,12 @@ export interface ChampState {
   spares: Record<string, number>;
   /** posições de punição no grid da próxima corrida (motor novo sem reserva) */
   gridPen: Record<string, number>;
-  /** nível da equipe de mecânicos (0..5) de cada equipe */
-  crew: Record<string, number>;
+  /** mecânicos de cada carro: nível (0..5) de cada especialista */
+  crew: Record<string, Crew>;
+  /** pontos de mecânicos de cada carro (separados dos do carro) */
+  crewPts?: Record<string, number>;
+  /** dev, devPts, devLog e crew já são por carro (saves antigos eram por equipe) */
+  perCar?: boolean;
   /** nome que o jogador deu pro campeonato e um id pra achar o save */
   name?: string;
   id?: string;
@@ -52,6 +58,28 @@ export interface ChampState {
   contracts?: Record<string, number>;
   /** pilotos livres no mercado (fim de temporada) */
   market?: string[];
+  /** troféus de pódio de cada equipe, por pista: [1º, 2º, 3º] (somam todas as temporadas) */
+  trophies?: Record<string, Record<number, [number, number, number]>>;
+}
+
+/** guarda os troféus de pódio de uma etapa */
+function addTrophies(ch: ChampState, r: RoundResult, teamOf: (carId: string) => string) {
+  ch.trophies ??= {};
+  r.order.slice(0, 3).forEach((id, k) => {
+    if (r.retired.includes(id)) return;
+    const team = teamOf(id);
+    const byTrack = (ch.trophies![team] ??= {});
+    const t = (byTrack[r.trackIndex] ??= [0, 0, 0]);
+    t[k]++;
+  });
+}
+
+/** saves antigos (sem troféus guardados): monta a partir das etapas desta temporada */
+export function ensureTrophies(ch: ChampState, lineup: Record<string, string[]>) {
+  if (ch.trophies) return;
+  ch.trophies = {};
+  const teamOf = (id: string) => Object.entries(lineup).find(([, c]) => c.includes(id))?.[0] ?? "";
+  for (const r of ch.results) addTrophies(ch, r, teamOf);
 }
 
 export interface SeasonSummary {
@@ -82,19 +110,57 @@ export function openMarket(ch: ChampState, lineup: Record<string, string[]>, poo
 }
 
 /** renova o contrato do piloto por mais 2 temporadas */
-export function renewDriver(ch: ChampState, team: string, id: string): boolean {
-  if ((ch.devPts[team] ?? 0) < RENEW_COST) return false;
-  ch.devPts[team] -= RENEW_COST;
+export function renewDriver(ch: ChampState, id: string): boolean {
+  if ((ch.devPts[id] ?? 0) < RENEW_COST) return false;
+  ch.devPts[id] -= RENEW_COST;
   ch.contracts ??= {};
   ch.contracts[id] = (ch.contracts[id] ?? 0) + 2;
   return true;
 }
 
-/** contrata um piloto livre no lugar de outro da equipe; devolve a escalação nova */
+/** carro (evolução, pontos, mecânicos, motor) passa de um piloto pro outro */
+export function moveCar(ch: ChampState, from: string, to: string) {
+  if (from === to) return;
+  for (const m of [ch.dev, ch.devPts, ch.devLog, ch.crew, ch.crewPts, ch.engines, ch.gridPen] as (Record<string, unknown> | undefined)[]) {
+    if (!m || !(from in m)) continue;
+    m[to] = m[from];
+    delete m[from];
+  }
+}
+
+/** saves antigos: o que era da equipe vira dos dois carros (pontos divididos) */
+export function migratePerCar(ch: ChampState, lineup: Record<string, string[]>) {
+  ch.crewPts ??= {};
+  if (ch.perCar) {
+    for (const k of Object.keys(ch.crew ?? {})) ch.crew[k] = normCrew(ch.crew[k]);
+    return;
+  }
+  const dev: Record<string, DevLevels> = {}, pts: Record<string, number> = {}, crew: Record<string, Crew> = {};
+  for (const [team, cars] of Object.entries(lineup)) {
+    const p = ch.devPts?.[team] ?? 0;
+    cars.forEach((id, i) => {
+      dev[id] = { ...(ch.dev?.[team] ?? NO_DEV) };
+      pts[id] = i === 0 ? Math.ceil(p / cars.length) : Math.floor(p / cars.length);
+      crew[id] = normCrew((ch.crew as Record<string, unknown> | undefined)?.[team] ?? CREW_DEFAULT);
+    });
+  }
+  ch.dev = dev;
+  ch.devPts = pts;
+  ch.crew = crew;
+  ch.devLog = {};
+  ch.perCar = true;
+}
+
+export function crewOfCar(ch: ChampState, carId: string): Crew {
+  return (ch.crew[carId] ??= crewOf());
+}
+
+/** contrata um piloto livre no lugar de outro da equipe (fica com o carro dele); devolve a escalação nova */
 export function signDriver(ch: ChampState, lineup: Record<string, [string, string]>, team: string, outId: string, inId: string): Record<string, [string, string]> | null {
   const pair = lineup[team];
-  if (!pair || !pair.includes(outId) || !ch.market?.includes(inId) || (ch.devPts[team] ?? 0) < SIGN_COST) return null;
-  ch.devPts[team] -= SIGN_COST;
+  if (!pair || !pair.includes(outId) || !ch.market?.includes(inId) || (ch.devPts[outId] ?? 0) < SIGN_COST) return null;
+  ch.devPts[outId] -= SIGN_COST;
+  moveCar(ch, outId, inId);
   const np = [...pair] as [string, string];
   np[np.indexOf(outId)] = inId;
   ch.market = ch.market.filter((x) => x !== inId).concat(outId); // quem saiu vai pro mercado
@@ -145,7 +211,11 @@ export function startNewSeason(
   // regulamento novo: o carro perde metade da evolução
   for (const lv of Object.values(ch.dev)) for (const a of DEV_AREAS) lv[a.id] = Math.floor(lv[a.id] / 2);
   // pontos de desenvolvimento pra começar: quem ficou atrás ganha mais
-  teams.forEach((t, rank) => (ch.devPts[t.id] = (ch.devPts[t.id] ?? 0) + 3 + Math.round((rank / Math.max(1, teams.length - 1)) * 4)));
+  ch.crewPts ??= {};
+  drivers.forEach((d, rank) => {
+    ch.devPts[d.id] = (ch.devPts[d.id] ?? 0) + 3 + Math.round((rank / Math.max(1, drivers.length - 1)) * 4);
+    ch.crewPts![d.id] = (ch.crewPts![d.id] ?? 0) + roundCrewPoints(rank, drivers.length);
+  });
   // contratos
   ch.contracts ??= {};
   let lu = { ...lineup };
@@ -168,6 +238,7 @@ export function startNewSeason(
       free.push(id);
       delete ch.contracts![id];
       ch.contracts![nw] = 1 + Math.floor(rnd() * 3);
+      moveCar(ch, id, nw);
       np[i] = nw;
     });
     lu = { ...lu, [team]: np };
@@ -176,19 +247,16 @@ export function startNewSeason(
   return lu;
 }
 
-/** custo (pontos de desenvolvimento) de subir os mecânicos do nível atual pro próximo */
-export function crewCost(level: number): number {
-  return 2 + level;
-}
-
-/** treina a equipe de mecânicos (sobe 1 nível); false se não dava */
-export function upgradeCrew(ch: ChampState, team: string): boolean {
+/** treina um especialista dos mecânicos do carro (sobe 1 nível, gasta pontos de mecânicos); false se não dava */
+export function upgradeCrew(ch: ChampState, carId: string, area: CrewArea): boolean {
+  if (!CREW_AREAS.some((a) => a.id === area)) return false;
   ch.crew ??= {};
-  const lv = ch.crew[team] ?? CREW_DEFAULT;
-  const cost = crewCost(lv);
-  if (lv >= CREW_MAX || (ch.devPts[team] ?? 0) < cost) return false;
-  ch.devPts[team] -= cost;
-  ch.crew[team] = lv + 1;
+  ch.crewPts ??= {};
+  const c = crewOfCar(ch, carId);
+  const cost = crewCost(c[area]);
+  if (c[area] >= CREW_MAX || (ch.crewPts[carId] ?? 0) < cost) return false;
+  ch.crewPts[carId] -= cost;
+  c[area]++;
   return true;
 }
 
@@ -251,7 +319,9 @@ export function newChampionship(pct = 100, rnd: () => number = Math.random): Cha
     engines: {},
     spares: Object.fromEntries(TEAMS.map((t) => [t.id, champSpares(n)])),
     gridPen: {},
-    crew: Object.fromEntries(TEAMS.map((t) => [t.id, CREW_DEFAULT])),
+    crew: {},
+    crewPts: {},
+    perCar: true,
     id: Math.random().toString(36).slice(2, 10),
   };
 }
@@ -266,36 +336,42 @@ export function awardPoints(ch: ChampState, race: Race) {
   });
   for (const c of race.cars) ch.engines[c.id] = c.retireReason === "Motor" ? 0 : c.engineHealth;
   ch.gridPen = {};
-  ch.results.push({
+  const res: RoundResult = {
     trackIndex: race.opts.trackIndex,
     order: order.map((c) => c.id),
     retired: order.filter((c) => c.retired).map((c) => c.id),
     winnerTeam: order[0].team.id,
     pole: race.opts.grid?.[0],
     fastest: race.fastestLap,
-  });
+  };
+  ch.results.push(res);
+  addTrophies(ch, res, (id) => race.cars.find((c) => c.id === id)?.team.id ?? "");
   if (ch.results.length >= ch.rounds.length) ch.finished = true;
   if (ch.finished) return;
-  // pontos de desenvolvimento: quem está atrás no campeonato ganha mais
+  // pontos de cada carro (desenvolvimento e mecânicos): quem está atrás no campeonato de pilotos ganha mais
   ch.devLog = {};
-  const teamIds = [...new Set(race.cars.map((c) => c.team.id))].sort((a, b) => (ch.teamPts[b] ?? 0) - (ch.teamPts[a] ?? 0));
-  teamIds.forEach((id, rank) => (ch.devPts[id] = (ch.devPts[id] ?? 0) + roundDevPoints(rank, teamIds.length)));
+  ch.crewPts ??= {};
+  const carIds = race.cars.map((c) => c.id).sort((a, b) => (ch.driverPts[b] ?? 0) - (ch.driverPts[a] ?? 0));
+  carIds.forEach((id, rank) => {
+    ch.devPts[id] = (ch.devPts[id] ?? 0) + roundDevPoints(rank, carIds.length);
+    ch.crewPts![id] = (ch.crewPts![id] ?? 0) + roundCrewPoints(rank, carIds.length);
+  });
 }
 
-export function devOf(ch: ChampState, team: string): DevLevels {
-  return (ch.dev[team] ??= { ...NO_DEV });
+export function devOf(ch: ChampState, carId: string): DevLevels {
+  return (ch.dev[carId] ??= { ...NO_DEV });
 }
 
 /** investe numa área; devolve quanto subiu (0, 1, 2) ou null se não dava */
-export function investDev(ch: ChampState, team: string, area: DevArea, quality: number | null, rnd: () => number): number | null {
-  const lv = devOf(ch, team);
+export function investDev(ch: ChampState, carId: string, area: DevArea, quality: number | null, rnd: () => number): number | null {
+  const lv = devOf(ch, carId);
   if (lv[area] >= DEV_MAX) return null;
   const cost = devCost(lv[area]);
-  if ((ch.devPts[team] ?? 0) < cost) return null;
-  ch.devPts[team] -= cost;
+  if ((ch.devPts[carId] ?? 0) < cost) return null;
+  ch.devPts[carId] -= cost;
   const gain = Math.min(DEV_MAX - lv[area], rollUpgrade(rnd, quality));
   lv[area] += gain;
-  (ch.devLog[team] ??= []).push({ area, gain });
+  (ch.devLog[carId] ??= []).push({ area, gain });
   return gain;
 }
 
@@ -304,33 +380,39 @@ export const ENGINE_REPAIR_COST = 2;
 export const ENGINE_REPAIR_GAIN = 0.25;
 
 /** revisa o motor do carro; devolve false se não dava (sem pontos ou motor já inteiro) */
-export function repairEngine(ch: ChampState, team: string, carId: string): boolean {
+export function repairEngine(ch: ChampState, carId: string): boolean {
   const h = ch.engines[carId] ?? 1;
-  if (h >= 0.999 || h <= 0.02 || (ch.devPts[team] ?? 0) < ENGINE_REPAIR_COST) return false;
-  ch.devPts[team] -= ENGINE_REPAIR_COST;
+  if (h >= 0.999 || h <= 0.02 || (ch.devPts[carId] ?? 0) < ENGINE_REPAIR_COST) return false;
+  ch.devPts[carId] -= ENGINE_REPAIR_COST;
   ch.engines[carId] = Math.min(1, h + ENGINE_REPAIR_GAIN);
   return true;
 }
 
 /** equipes da IA gastam tudo (engenheiro bom espalha melhor); motor muito gasto é revisado antes */
-export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => number, lineup?: Record<string, string[]>) {
-  for (const team of Object.keys(ch.devPts)) {
+export function aiDevelop(ch: ChampState, humanTeams: Set<string>, rnd: () => number, lineup: Record<string, string[]>) {
+  for (const [team, cars] of Object.entries(lineup)) {
     if (humanTeams.has(team)) continue;
     const q = ch.engineers?.[team]?.quality ?? 0.5;
-    for (const id of lineup?.[team] ?? []) {
+    for (const id of cars) {
       // engenheiro bom cuida do motor mais cedo
-      while ((ch.engines[id] ?? 1) < 0.35 + q * 0.2 && repairEngine(ch, team, id));
-    }
-    // engenheiro bom também investe nos mecânicos (às vezes)
-    if ((ch.crew?.[team] ?? CREW_DEFAULT) < 1 + Math.round(q * 4) && rnd() < 0.35 + q * 0.4) upgradeCrew(ch, team);
-    for (let guard = 0; guard < 20; guard++) {
-      const lv = devOf(ch, team);
-      // bom engenheiro sobe a área mais atrasada; ruim escolhe meio no chute
-      const areas = DEV_AREAS.map((a) => a.id).filter((a) => lv[a] < DEV_MAX && devCost(lv[a]) <= (ch.devPts[team] ?? 0));
-      if (!areas.length) break;
-      areas.sort((a, b) => lv[a] - lv[b]);
-      const pick = rnd() < q ? areas[0] : areas[Math.floor(rnd() * areas.length)];
-      investDev(ch, team, pick, q, rnd);
+      while ((ch.engines[id] ?? 1) < 0.35 + q * 0.2 && repairEngine(ch, id));
+      // mecânicos: bom engenheiro sobe o especialista mais fraco; ruim, no chute
+      for (let guard = 0; guard < 20; guard++) {
+        const c = crewOfCar(ch, id);
+        const areas = CREW_AREAS.map((a) => a.id).filter((a) => c[a] < CREW_MAX && crewCost(c[a]) <= (ch.crewPts?.[id] ?? 0));
+        if (!areas.length) break;
+        areas.sort((a, b) => c[a] - c[b]);
+        upgradeCrew(ch, id, rnd() < q ? areas[0] : areas[Math.floor(rnd() * areas.length)]);
+      }
+      for (let guard = 0; guard < 20; guard++) {
+        const lv = devOf(ch, id);
+        // bom engenheiro sobe a área mais atrasada; ruim escolhe meio no chute
+        const areas = DEV_AREAS.map((a) => a.id).filter((a) => lv[a] < DEV_MAX && devCost(lv[a]) <= (ch.devPts[id] ?? 0));
+        if (!areas.length) break;
+        areas.sort((a, b) => lv[a] - lv[b]);
+        const pick = rnd() < q ? areas[0] : areas[Math.floor(rnd() * areas.length)];
+        investDev(ch, id, pick, q, rnd);
+      }
     }
   }
 }

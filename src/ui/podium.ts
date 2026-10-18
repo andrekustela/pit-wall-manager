@@ -54,7 +54,7 @@ export class PodiumScreen {
     bindTelemetry(root);
     root.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-dev]");
-      if (b && !b.disabled) conn.send({ t: "develop", area: b.dataset.dev as DevArea });
+      if (b && !b.disabled) conn.send({ t: "develop", carId: b.dataset.car!, area: b.dataset.dev as DevArea });
       const r = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-repair]");
       if (r && !r.disabled) conn.send({ t: "repairEngine", carId: r.dataset.repair! });
     });

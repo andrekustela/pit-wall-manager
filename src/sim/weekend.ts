@@ -1,5 +1,5 @@
 // Treino livre e classificação (Q1, Q2, Q3).
-import { buildEntrants, type Engineer } from "./entrants";
+import { buildEntrants, carTeam, type Engineer } from "./entrants";
 import { Rng } from "./rng";
 import { getTrack } from "./track";
 import type { Lineup } from "./drivers";
@@ -36,7 +36,7 @@ export function practiceLap(w: WeekendInfo, carId: string, tuning: Tuning, lapIn
   const track = getTrack(w.trackIndex);
   const { teams, drivers } = buildEntrants(w);
   const d = drivers.find((x) => x.id === carId)!;
-  const team = teams.find((t) => t.id === d.teamId)!;
+  const team = carTeam(teams, d, w);
   const rng = new Rng(w.seed ^ hash(carId) ^ (lapIndex * 7919));
   return qualiLap(track, team, d, tuning, weekendWeather(w).practiceWet, rng, 40, weekendConditions(w));
 }
@@ -80,7 +80,7 @@ export function runQualifying(w: WeekendInfo, humanTunings: Record<string, Tunin
   for (let session = 0; session < 3; session++) {
     for (const r of alive) {
       const d = drivers.find((x) => x.id === r.carId)!;
-      const team = teams.find((t) => t.id === d.teamId)!;
+      const team = carTeam(teams, d, w);
       const lap = qualiLap(track, team, d, r.tuning, wet, rng, 8, cond);
       const t = lap.time - session * 0.12; // pista emborrachando
       r.q.push(t);
