@@ -1,6 +1,7 @@
 // Carro de F1 em vetor, visto de cima (frente pra +x), desenhado UMA vez por
 // equipe numa imagem de alta resolução e depois só girado/escalado a cada frame.
 import type { Team } from "../sim/types";
+import { liveryKey, type Livery } from "../sim/livery";
 
 /** tamanho real do carro (m) */
 export const CAR_LEN_M = 4.3;
@@ -29,9 +30,10 @@ export interface CarImage {
 const cache = new Map<string, CarImage>();
 
 export function carImage(team: Team, rainLight = false, safety = false): CarImage {
-  const key = `${safety ? "SC" : team.id}|${rainLight}`;
+  const key = `${safety ? "SC" : team.id}|${rainLight}|${safety ? "" : liveryKey(team.livery)}`;
   const hit = cache.get(key);
   if (hit) return hit;
+  if (cache.size > 300) cache.clear(); // prévias do editor de pintura não acumulam pra sempre
   const wM = CAR_LEN_M + PAD * 2, hM = CAR_WID_M + PAD * 2;
   const cv = document.createElement("canvas");
   cv.width = Math.round(wM * RES);
@@ -77,8 +79,10 @@ function arm(g: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2
 }
 
 function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
-  const body = team.color;
-  const acc = team.accent;
+  const lv = team.livery;
+  const body = lv?.base ?? team.color;
+  const acc = lv?.accent ?? team.accent;
+  const wing = lv?.wing ?? acc;
 
   // sombra no chão
   g.save();
@@ -122,20 +126,12 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   bodyGrad.addColorStop(0, shade(body, 0.35));
   bodyGrad.addColorStop(0.45, body);
   bodyGrad.addColorStop(1, shade(body, -0.38));
-  g.beginPath();
-  g.moveTo(-2.35, -0.2);
-  g.bezierCurveTo(-1.8, -0.32, -1.3, -0.62, -0.75, -0.64);
-  g.bezierCurveTo(-0.1, -0.66, 0.25, -0.6, 0.45, -0.38);
-  g.bezierCurveTo(0.7, -0.24, 0.95, -0.17, 1.2, -0.14);
-  g.lineTo(2.3, -0.075);
-  g.quadraticCurveTo(2.42, 0, 2.3, 0.075);
-  g.lineTo(1.2, 0.14);
-  g.bezierCurveTo(0.95, 0.17, 0.7, 0.24, 0.45, 0.38);
-  g.bezierCurveTo(0.25, 0.6, -0.1, 0.66, -0.75, 0.64);
-  g.bezierCurveTo(-1.3, 0.62, -1.8, 0.32, -2.35, 0.2);
-  g.closePath();
+  bodyPath(g);
   g.fillStyle = bodyGrad;
   g.fill();
+  // pintura escolhida pelo jogador (fica só dentro da carroceria)
+  if (lv && lv.pattern !== "classica") paintPattern(g, lv);
+  bodyPath(g);
   g.strokeStyle = "rgba(0,0,0,0.35)";
   g.lineWidth = 0.025;
   g.stroke();
@@ -161,7 +157,8 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
     }
   }
 
-  // faixa da pintura ao longo da capa do motor e do bico
+  // faixa da pintura ao longo da capa do motor e do bico (estilo clássico)
+  if (!lv || lv.pattern === "classica") {
   g.beginPath();
   g.moveTo(-2.3, -0.06);
   g.lineTo(0.3, -0.1);
@@ -170,8 +167,24 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   g.lineTo(0.3, 0.1);
   g.lineTo(-2.3, 0.06);
   g.closePath();
-  g.fillStyle = acc;
+  g.fillStyle = lv?.patternColor ?? acc;
   g.fill();
+  }
+  // número do carro na capa do motor
+  if (lv) {
+    g.save();
+    g.translate(-1.25, 0);
+    g.rotate(Math.PI / 2);
+    g.font = "900 0.36px Arial, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.lineWidth = 0.05;
+    g.strokeStyle = "rgba(0,0,0,0.55)";
+    g.strokeText(String(lv.number), 0, 0.01);
+    g.fillStyle = lv.numberColor;
+    g.fillText(String(lv.number), 0, 0.01);
+    g.restore();
+  }
 
   // tomada de ar acima do piloto (airbox) e capa do motor
   rr(g, -0.05, -0.12, 0.32, 0.24, 0.08);
@@ -212,7 +225,7 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
     g.beginPath();
     g.moveTo(x, -0.95);
     g.quadraticCurveTo(x + 0.14 - i * 0.04, 0, x, 0.95);
-    g.strokeStyle = i === 0 ? acc : shade(acc, -0.25 - i * 0.1);
+    g.strokeStyle = i === 0 ? wing : shade(wing, -0.25 - i * 0.1);
     g.lineWidth = 0.075;
     g.stroke();
   }
@@ -222,10 +235,10 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
 
   // asa traseira: plano principal + flap + placas laterais
   rr(g, -2.78, -0.5, 0.22, 1.0, 0.03);
-  g.fillStyle = acc;
+  g.fillStyle = wing;
   g.fill();
   rr(g, -2.56, -0.48, 0.1, 0.96, 0.03);
-  g.fillStyle = shade(acc, -0.3);
+  g.fillStyle = shade(wing, -0.3);
   g.fill();
   g.fillStyle = "#16171b";
   g.fillRect(-2.8, -0.54, 0.38, 0.06);
@@ -241,6 +254,72 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
     g.fillRect(-2.86, -0.05, 0.08, 0.1);
     g.restore();
   }
+}
+
+/** contorno da carroceria (laterais largas que afinam no cockpit e viram bico) */
+function bodyPath(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(-2.35, -0.2);
+  g.bezierCurveTo(-1.8, -0.32, -1.3, -0.62, -0.75, -0.64);
+  g.bezierCurveTo(-0.1, -0.66, 0.25, -0.6, 0.45, -0.38);
+  g.bezierCurveTo(0.7, -0.24, 0.95, -0.17, 1.2, -0.14);
+  g.lineTo(2.3, -0.075);
+  g.quadraticCurveTo(2.42, 0, 2.3, 0.075);
+  g.lineTo(1.2, 0.14);
+  g.bezierCurveTo(0.95, 0.17, 0.7, 0.24, 0.45, 0.38);
+  g.bezierCurveTo(0.25, 0.6, -0.1, 0.66, -0.75, 0.64);
+  g.bezierCurveTo(-1.3, 0.62, -1.8, 0.32, -2.35, 0.2);
+  g.closePath();
+}
+
+/** estilos de pintura (desenhados por cima da cor principal, dentro da carroceria) */
+function paintPattern(g: CanvasRenderingContext2D, lv: Livery) {
+  const c = lv.patternColor;
+  g.save();
+  bodyPath(g);
+  g.clip();
+  g.fillStyle = c;
+  const poly = (pts: number[][]) => {
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.closePath();
+    g.fill();
+  };
+  switch (lv.pattern) {
+    case "faixas":
+      for (const y of [-0.16, 0.16]) g.fillRect(-2.4, y - 0.045, 4.8, 0.09);
+      break;
+    case "lateral":
+      for (const s of [-1, 1]) poly([[-2.2, 0.3 * s], [0.4, 0.44 * s], [0.45, 0.6 * s], [-2.2, 0.42 * s]]);
+      break;
+    case "chevron":
+      for (const dx of [0, -0.75]) poly([[-1.0 + dx, -0.75], [0.25 + dx, 0], [-1.0 + dx, 0.75], [-1.3 + dx, 0.75], [-0.05 + dx, 0], [-1.3 + dx, -0.75]]);
+      break;
+    case "diagonal":
+      for (let x = -2.4; x < 2.5; x += 0.5) poly([[x, -0.8], [x + 0.18, -0.8], [x + 0.58, 0.8], [x + 0.4, 0.8]]);
+      break;
+    case "dividida":
+      g.fillRect(-2.5, -1, 1.95, 2);
+      break;
+    case "degrade": {
+      const gr = g.createLinearGradient(2.4, 0, -2.4, 0);
+      gr.addColorStop(0, c);
+      gr.addColorStop(0.55, c + "66");
+      gr.addColorStop(1, c + "00");
+      g.fillStyle = gr;
+      g.fillRect(-2.5, -1, 5, 2);
+      break;
+    }
+    case "flechas":
+      for (const s of [-1, 1]) poly([[2.35, 0.02 * s], [0.9, 0.16 * s], [-0.4, 0.62 * s], [-0.55, 0.5 * s], [0.75, 0.1 * s]]);
+      break;
+    case "pontas":
+      g.fillRect(1.25, -0.3, 1.3, 0.6);
+      for (const s of [-1, 1]) poly([[-0.75, 0.66 * s], [0.45, 0.4 * s], [0.45, 0.5 * s], [-0.75, 0.75 * s]]);
+      g.fillRect(-2.5, -0.3, 0.45, 0.6);
+      break;
+  }
+  g.restore();
 }
 
 /** safety car: esportivo amarelo (estilo superesportivo italiano), giroflex no teto */

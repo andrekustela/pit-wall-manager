@@ -22,13 +22,18 @@ export interface EntrantOptions {
   /** níveis de desenvolvimento de cada equipe (campeonato) */
   dev?: Record<string, DevLevels>;
   trackIndex?: number;
+  /** pinturas personalizadas das equipes dos jogadores */
+  liveries?: Record<string, import("./livery").Livery>;
 }
 
 /** no modo igual todo mundo tem carro e piloto equivalentes */
 const EQUAL_SKILL = 0.25;
 
 export function buildEntrants(opts: EntrantOptions): { teams: Team[]; drivers: Driver[] } {
-  const teams = TEAMS.map((t) => {
+  const teams = TEAMS.map((t0) => {
+    // pintura do jogador: troca as cores da equipe em tudo (carro, tabela, painéis)
+    const liv = opts.liveries?.[t0.id];
+    const t = liv ? { ...t0, color: liv.base, accent: liv.accent, livery: liv } : t0;
     const base = opts.equalCars ? 0 : t.carPace;
     const lv = opts.dev?.[t.id];
     if (!lv) return { ...t, name: opts.teamNames?.[t.id]?.trim() || t.name, carPace: base };

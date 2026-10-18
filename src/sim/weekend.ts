@@ -19,6 +19,7 @@ export interface WeekendInfo {
   engineers: Record<string, Engineer>;
   lineup?: Lineup;
   dev?: Record<string, DevLevels>;
+  liveries?: Record<string, import("./livery").Livery>;
 }
 
 /** condições da pista no fim de semana (vento, ondulação, temperatura) */

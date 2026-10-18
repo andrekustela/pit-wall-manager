@@ -10,6 +10,8 @@ import { CREW_DEFAULT, CREW_MAX, crewErrorChance, crewStopTime, fmtLap } from ".
 import { CIRCUITS } from "../sim/track";
 import { devInner } from "./devPanel";
 import { driverCardHtml } from "./driverCard";
+import { editMyLivery } from "./liveryEditor";
+import { emblemSvg } from "../render/emblem";
 import { drawTrackThumb, esc, teamDrivers, teamName, teamOfDriver, updateWaitBar } from "./common";
 
 type Tab = "resumo" | "fabrica" | "mecanicos" | "trofeus" | "pilotos" | "mercado";
@@ -49,6 +51,7 @@ export class HqScreen {
     if (rep && !rep.disabled) this.conn.send({ t: "repairEngine", carId: rep.dataset.repair! });
     const crew = t.closest<HTMLButtonElement>("[data-crew]");
     if (crew && !crew.disabled) this.conn.send({ t: "upgradeCrew" });
+    if (t.closest("#hq-livery")) editMyLivery(this.me().teamId ?? "", teamName(this.lobby, this.me().teamId ?? ""), this.conn);
     if (t.closest("#hq-season")) this.conn.send({ t: "newSeason" });
     const rn = t.closest<HTMLButtonElement>("[data-renew]");
     if (rn && !rn.disabled) this.conn.send({ t: "renewDriver", carId: rn.dataset.renew! });
@@ -81,16 +84,16 @@ export class HqScreen {
     const ch = l.champ!;
     const me = this.me();
     const team = me.teamId ?? "";
-    const tcol = TEAMS.find((t) => t.id === team)?.color ?? "#fff";
+    const tcol = me.livery?.base ?? TEAMS.find((t) => t.id === team)?.color ?? "#fff";
     const pts = ch.devPts[team] ?? 0;
     const body =
       this.tab === "resumo" ? this.resumo() : this.tab === "fabrica" ? devInner(l) : this.tab === "mecanicos" ? this.mecanicos() : this.tab === "trofeus" ? this.trofeus() : this.tab === "mercado" ? this.mercado() : this.pilotos();
     this.root.innerHTML = `
       <div class="screen"><div class="wrap hq">
         <div class="hqhead" style="border-left-color:${tcol}">
-          <div><div class="hint" style="margin:0">SEDE DA EQUIPE · ${esc(ch.name ?? "Campeonato")}</div>
+          <div class="accname">${me.livery ? emblemSvg(me.livery.emblem, 64) : ""}<div><div class="hint" style="margin:0">SEDE DA EQUIPE · ${esc(ch.name ?? "Campeonato")}</div>
             <h1 class="title" style="margin:2px 0 0">${esc(teamName(l, team).toUpperCase())}</h1>
-            <div class="hint" style="margin:4px 0 0">Temporada ${ch.season ?? 1} · ${ch.finished ? "temporada encerrada" : `etapa ${ch.results.length} de ${ch.rounds.length} concluída`} · engenheiro ${esc(me.name)}</div></div>
+            <div class="hint" style="margin:4px 0 0">Temporada ${ch.season ?? 1} · ${ch.finished ? "temporada encerrada" : `etapa ${ch.results.length} de ${ch.rounds.length} concluída`} · engenheiro ${esc(me.name)} · <button class="btn small" id="hq-livery">🎨 PINTURA E EMBLEMA</button></div></div></div>
           <div class="hqpts"><span class="devpts">${pts}</span><span>pontos de<br>desenvolvimento</span></div>
         </div>
         <div class="seg hqtabs">${[...TABS, ...(ch.finished ? ([["mercado", "MERCADO"]] as [Tab, string][]) : [])].map(([k, n]) => `<button data-hqtab="${k}" class="${k === this.tab ? "on" : ""} ${k === "mercado" ? "hot" : ""}">${n}</button>`).join("")}</div>

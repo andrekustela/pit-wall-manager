@@ -10,6 +10,7 @@ import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
 import { clampTuning, type QualiLap } from "../sim/tuning";
+import { cleanLivery, type Livery } from "../sim/livery";
 import { ALL_COMPOUNDS, DEFAULT_TUNING, FUEL_MAX, type CarSetup, type Tuning } from "../sim/types";
 import { PRACTICE_LAPS, practiceLap, runQualifying, weekendWeather, type WeekendInfo } from "../sim/weekend";
 import {
@@ -39,6 +40,8 @@ interface Player {
   practiceLaps: Record<string, QualiLap[]>;
   /** senha secreta pra voltar pra sala se a conexão cair */
   token: string;
+  /** pintura do carro e emblema que o jogador criou */
+  livery?: Livery;
 }
 
 export type Send = (playerId: string, msg: ServerMsg) => void;
@@ -285,6 +288,14 @@ export class Room {
     if (!p) return;
     const isHost = this.hostId === id;
     switch (msg.t) {
+      case "livery": {
+        // pintura do carro/emblema: vale a partir do próximo fim de semana (e já aparece no lobby)
+        const lv = cleanLivery(msg.livery);
+        p.livery = lv ?? undefined;
+        if (this.weekend && this.phase === "practice" && p.teamId && lv) this.weekend.liveries = { ...(this.weekend.liveries ?? {}), [p.teamId]: lv };
+        this.broadcastLobby();
+        break;
+      }
       case "profile":
         if (this.phase !== "lobby") return;
         p.name = clean(msg.name, 18) || p.name;
@@ -546,6 +557,7 @@ export class Room {
       engineers,
       lineup: this.lineup,
       dev: ch ? JSON.parse(JSON.stringify(ch.dev)) : undefined,
+      liveries: Object.fromEntries(players.filter((p) => p.teamId && p.livery).map((p) => [p.teamId!, p.livery!])),
     };
     if (ch) engineCheck(ch, this.lineup, new Set(players.map((p) => p.teamId!)));
     this.setPhase("practice");
@@ -617,6 +629,7 @@ export class Room {
       engineers: w.engineers,
       lineup: w.lineup,
       dev: w.dev,
+      liveries: w.liveries,
       engineStart: this.champ ? { ...this.champ.engines } : undefined,
       engineWearMult: this.champ ? CHAMP_ENGINE_WEAR : undefined,
       crew: this.champ?.crew ? { ...this.champ.crew } : undefined,
@@ -718,6 +731,7 @@ export class Room {
         teamName: p.teamName,
         teamId: p.teamId,
         connected: p.connected,
+        livery: p.livery,
         ready: p.ready,
       })),
     };

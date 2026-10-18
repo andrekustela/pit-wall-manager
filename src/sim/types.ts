@@ -15,6 +15,8 @@ export interface Team {
   /** desenvolvimento do campeonato: multiplicadores de desgaste */
   tyreWear?: number;
   engineWear?: number;
+  /** pintura personalizada (equipe de jogador) */
+  livery?: import("./livery").Livery;
 }
 
 export interface Driver {

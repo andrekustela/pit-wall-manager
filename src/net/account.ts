@@ -36,6 +36,8 @@ export interface Profile {
   stats: Partial<PlayerStats>;
   /** campeonatos salvos (id -> save) */
   champs: Record<string, unknown> | null;
+  /** pintura do carro e emblema */
+  livery?: unknown;
   /** melhor volta em cada pista (índice da pista -> tempo e piloto) */
   laps?: Record<string, { time: number; driver: string }>;
 }
@@ -147,7 +149,7 @@ class Account {
       } catch {
         champs = null;
       }
-      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {} };
+      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {}, livery: d.livery ?? null };
       return;
     }
     const fresh: Profile = {
@@ -173,6 +175,12 @@ class Account {
 
   setNames(name: string, teamName: string) {
     if (this.profile && (this.profile.name !== name || this.profile.team_name !== teamName)) void this.save({ name, team_name: teamName });
+  }
+
+  /** pintura do carro e emblema na conta */
+  saveLivery(livery: unknown) {
+    void this.save({ livery });
+    void this.publish();
   }
 
   /** campeonatos salvos na nuvem (junto do perfil) */
@@ -211,7 +219,7 @@ class Account {
     const p = this.profile;
     await setDoc(
       doc(F().db, "leaderboard", this.user.uid),
-      { name: p.name, team_name: p.team_name, stats: { ...EMPTY_STATS, ...p.stats }, laps: p.laps ?? {}, updated_at: serverTimestamp() },
+      { name: p.name, team_name: p.team_name, stats: { ...EMPTY_STATS, ...p.stats }, laps: p.laps ?? {}, livery: p.livery ?? null, updated_at: serverTimestamp() },
       { merge: true },
     ).catch((e) => console.warn("ranking: não publicou", e));
   }

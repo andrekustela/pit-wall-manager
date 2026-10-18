@@ -7,6 +7,9 @@ import { mountInstallButton } from "./install";
 import { deleteSave, listSaves, renameSave } from "./saves";
 import { confirmDialog } from "./confirm";
 import { showRanking } from "./ranking";
+import { editMyLivery } from "./liveryEditor";
+import { getLivery } from "./liveryStore";
+import { emblemSvg } from "../render/emblem";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -59,13 +62,14 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     <div class="screen"><div class="wrap" style="max-width:720px">
       <div class="menuhead"><img class="menulogo" src="/brand/logo.png" alt="Pit Wall Manager"><div id="m-install"></div></div>
       <p class="sub">Você é o engenheiro-chefe. Os pilotos correm, você decide o acerto e a estratégia.</p>
-      ${account.profile ? `<div class="box accountbox"><div class="accounthead"><div><h3 style="margin:0">OLÁ, ${esc(account.profile.name.toUpperCase())}</h3>
-          <div class="hint" style="margin:2px 0 0">${account.profile.team_name ? `Equipe ${esc(account.profile.team_name)}` : "Equipe com o nome original"}</div></div>
-          <div class="row-btns" style="margin:0"><button class="btn small primary" id="m-rank">🏆 RANKING</button><button class="btn small" id="m-edit">EDITAR PERFIL</button><button class="btn small" id="m-logout">SAIR DA CONTA</button></div></div>${statsHtml()}</div>` : ""}
+      ${account.profile ? `<div class="box accountbox"><div class="accounthead"><div class="accname">${getLivery() ? emblemSvg(getLivery()!.emblem, 52) : ""}<div><h3 style="margin:0">OLÁ, ${esc(account.profile.name.toUpperCase())}</h3>
+          <div class="hint" style="margin:2px 0 0">${account.profile.team_name ? `Equipe ${esc(account.profile.team_name)}` : "Equipe com o nome original"}</div></div></div>
+          <div class="row-btns" style="margin:0"><button class="btn small primary" id="m-rank">🏆 RANKING</button><button class="btn small" id="m-livery">🎨 PINTURA E EMBLEMA</button><button class="btn small" id="m-edit">EDITAR PERFIL</button><button class="btn small" id="m-logout">SAIR DA CONTA</button></div></div>${statsHtml()}</div>` : ""}
       <div class="box" id="m-profile" ${account.profile ? "hidden" : ""}>
         <h3>${account.profile ? "EDITAR PERFIL" : "SEU PERFIL"}</h3>
         <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="m-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
         <label class="fld"><span>Nome da equipe (opcional)</span><input class="txt" id="m-team" maxlength="24" placeholder="Ex.: Kustela Racing" value="${esc(team)}"></label>
+        ${account.profile ? "" : `<button class="btn small" id="m-livery">🎨 PINTURA E EMBLEMA</button>`}
       </div>
       ${cont}
       <div class="cols" style="margin-top:12px">
@@ -132,6 +136,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       showMenu(root, onChoose, onLogout);
     }
   });
+  root.querySelector("#m-livery")?.addEventListener("click", () => editMyLivery(storeGet("pwm.lastTeam") || "", account.profile?.team_name || storeGet("pwm.team"), undefined, () => showMenu(root, onChoose, onLogout)));
   mountInstallButton(root.querySelector<HTMLElement>("#m-install")!);
   root.querySelector("#m-solo")!.addEventListener("click", () => onChoose({ mode: "solo", ...get() }));
   root.querySelector("#m-create")!.addEventListener("click", () => onChoose({ mode: "create", ...get() }));

@@ -18,6 +18,7 @@ import { StrategyScreen } from "./ui/strategy";
 import { showDraft } from "./ui/draft";
 import { HqScreen } from "./ui/hq";
 import { ReplayRecorder, showReplay } from "./render/replay";
+import { getLivery } from "./ui/liveryStore";
 import { ChatWidget } from "./ui/chat";
 import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
@@ -132,6 +133,9 @@ class App {
     if (c.mode === "rejoin") conn.send({ t: "rejoin", code: c.code!, token: c.token!, v });
     if (c.mode === "create" || onlineResume) conn.send({ t: "create", name: c.name, teamName: c.teamName, v, resume: onlineResume ? c.save : undefined });
     if (c.mode === "join") conn.send({ t: "join", code: c.code!, name: c.name, teamName: c.teamName, v });
+    // a pintura do carro/emblema do jogador vai junto
+    const liv = getLivery();
+    if (liv) conn.send({ t: "livery", livery: liv });
   }
 
   private leave() {

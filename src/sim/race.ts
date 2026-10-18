@@ -61,6 +61,8 @@ export interface RaceOptions {
   engineStart?: Record<string, number>;
   /** multiplicador do desgaste do motor (no campeonato gasta menos por corrida) */
   engineWearMult?: number;
+  /** pinturas personalizadas (equipes dos jogadores) */
+  liveries?: Record<string, import("./livery").Livery>;
   /** nível da equipe de mecânicos de cada equipe (0..5): pit stop mais rápido e com menos erro */
   crew?: Record<string, number>;
 }

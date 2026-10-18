@@ -4,13 +4,17 @@ import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { CIRCUITS } from "../sim/track";
 import { champRounds } from "../sim/championship";
-import { drawTrackThumb, esc, teamName } from "./common";
+import { drawTrackThumb, esc, storeSet, teamName } from "./common";
+import { editMyLivery } from "./liveryEditor";
+import { emblemSvg } from "../render/emblem";
 
 export class LobbyScreen {
   private el: HTMLElement;
   private thumbsDrawn = false;
+  private lobby: LobbyState;
 
   constructor(root: HTMLElement, private conn: Connection, lobby: LobbyState, onExit: () => void) {
+    this.lobby = lobby;
     const me = lobby.players.find((p) => p.id === lobby.you)!;
     root.innerHTML = `
       <div class="screen"><div class="wrap">
@@ -27,6 +31,7 @@ export class LobbyScreen {
             <h3>VOCÊ</h3>
             <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="l-name" maxlength="18" value="${esc(me.name)}"></label>
             <label class="fld" style="margin:0"><span>Nome da equipe (vazio = nome original)</span><input class="txt" id="l-team" maxlength="24" value="${esc(me.teamName)}"></label>
+            <button class="btn small" id="l-livery" style="margin-top:10px">🎨 PINTURA E EMBLEMA</button>
           </div>
           <div class="box" id="l-players" ${lobby.solo ? 'style="display:none"' : ""}></div>
         </div>
@@ -60,6 +65,10 @@ export class LobbyScreen {
       conn.send({ t: "startWeekend" });
     });
     root.querySelector("#l-exit")!.addEventListener("click", onExit);
+    root.querySelector("#l-livery")!.addEventListener("click", () => {
+      const cur = this.lobby.players.find((p) => p.id === this.lobby.you)!;
+      editMyLivery(cur.teamId ?? "", root.querySelector<HTMLInputElement>("#l-team")!.value, conn);
+    });
     // copiar o código ou o link de convite (o link abre o jogo com o código preenchido)
     root.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) =>
       b.addEventListener("click", async () => {
@@ -80,7 +89,10 @@ export class LobbyScreen {
   }
 
   update(lobby: LobbyState) {
+    this.lobby = lobby;
     const root = this.el;
+    const myTeam = lobby.players.find((p) => p.id === lobby.you)?.teamId;
+    if (myTeam) storeSet("pwm.lastTeam", myTeam);
     const isHost = lobby.hostId === lobby.you;
     const me = lobby.players.find((p) => p.id === lobby.you)!;
     const owner = (teamId: string) => lobby.players.find((p) => p.teamId === teamId);
@@ -88,7 +100,7 @@ export class LobbyScreen {
     root.querySelector("#l-players")!.innerHTML = `<h3>JOGADORES (${lobby.players.length})</h3><div class="plist">${lobby.players
       .map((p) => {
         const t = TEAMS.find((x) => x.id === p.teamId);
-        return `<div style="border-left-color:${t?.color ?? "#333"}"><b>${esc(p.name)}</b> ${esc(p.teamName || t?.name || "")}
+        return `<div style="border-left-color:${p.livery?.base ?? t?.color ?? "#333"}">${p.livery ? emblemSvg(p.livery.emblem, 22) + " " : ""}<b>${esc(p.name)}</b> ${esc(p.teamName || t?.name || "")}
           <span class="tag">${p.id === lobby.hostId ? "host" : ""}</span></div>`;
       })
       .join("")}</div>`;
@@ -107,7 +119,9 @@ export class LobbyScreen {
     }).join("");
     teams.querySelectorAll<HTMLCanvasElement>("canvas[data-sprite]").forEach((cv) => {
       // mesma imagem da corrida, sem esticar (mantém a proporção)
-      const img = carImage(TEAMS.find((t) => t.id === cv.dataset.sprite)!).canvas;
+      const t = TEAMS.find((x) => x.id === cv.dataset.sprite)!;
+      const lv = owner(t.id)?.livery;
+      const img = carImage(lv ? { ...t, color: lv.base, accent: lv.accent, livery: lv } : t).canvas;
       const k = Math.min(cv.width / img.width, cv.height / img.height);
       const w = img.width * k, h = img.height * k;
       cv.getContext("2d")!.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);

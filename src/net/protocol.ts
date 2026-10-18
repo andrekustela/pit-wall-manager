@@ -17,6 +17,8 @@ export interface LobbyPlayer {
   teamId: string | null;
   connected: boolean;
   ready: boolean;
+  /** pintura do carro e emblema (se o jogador personalizou) */
+  livery?: import("../sim/livery").Livery;
 }
 
 export interface WeekendPublic {
@@ -72,6 +74,7 @@ export type ClientMsg =
   | { t: "repairEngine"; carId: string }
   | { t: "upgradeCrew" }
   | { t: "newSeason" }
+  | { t: "livery"; livery: import("../sim/livery").Livery | null }
   | { t: "renewDriver"; carId: string }
   | { t: "signDriver"; outId: string; inId: string }
   | { t: "newEngine"; carId: string }

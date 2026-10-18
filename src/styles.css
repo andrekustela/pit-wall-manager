@@ -720,3 +720,28 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .mkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .mkfree { border: 2px solid var(--line); padding: 10px; background: #141924; }
 .mkhead { display: flex; flex-direction: column; gap: 2px; }
+
+/* editor de pintura */
+.livbox { width: min(980px, 96vw); max-height: 94vh; overflow-y: auto; }
+.livgrid { display: grid; grid-template-columns: 280px 1fr; gap: 18px; }
+@media (max-width: 760px) { .livgrid { grid-template-columns: 1fr; } }
+.livprev { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.livcar { width: 260px; height: 340px; border: 2px solid var(--line); display: block; }
+.livemb { line-height: 0; }
+.livname { font-family: var(--pix); font-size: 13px; }
+.livsec { margin-bottom: 14px; }
+.livsec > b { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; font-family: var(--pix); }
+.livcols { display: flex; gap: 14px; flex-wrap: wrap; }
+.livcol { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #c9d1e0; cursor: pointer; }
+.livcol input[type=color] { width: 54px; height: 38px; border: 2px solid var(--line); background: none; padding: 0; cursor: pointer; }
+.livpal { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.livpalb { width: 30px; height: 30px; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+.livpalb:hover { border-color: #fff; }
+.livpats { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.livpat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; background: #141924; border: 2px solid var(--line); cursor: pointer; font-size: 10px; color: #c9d1e0; }
+.livpat canvas { width: 96px; height: 40px; }
+.livpat.on, .livopt.on { border-color: #fff; background: #1f2737; }
+.livopts { display: flex; gap: 6px; flex-wrap: wrap; }
+.livopt { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px; background: #141924; border: 2px solid var(--line); cursor: pointer; font-size: 10px; color: #c9d1e0; min-width: 64px; }
+.emblem { display: inline-block; vertical-align: middle; }
+.accname { display: flex; align-items: center; gap: 12px; }
