@@ -943,3 +943,9 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .m2btn.mode.on { background: linear-gradient(90deg, #e8202a, #b3141c); border-color: #ff5a60; border-left-color: #fff; }
 .m2btn.mode.on span { color: rgba(255,255,255,.85); }
 .m2btn.mode.on i { color: #fff; }
+.m2trackrec { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; margin-top: 4px; font-family: var(--font); letter-spacing: 0; min-height: 36px; }
+.m2trackrec .t { font-family: var(--pix); font-size: 18px; color: var(--med); letter-spacing: .04em; }
+.m2trackrec span { font-size: 13px; color: rgba(233,237,245,.75); }
+.m2trackrec .none { color: rgba(233,237,245,.4); }
+.profbox .seg button:disabled { opacity: .4; cursor: not-allowed; }
+.m2trackrec span { letter-spacing: 0; }

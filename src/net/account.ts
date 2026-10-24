@@ -38,10 +38,19 @@ export interface Profile {
   champs: Record<string, unknown> | null;
   /** pintura do carro e emblema */
   livery?: unknown;
-  /** melhor volta em cada pista (índice da pista -> tempo e piloto) */
-  laps?: Record<string, { time: number; driver: string }>;
+  /** melhor volta em cada pista (índice da pista -> tempo, piloto e quando) */
+  laps?: Record<string, LapRec>;
+  /** o mesmo, contando só corridas online */
+  lapsOnline?: Record<string, LapRec>;
   /** amigos (ids das contas) */
   friends?: string[];
+}
+
+/** recorde de volta numa pista (at = quando, em ms; recordes antigos não têm) */
+export interface LapRec {
+  time: number;
+  driver: string;
+  at?: number;
 }
 
 export const EMPTY_STATS: PlayerStats = { races: 0, wins: 0, podiums: 0, poles: 0, points: 0, dnfs: 0, titles: 0, champs: 0, best: null };
@@ -151,7 +160,7 @@ class Account {
       } catch {
         champs = null;
       }
-      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {}, livery: d.livery ?? null, friends: Array.isArray(d.friends) ? d.friends : [] };
+      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {}, lapsOnline: d.lapsOnline ?? {}, livery: d.livery ?? null, friends: Array.isArray(d.friends) ? d.friends : [] };
       void this.publish(); // aparece pros amigos (e no ranking) assim que entra
       return;
     }
@@ -195,14 +204,19 @@ class Account {
   }
 
   /** soma o resultado de uma corrida nas estatísticas */
-  recordRace(r: { finish: number | null; pole: boolean; points: number; title?: boolean; champDone?: boolean; lap?: { track: number; time: number; driver: string } }) {
+  recordRace(r: { finish: number | null; pole: boolean; points: number; title?: boolean; champDone?: boolean; online?: boolean; lap?: { track: number; time: number; driver: string } }) {
     if (!this.profile) return;
     const s = { ...EMPTY_STATS, ...this.profile.stats };
     // recorde de volta por pista (pro ranking entre amigos)
     if (r.lap && r.lap.time > 0) {
-      const laps = (this.profile.laps ??= {});
       const k = String(r.lap.track);
-      if (!laps[k] || r.lap.time < laps[k].time) laps[k] = { time: Math.round(r.lap.time * 1000) / 1000, driver: r.lap.driver };
+      const rec = { time: Math.round(r.lap.time * 1000) / 1000, driver: r.lap.driver, at: Date.now() };
+      const laps = (this.profile.laps ??= {});
+      if (!laps[k] || r.lap.time < laps[k].time) laps[k] = rec;
+      if (r.online) {
+        const lo = (this.profile.lapsOnline ??= {});
+        if (!lo[k] || r.lap.time < lo[k].time) lo[k] = rec;
+      }
     }
     s.races++;
     if (r.finish === null) s.dnfs++;
@@ -215,7 +229,7 @@ class Account {
     s.points += r.points;
     if (r.champDone) s.champs++;
     if (r.title) s.titles++;
-    void this.save({ stats: s, laps: this.profile.laps ?? {} });
+    void this.save({ stats: s, laps: this.profile.laps ?? {}, lapsOnline: this.profile.lapsOnline ?? {} });
     void this.publish();
   }
 
@@ -225,7 +239,7 @@ class Account {
     const p = this.profile;
     await setDoc(
       doc(F().db, "leaderboard", this.user.uid),
-      { name: p.name, team_name: p.team_name, stats: { ...EMPTY_STATS, ...p.stats }, laps: p.laps ?? {}, livery: p.livery ?? null, updated_at: serverTimestamp() },
+      { name: p.name, team_name: p.team_name, stats: { ...EMPTY_STATS, ...p.stats }, laps: p.laps ?? {}, lapsOnline: p.lapsOnline ?? {}, livery: p.livery ?? null, updated_at: serverTimestamp() },
       { merge: true },
     ).catch((e) => console.warn("ranking: não publicou", e));
   }
@@ -263,7 +277,7 @@ class Account {
       const snap = await getDocs(collection(F().db, "leaderboard"));
       return snap.docs.map((d) => {
         const x = d.data();
-        return { id: d.id, name: x.name ?? "?", team_name: x.team_name ?? "", stats: { ...EMPTY_STATS, ...(x.stats ?? {}) }, laps: x.laps ?? {}, livery: x.livery ?? null, updated: x.updated_at?.toMillis?.() ?? 0 };
+        return { id: d.id, name: x.name ?? "?", team_name: x.team_name ?? "", stats: { ...EMPTY_STATS, ...(x.stats ?? {}) }, laps: x.laps ?? {}, lapsOnline: x.lapsOnline ?? {}, livery: x.livery ?? null, updated: x.updated_at?.toMillis?.() ?? 0 };
       });
     } catch (e) {
       if ((e as { code?: string }).code === "permission-denied") return null;
@@ -277,7 +291,8 @@ export interface RankRow {
   name: string;
   team_name: string;
   stats: PlayerStats;
-  laps: Record<string, { time: number; driver: string }>;
+  laps: Record<string, LapRec>;
+  lapsOnline?: Record<string, LapRec>;
   livery?: unknown;
   /** última vez que entrou ou correu (ms) */
   updated?: number;

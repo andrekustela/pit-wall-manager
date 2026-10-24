@@ -1,6 +1,7 @@
 import "./fonts.css";
 import "./styles.css";
 import { enterScreen, wipe } from "./ui/transition";
+import { saveLocalLap } from "./ui/records";
 import { sound } from "./audio/sound";
 import { music } from "./audio/music";
 import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
@@ -268,11 +269,15 @@ class App {
 
   /** soma a corrida nas estatísticas da conta (melhor carro da sua equipe) */
   private recordStats(l: LobbyState, race: Race) {
-    if (!account.profile || this.recorded === race.opts.seed) return;
+    if (this.recorded === race.opts.seed) return;
     this.recorded = race.opts.seed;
     const my = this.myTeam();
     const order = race.ordered();
     const mine = order.map((c, i) => ({ c, i })).filter((x) => x.c.team.id === my);
+    // melhor volta da sua equipe: recorde no navegador (vale também sem conta)
+    const bestCar = mine.map((x) => x.c).filter((c) => c.bestLap).sort((a, b) => a.bestLap! - b.bestLap!)[0];
+    if (bestCar) saveLocalLap(race.opts.trackIndex, bestCar.bestLap!, bestCar.driver.name, !l.solo);
+    if (!account.profile) return;
     const fin = mine.filter((x) => !x.c.retired).map((x) => x.i + 1);
     const points = mine.reduce((a, x) => a + (x.c.retired ? 0 : (POINTS[x.i] ?? 0)), 0);
     const ch = l.champ;
@@ -288,11 +293,9 @@ class App {
       points,
       champDone: !!ch?.finished,
       title,
-      lap: (() => {
-        // melhor volta da sua equipe (vira recorde no ranking se for a sua melhor ali)
-        const best = mine.map((x) => x.c).filter((c) => c.bestLap).sort((a, b) => a.bestLap! - b.bestLap!)[0];
-        return best ? { track: race.opts.trackIndex, time: best.bestLap!, driver: best.driver.name } : undefined;
-      })(),
+      online: !l.solo,
+      // melhor volta da sua equipe (vira recorde no ranking se for a sua melhor ali)
+      lap: bestCar ? { track: race.opts.trackIndex, time: bestCar.bestLap!, driver: bestCar.driver.name } : undefined,
     });
   }
 

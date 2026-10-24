@@ -12,6 +12,8 @@ import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
 import { mountMenuBackdrop, trackIndexByName } from "./menuBg";
 import { showFriends } from "./friends";
+import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
+import { fmtLap } from "../sim/race";
 
 /** sessão online guardada pra voltar pra sala se a conexão cair */
 export interface Session {
@@ -105,23 +107,41 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         </div>
         <div class="m2right"><div class="m2panel" id="m-panel" hidden></div></div>
       </div>
-      <div class="m2trackname"><span>PISTA EM DESTAQUE</span><b id="m-trackname">${esc((CIRCUITS[bgTrack]?.name ?? "").toUpperCase())}</b></div>
+      <div class="m2trackname"><span>PISTA EM DESTAQUE</span><b id="m-trackname">${esc((CIRCUITS[bgTrack]?.name ?? "").toUpperCase())}</b><div class="m2trackrec" id="m-trackrec"></div></div>
     </div>`;
 
   // ----- fundo: pista troca a cada volta, com a faixa varrendo e o nome deslizando -----
   const stripe = root.querySelector<HTMLElement>(".m2stripe")!;
   const nameEl = root.querySelector<HTMLElement>("#m-trackname")!;
+  const recEl = root.querySelector<HTMLElement>("#m-trackrec")!;
+  // recordes de volta (do jeito que o jogador escolheu no perfil): começa só com os locais e completa quando o ranking chegar
+  let recs: (t: number) => TrackRecord[] = () => [];
+  let shown = bgTrack;
+  const recHtml = (idx: number) => {
+    const r = recs(idx)[0];
+    if (!r) return `<span class="none">sem tempo nesta pista ainda</span>`;
+    const when = r.at ? new Date(r.at).toLocaleDateString("pt-BR") : "";
+    return `<span class="t">⏱ ${fmtLap(r.time)}</span><span>${esc(r.who)}${when ? ` · ${when}` : ""}</span>`;
+  };
+  void loadRecords().then((f) => {
+    recs = f;
+    if (recEl.isConnected) recEl.innerHTML = recHtml(shown);
+  });
   mountMenuBackdrop(root.querySelector<HTMLCanvasElement>(".menubg")!, bgTrack, stripe, (idx) => {
+    shown = idx;
     const out = nameEl.animate([{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-8px)", opacity: 0 }], { duration: 160, easing: "ease-out", fill: "forwards" });
+    recEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: "forwards" });
     out.onfinish = () => {
       nameEl.textContent = (CIRCUITS[idx]?.name ?? "").toUpperCase();
+      recEl.innerHTML = recHtml(idx);
+      recEl.animate([{ transform: "translateY(8px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], { duration: 300, delay: 80, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "forwards" });
       nameEl.animate([{ transform: "translateY(10px)", opacity: 0, filter: "blur(2px)" }, { transform: "translateY(0)", opacity: 1, filter: "blur(0)" }], {
         duration: 260,
         easing: "cubic-bezier(0.23, 1, 0.32, 1)",
         fill: "forwards",
       });
     };
-  });
+  }, (idx) => recs(idx).map((r) => r.who));
 
   // ----- painéis (campeonatos / carreira e ranking) -----
   const panel = root.querySelector<HTMLElement>("#m-panel")!;
@@ -252,6 +272,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
 function showProfileEditor(onDone: () => void, onLogout?: () => void) {
   const name = account.profile?.name ?? storeGet("pwm.name");
   const team = account.profile?.team_name ?? storeGet("pwm.team");
+  const rp = getRecPrefs();
+  if (!account.profile) rp.scope = "meu"; // sem conta só dá pra ver os próprios tempos
   const m = document.createElement("div");
   m.className = "helpmodal";
   m.innerHTML = `<div class="helpbox panel profbox">
@@ -259,6 +281,12 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
       <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="p-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
       <label class="fld"><span>Nome da equipe (vazio = nome original)</span><input class="txt" id="p-team" maxlength="24" placeholder="Ex.: Kustela Racing" value="${esc(team)}"></label>
       <button class="m2btn small profliv" data-liv><b>🎨 PINTURA DO CARRO E EMBLEMA</b><i>▶</i></button>
+      <h3 class="m2psub">RECORDES NO MENU</h3>
+      <p class="hint" style="margin:-2px 0 8px">Embaixo do nome da pista aparece o melhor tempo e, na pista, os 3 melhores.</p>
+      <div class="fld"><span>Contar tempos de</span><div class="seg" data-recmode>
+        <button data-v="todos" class="${rp.mode === "todos" ? "on" : ""}">TODOS OS MODOS</button><button data-v="online" class="${rp.mode === "online" ? "on" : ""}">SÓ ONLINE</button></div></div>
+      <div class="fld" style="margin:0"><span>Mostrar o melhor tempo</span><div class="seg" data-recscope>
+        <button data-v="meu" class="${rp.scope === "meu" ? "on" : ""}">SÓ MEU</button><button data-v="amigos" class="${rp.scope === "amigos" ? "on" : ""}" ${account.profile ? "" : "disabled"}>DOS AMIGOS</button><button data-v="todos" class="${rp.scope === "todos" ? "on" : ""}" ${account.profile ? "" : "disabled"}>DE TODOS</button></div></div>
       ${account.profile ? `<p class="hint" style="margin:12px 0 0">Conta: ${esc(account.user?.email ?? "")} · código de amigo <b>${account.friendCode()}</b></p>` : `<p class="hint" style="margin:12px 0 0">Sem conta: o perfil fica só neste navegador.</p>`}
       <div class="row-btns" style="justify-content:space-between;margin-top:14px">
         ${account.profile ? `<button class="btn" data-logout>SAIR DA CONTA</button>` : "<span></span>"}
@@ -282,6 +310,8 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
     storeSet("pwm.name", n);
     storeSet("pwm.team", t);
     if (n) account.setNames(n, t);
+    const pick = (sel: string) => m.querySelector<HTMLElement>(`${sel} .on`)?.dataset.v;
+    setRecPrefs({ mode: (pick("[data-recmode]") as RecMode) ?? rp.mode, scope: (pick("[data-recscope]") as RecScope) ?? rp.scope });
     close();
     onDone();
   };
@@ -290,6 +320,8 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
   m.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t === m || t.closest("[data-x]")) return close();
+    const seg = t.closest<HTMLButtonElement>("[data-recmode] button, [data-recscope] button");
+    if (seg && !seg.disabled) seg.parentElement!.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === seg));
     if (t.closest("[data-save]")) return save();
     if (t.closest("[data-logout]")) {
       close();

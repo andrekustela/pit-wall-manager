@@ -70,7 +70,14 @@ interface Scene {
  * Monta o fundo no canvas. `stripe` é a faixa vermelha (o fundo move ela durante a
  * troca). `onTrack(idx)` avisa quando a pista nova começa a entrar.
  */
-export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, stripe?: HTMLElement | null, onTrack?: (idx: number) => void) {
+export function mountMenuBackdrop(
+  cv: HTMLCanvasElement,
+  trackIndex: number,
+  stripe?: HTMLElement | null,
+  onTrack?: (idx: number) => void,
+  /** nomes pros 3 carros (1º, 2º e 3º melhor tempo da pista) */
+  labels?: (idx: number) => string[],
+) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const g = cv.getContext("2d")!;
   let grid: HTMLCanvasElement | null = null;
@@ -79,7 +86,7 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, str
   const build = (idx: number, t0: number): Scene => {
     const tr = geo(idx);
     const [minX, minY, maxX, maxY] = tr.bounds;
-    const areaX = W * 0.42, areaW = W * 0.54, areaY = H * 0.12, areaH = H * 0.72;
+    const areaX = W * 0.47, areaW = W * 0.44, areaY = H * 0.17, areaH = H * 0.58;
     const sc = Math.min(areaW / (maxX - minX), areaH / (maxY - minY));
     const map = { sc, ox: areaX + (areaW - (maxX - minX) * sc) / 2 - minX * sc, oy: areaY + (areaH - (maxY - minY) * sc) / 2 - minY * sc };
     const layer = document.createElement("canvas");
@@ -108,9 +115,19 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, str
     l.strokeStyle = "rgba(233,237,245,0.85)";
     l.lineWidth = 2;
     l.stroke(path);
-    const s0 = pointAt(tr, 0);
-    l.fillStyle = "#fff";
-    l.fillRect(map.ox + s0.x * map.sc - 2, map.oy + s0.y * map.sc - 9, 4, 18);
+    // linha de largada: atravessa a pista (perpendicular ao traçado), quadriculada
+    const a0 = pointAt(tr, 0), a1 = pointAt(tr, 0.002);
+    const ang = Math.atan2(a1.y - a0.y, a1.x - a0.x);
+    l.save();
+    l.translate(map.ox + a0.x * map.sc, map.oy + a0.y * map.sc);
+    l.rotate(ang);
+    const cw = 4, rows = 6; // 2 colunas x 6 linhas de quadradinhos
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < 2; c++) {
+        l.fillStyle = (r + c) % 2 ? "#0b0e15" : "#ffffff";
+        l.fillRect(-cw + c * cw, -rows * cw / 2 + r * cw, cw, cw);
+      }
+    l.restore();
     return { tr, layer, map, t0 };
   };
 
@@ -156,12 +173,11 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, str
     g.drawImage(s.layer, 0, 0);
     g.setTransform(dpr, 0, 0, dpr, dx * dpr, 0);
     const t = ((frozenAt ?? now) - s.t0) / 1000;
-    for (const r of RUNNERS) {
+    const names = labels?.(s.tr.idx) ?? [];
+    RUNNERS.forEach((r, ri) => {
       const u = r.start + t * r.speed;
-      if (u < 0) continue; // ainda não largou
       for (let k = 14; k >= 0; k--) {
-        const uk = u - k * 0.0035;
-        if (uk < 0) continue;
+        const uk = u - k * 0.0035; // antes da largada fica no fim da volta (enfileirado atrás da linha)
         const p = pointAt(s.tr, uk);
         g.globalAlpha = alpha * (1 - k / 15) * 0.8;
         g.fillStyle = r.color;
@@ -178,7 +194,23 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, str
       g.arc(s.map.ox + p.x * s.map.sc, s.map.oy + p.y * s.map.sc, 2.4, 0, Math.PI * 2);
       g.fill();
       g.shadowBlur = 0;
-    }
+      // plaquinha com o nome (posição + nome) acima do carro
+      const nm = names[ri];
+      if (nm) {
+        const x = s.map.ox + p.x * s.map.sc, y = s.map.oy + p.y * s.map.sc - 14;
+        const txt = `${ri + 1}º ${nm.toUpperCase()}`;
+        g.font = "600 11px Oswald, sans-serif";
+        const w = g.measureText(txt).width + 10;
+        g.fillStyle = "rgba(8,10,16,0.85)";
+        g.fillRect(x - w / 2, y - 9, w, 16);
+        g.fillStyle = r.color;
+        g.fillRect(x - w / 2, y - 9, 2, 16);
+        g.fillStyle = "#fff";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(txt, x + 1, y);
+      }
+    });
     g.restore();
   };
 
