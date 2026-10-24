@@ -13,7 +13,7 @@ import { emblemSvg } from "../render/emblem";
 import { LAP_OPTIONS } from "../net/protocol";
 import { champRounds } from "../sim/championship";
 import { mountTrackPicker } from "./trackPicker";
-import { mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
+import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen } from "./transition";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
@@ -83,8 +83,7 @@ type Panel = "solo" | "online" | "carreira" | "solo-tipo" | "cfg-corrida" | "cfg
 const PARENT: Record<string, Panel> = { solo: null, online: null, carreira: null, "solo-tipo": "solo", "cfg-corrida": "solo-tipo", "cfg-fds": "solo-tipo", "cfg-camp": "solo-tipo" };
 /** painel aberto (continua aberto quando o menu é redesenhado, ex.: depois de renomear) */
 let openPanel: Panel = null;
-/** pista do fundo e começo da volta dela: o menu redesenhado (ex.: salvar o perfil) continua de onde estava */
-let bgMemo: { idx: number; t0: number } | null = null;
+
 
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -101,8 +100,9 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   if (invite && !openPanel) openPanel = "online";
 
   // pista do fundo: sorteada (as próximas também vêm sorteadas, a cada volta)
-  const bgTrack = bgMemo?.idx ?? Math.floor(Math.random() * CIRCUITS.length);
-  if (!bgMemo) bgMemo = { idx: bgTrack, t0: performance.now() };
+  // (a memória faz o menu redesenhado — ex.: salvar o perfil — continuar a mesma pista e a mesma volta)
+  const bgTrack = backdropMemo.v?.idx ?? Math.floor(Math.random() * CIRCUITS.length);
+  if (!backdropMemo.v) backdropMemo.v = { idx: bgTrack, t0: performance.now() };
 
   const champRows = (list: typeof saves) => list
     .map((s) => {
@@ -174,7 +174,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         fill: "forwards",
       });
     };
-  }, (idx) => recs(idx).map((r) => r.who), lock, bgMemo.t0, (idx, t0) => (bgMemo = { idx, t0 }));
+  }, (idx) => recs(idx).map((r) => r.who), lock, backdropMemo.v.t0, (idx, t0) => (backdropMemo.v = { idx, t0 }));
 
   // ----- vistas da coluna da esquerda: menu inicial ou um dos modos -----
   const homeHtml = () => `

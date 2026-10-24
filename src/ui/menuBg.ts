@@ -37,6 +37,9 @@ export function releaseStripe(lock: StripeLock) {
   f?.();
 }
 
+/** pista do fundo e começo da volta dela, compartilhada entre a tela de entrada e o menu */
+export const backdropMemo: { v: { idx: number; t0: number } | null } = { v: null };
+
 export function trackIndexByName(name: string): number {
   const i = CIRCUITS.findIndex((c) => c.name.toLowerCase().includes(name.toLowerCase()));
   return i >= 0 ? i : 0;

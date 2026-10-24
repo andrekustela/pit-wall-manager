@@ -1050,3 +1050,23 @@ body:has(#view) .helpbtns .vol { display: none; }
 body:has(.screen:not(.menu2)) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px; }
 .screen:not(.menu2) { padding-top: 64px; padding-bottom: 40px; }
 body:has(.screen:not(.menu2)) .readyboard { top: 58px; }
+/* tela de entrada no formato do menu */
+.loginv2 .lgview { width: min(470px, 31vw); gap: 10px; }
+.loginv2 .logintabs { margin: 0; }
+.loginv2 .logintabs button { font-family: var(--pix); letter-spacing: .06em; font-size: 15px; padding: 10px; }
+.loginv2 .loginform { display: flex; flex-direction: column; gap: 10px; }
+.loginv2 .loginform .fld { margin: 0; }
+.loginv2 .loginform .fld > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.loginv2 .loginform .txt { background: rgba(13,17,25,.92); font-size: 16px; }
+.loginv2 .m2btn { width: 100%; clip-path: none; }
+.loginv2 .m2btn b { font-size: 22px; }
+.loginv2 .m2btn.google { grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; background: #f4f6fa; border-color: #fff; border-left-color: #c9d1e0; color: #1d2331; }
+.loginv2 .m2btn.google b { font-size: 18px; }
+.loginv2 .m2btn.google i { color: #5a6680; grid-column: auto; grid-row: auto; }
+.loginv2 .m2btn.google svg { grid-row: 1; }
+.loginv2 .m2btn.google:hover { background: #fff; }
+.loginv2 .loginlinks { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
+.loginv2 .lgnote { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+.loginv2 .loginmsg:empty { display: none; }
+@media (max-width: 980px) { .loginv2 .lgview { width: 100%; } }
+body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px; }
