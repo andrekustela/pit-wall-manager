@@ -1039,3 +1039,4 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .calcard.next { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .calcard.next .calinfo { color: var(--accent); font-family: var(--pix); letter-spacing: .08em; }
 @media (prefers-reduced-motion: reduce) { .calcard { animation: none; } }
+.hbtn.home { font-size: 18px; }

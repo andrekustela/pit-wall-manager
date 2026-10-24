@@ -86,11 +86,16 @@ export class HelpWidget {
   private el: HTMLElement;
   private modal: HTMLElement | null = null;
 
-  constructor(private currentTab: () => Tab) {
+  /** `onHome`: botão de voltar ao menu (só aparece quando `showHome()` diz que está num jogo) */
+  constructor(private currentTab: () => Tab, onHome?: () => void, showHome?: () => boolean) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
+    this.el.innerHTML = `<button class="hbtn home" data-home title="Voltar ao menu" hidden>⌂</button><button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
+    const home = this.el.querySelector<HTMLButtonElement>("[data-home]")!;
+    home.addEventListener("click", () => onHome?.());
+    // aparece só fora do menu (checagem barata, 2x por segundo)
+    if (onHome && showHome) setInterval(() => (home.hidden = !showHome()), 500);
     this.el.querySelector("[data-help]")!.addEventListener("click", () => this.open(this.currentTab()));
     this.el.querySelector("[data-mute]")!.addEventListener("click", () => sound.toggleMute());
     this.el.querySelector("[data-full]")!.addEventListener("click", () => toggleFullscreen());

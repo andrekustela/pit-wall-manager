@@ -70,6 +70,27 @@ class App {
   private guest = false;
   private recorded = -1;
 
+  /** está numa tela de jogo (não no menu/login)? */
+  inGame(): boolean {
+    return !!this.conn && this.screenPhase !== "menu";
+  }
+
+  /** botão ⌂: volta pro menu (pergunta antes; campeonato fica salvo) */
+  async exitToMenu() {
+    if (!this.inGame()) return;
+    const l = this.lobby;
+    const text = l?.champ
+      ? "O campeonato fica salvo: você continua de onde parou em Modo solo / Modo online."
+      : l && !l.solo
+        ? "Você sai da sala online (a IA assume o seu carro)."
+        : "Este jogo vai ser encerrado.";
+    const ok = await confirmDialog({ title: "Voltar ao menu", icon: "⌂", text, ok: "IR PRO MENU", cancel: "CONTINUAR JOGANDO" });
+    if (ok && this.inGame()) {
+      this.autoSetup = null;
+      this.leave();
+    }
+  }
+
   helpTab(): HelpTab {
     const p = this.screenPhase;
     return p === "practice" ? "treino" : p === "strategy" || p === "quali" ? "estrategia" : p === "race" ? "corrida" : "jogo";
@@ -458,7 +479,11 @@ class App {
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
-  new HelpWidget(() => appInst.helpTab());
+  new HelpWidget(
+    () => appInst.helpTab(),
+    () => appInst.exitToMenu(),
+    () => appInst.inGame(),
+  );
   // áudio só é liberado depois de um clique; aproveita pra fazer o "tic" dos botões
   document.addEventListener("pointerdown", (e) => {
     sound.unlock();
