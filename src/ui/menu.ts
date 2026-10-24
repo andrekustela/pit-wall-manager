@@ -48,7 +48,6 @@ const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)")
 export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, onLogout?: () => void) {
   const redraw = () => showMenu(root, onChoose, onLogout);
   const saves = listSaves();
-  const sess = loadJson<Session>("pwm.session");
   const liv = getLivery();
   const myName = () => account.profile?.name || storeGet("pwm.name") || "";
   const myTeam = () => (account.profile ? account.profile.team_name : storeGet("pwm.team"));
@@ -93,19 +92,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         <div class="m2left">
           <div class="m2logowrap"><img class="m2logo" src="/brand/logo.png" alt="Pit Wall Manager"></div>
           <p class="m2tag">A estratégia de corrida é sua. <b>Você é o engenheiro-chefe.</b></p>
-          <div class="m2acc">
-            ${liv ? emblemSvg(liv.emblem, 46) : `<div class="m2noemb">${esc((myName() || "?").slice(0, 1).toUpperCase())}</div>`}
-            <div class="m2accinfo"><div class="m2hi">${myName() ? `OLÁ, ${esc(myName().toUpperCase())}` : "ENGENHEIRO SEM NOME"}</div>
-              <div class="m2team">${myTeam() ? esc(myTeam()) : "Equipe com o nome original"}${account.profile ? "" : " · sem conta"}</div></div>
-            <button class="m2gear" id="m-edit" title="Editar perfil e pintura">⚙</button>
-          </div>
-          <nav class="m2nav">
-            <button class="m2btn mode ${openPanel === "solo" ? "on" : ""}" data-panel="solo"><b>MODO SOLO</b><span>Você contra 9 equipes da IA${soloSaves.length ? ` · ${soloSaves.length} campeonato${soloSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
-            <button class="m2btn mode ${sess ? "alert" : ""}" data-panel="online"><b>MODO ONLINE</b><span>${sess ? `Conexão caiu: volte pra sala ${esc(sess.code)}` : `Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}`}</span><i>▶</i></button>
-            <button class="m2btn mode" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
-          </nav>
+          <div class="m2stage" id="m-stage"></div>
         </div>
-        <div class="m2right"><div class="m2panel" id="m-panel" hidden></div></div>
       </div>
       <div class="m2trackname"><span>PISTA EM DESTAQUE</span><b id="m-trackname">${esc((CIRCUITS[bgTrack]?.name ?? "").toUpperCase())}</b><div class="m2trackrec" id="m-trackrec"></div></div>
     </div>`;
@@ -143,38 +131,46 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     };
   }, (idx) => recs(idx).map((r) => r.who));
 
-  // ----- painéis (campeonatos / carreira e ranking) -----
-  const panel = root.querySelector<HTMLElement>("#m-panel")!;
+  // ----- vistas da coluna da esquerda: menu inicial ou um dos modos -----
+  const homeHtml = () => `
+    <div class="m2acc">
+      ${liv ? emblemSvg(liv.emblem, 46) : `<div class="m2noemb">${esc((myName() || "?").slice(0, 1).toUpperCase())}</div>`}
+      <div class="m2accinfo"><div class="m2hi">${myName() ? `OLÁ, ${esc(myName().toUpperCase())}` : "ENGENHEIRO SEM NOME"}</div>
+        <div class="m2team">${myTeam() ? esc(myTeam()) : "Equipe com o nome original"}${account.profile ? "" : " · sem conta"}</div></div>
+      <button class="m2gear" id="m-edit" title="Editar perfil e pintura">⚙</button>
+    </div>
+    <nav class="m2nav">
+      <button class="m2btn mode" data-panel="solo"><b>MODO SOLO</b><span>Você contra 9 equipes da IA${soloSaves.length ? ` · ${soloSaves.length} campeonato${soloSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
+      <button class="m2btn mode" data-panel="online"><b>MODO ONLINE</b><span>Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
+      <button class="m2btn mode" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
+    </nav>`;
+  const head = (t: string) => `<div class="m2vhead"><button class="m2back" data-back>◀ VOLTAR</button><b>${t}</b></div>`;
   const panelHtml = (p: Panel) => {
     if (p === "solo")
-      return `<div class="m2phead"><b>MODO SOLO</b><button class="btn small" data-pclose>✕</button></div>
+      return `${head("MODO SOLO")}
         <button class="m2btn hot" id="m-solo"><b>NOVO JOGO SOLO</b><span>Fim de semana avulso ou campeonato novo (escolha nas regras)</span><i>▶</i></button>
         <h3 class="m2psub">SEUS CAMPEONATOS SOLO</h3>
         <div class="m2plist">${champRows(soloSaves) || `<p class="hint">Nenhum ainda. Em <b>Novo jogo solo</b>, ligue "Campeonato" nas regras.</p>`}</div>`;
     if (p === "online")
-      return `<div class="m2phead"><b>MODO ONLINE</b><button class="btn small" data-pclose>✕</button></div>
-        ${sess ? `<button class="m2btn rejoin" id="m-rejoin"><b>VOLTAR PRA SALA ${esc(sess.code)}</b><span>A conexão caiu? A IA cuidou do seu carro enquanto isso.</span><i>▶</i></button>
-          <button class="btn small" id="m-forget" style="margin:6px 0 4px">ESQUECER ESSA SALA</button>` : ""}
+      return `${head("MODO ONLINE")}
         <button class="m2btn hot" id="m-create"><b>CRIAR SALA</b><span>Você é o host: passe o código pros amigos</span><i>▶</i></button>
         <div class="m2join"><input class="txt" id="m-code" maxlength="4" placeholder="CÓDIGO"><button class="m2btn small" id="m-join"><b>ENTRAR NUMA SALA</b><i>▶</i></button></div>
         <h3 class="m2psub">SEUS CAMPEONATOS ONLINE</h3>
         <div class="m2plist">${champRows(onlineSaves) || `<p class="hint">Nenhum ainda. Quem cria a sala com "Campeonato" ligado fica com o campeonato salvo e pode continuar depois.</p>`}</div>`;
     if (p === "carreira")
-      return `<div class="m2phead"><b>CARREIRA E RANKING</b><button class="btn small" data-pclose>✕</button></div>
+      return `${head("CARREIRA E RANKING")}
         <div class="seg m2ptabs"><button data-ctab="carreira" class="on">SUA CARREIRA</button><button data-ctab="ranking">RANKING</button></div>
         <div class="m2pbody" id="m-cbody">${account.profile ? statsHtml() : `<p class="hint">Sem conta as estatísticas não ficam salvas. Entre com uma conta (e-mail ou Google) pela tela inicial pra ter carreira, ranking e amigos.</p>`}</div>`;
     return "";
   };
-  const bindPanel = () => {
-    panel.querySelector("[data-pclose]")?.addEventListener("click", () => setPanel(null));
-    panel.querySelector("#m-solo")?.addEventListener("click", () => choose({ mode: "solo", ...get() }));
-    panel.querySelector("#m-create")?.addEventListener("click", () => choose({ mode: "create", ...get() }));
-    panel.querySelector("#m-rejoin")?.addEventListener("click", () => choose({ mode: "rejoin", ...get(), code: sess!.code, token: sess!.token }));
-    panel.querySelector("#m-forget")?.addEventListener("click", () => {
-      storeSet("pwm.session", "");
-      redraw();
-    });
-    const codeInp = panel.querySelector<HTMLInputElement>("#m-code");
+
+  const bindView = (el: HTMLElement) => {
+    el.querySelectorAll<HTMLElement>("[data-panel]").forEach((bt) => bt.addEventListener("click", () => show(bt.dataset.panel as Panel)));
+    el.querySelector("[data-back]")?.addEventListener("click", () => show(null));
+    el.querySelector("#m-edit")?.addEventListener("click", () => showProfileEditor(redraw, onLogout));
+    el.querySelector("#m-solo")?.addEventListener("click", () => choose({ mode: "solo", ...get() }));
+    el.querySelector("#m-create")?.addEventListener("click", () => choose({ mode: "create", ...get() }));
+    const codeInp = el.querySelector<HTMLInputElement>("#m-code");
     if (codeInp) {
       const join = () => {
         const code = codeInp.value.trim().toUpperCase();
@@ -183,18 +179,18 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         if (!reduceMotion())
           codeInp.animate([{ transform: "translateX(0)" }, { transform: "translateX(-6px)" }, { transform: "translateX(6px)" }, { transform: "translateX(-3px)" }, { transform: "translateX(0)" }], { duration: 260, easing: "ease-out" });
       };
-      panel.querySelector("#m-join")!.addEventListener("click", join);
+      el.querySelector("#m-join")!.addEventListener("click", join);
       codeInp.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && join());
       if (invite) {
         codeInp.value = invite;
-        const jb = panel.querySelector<HTMLElement>("#m-join")!;
+        const jb = el.querySelector<HTMLElement>("#m-join")!;
         jb.classList.add("hot");
         jb.querySelector("b")!.textContent = `ENTRAR NA SALA ${invite}`;
       }
     }
-    panel.querySelectorAll<HTMLElement>(".m2champ").forEach((row) => {
+    el.querySelectorAll<HTMLElement>(".m2champ").forEach((row) => {
       const id = row.dataset.cid!;
-      const save = saves.find((s) => s.champ.id === id)!;
+      const save = saves.find((x) => x.champ.id === id)!;
       row.querySelector("[data-cplay]")!.addEventListener("click", () => choose({ mode: "resume", ...get(), save }));
       row.querySelector("[data-crename]")!.addEventListener("click", () => {
         const n = window.prompt("Novo nome do campeonato:", save.champ.name ?? "");
@@ -210,62 +206,97 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         redraw();
       });
     });
-    panel.querySelectorAll<HTMLElement>("[data-ctab]").forEach((b) =>
-      b.addEventListener("click", () => {
-        panel.querySelectorAll("[data-ctab]").forEach((x) => x.classList.toggle("on", x === b));
-        const body = panel.querySelector<HTMLElement>("#m-cbody")!;
-        if (b.dataset.ctab === "ranking") {
+    el.querySelectorAll<HTMLElement>("[data-ctab]").forEach((bt) =>
+      bt.addEventListener("click", () => {
+        el.querySelectorAll("[data-ctab]").forEach((x) => x.classList.toggle("on", x === bt));
+        const body = el.querySelector<HTMLElement>("#m-cbody")!;
+        if (bt.dataset.ctab === "ranking") {
           if (account.profile) void fillRanking(body, (account.profile.friends?.length ?? 0) > 0);
           else body.innerHTML = `<p class="hint">O ranking é entre jogadores com conta. Entre com uma conta pela tela inicial.</p>`;
         } else body.innerHTML = account.profile ? statsHtml() : `<p class="hint">Sem conta as estatísticas não ficam salvas.</p>`;
       }),
     );
   };
-  const setPanel = (p: Panel, animate = true) => {
-    const was = openPanel;
-    openPanel = was === p ? null : p;
-    root.querySelectorAll<HTMLElement>("[data-panel]").forEach((b) => b.classList.toggle("on", b.dataset.panel === openPanel));
-    const show = () => {
-      if (!openPanel) {
-        panel.hidden = true;
-        return;
-      }
-      panel.innerHTML = panelHtml(openPanel);
-      panel.hidden = false;
-      bindPanel();
-      if (animate && !reduceMotion())
-        panel.animate([{ transform: "translateX(28px)", opacity: 0, filter: "blur(3px)" }, { transform: "translateX(0)", opacity: 1, filter: "blur(0)" }], {
-          duration: 260,
-          easing: "cubic-bezier(0.23, 1, 0.32, 1)",
-        });
+
+  /**
+   * Troca a vista da esquerda. A faixa vermelha sai do lugar dela e varre a coluna
+   * da direita pra esquerda: atrás dela (à direita) já é a vista nova, na frente
+   * (à esquerda) ainda a antiga — igual à troca de pista do fundo.
+   */
+  const stage = root.querySelector<HTMLElement>("#m-stage")!;
+  const VIEW_MS = 560;
+  const TAN = Math.tan((18 * Math.PI) / 180);
+  const easeIO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  let busy = false;
+  const show = (v: Panel, animate = true) => {
+    if (busy) return;
+    openPanel = v;
+    const neu = document.createElement("div");
+    neu.className = v ? "m2view m2pview" : "m2view";
+    neu.innerHTML = v ? panelHtml(v) : homeHtml();
+    bindView(neu);
+    const old = stage.firstElementChild as HTMLElement | null;
+    if (!old || !animate || reduceMotion()) {
+      stage.replaceChildren(neu);
+      return;
+    }
+    busy = true;
+    neu.classList.add("swapping");
+    stage.appendChild(neu);
+    const fly = document.createElement("div");
+    fly.className = "m2stripe m2fly";
+    root.querySelector(".menu2")!.appendChild(fly);
+    stripe.style.opacity = "0";
+    const W = window.innerWidth, H = window.innerHeight;
+    const endTx = -(W * 0.375 + H * TAN * 0.6 + 80); // até a faixa sair pela esquerda
+    // ida (pra esquerda): a faixa vai apagando a vista antiga; volta (pra direita): a nova vai aparecendo atrás dela
+    const BACK_MS = 640;
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    neu.style.clipPath = "polygon(0 0, 0 0, 0 0)";
+    const t0 = performance.now();
+    const edge = (el: HTMLElement, tx: number) => {
+      // borda = centro da faixa (inclinada), em coordenadas do elemento, no topo e no pé dele
+      const xc = (y: number) => W * (0.33 + 0.045) + tx - TAN * (y - H * 0.55);
+      const r = stage.getBoundingClientRect();
+      return [xc(r.top) - r.left, xc(r.top + el.offsetHeight) - r.left];
     };
-    // fecha o anterior rapidinho antes de abrir o outro
-    if (was && !panel.hidden && animate && !reduceMotion()) {
-      const a = panel.animate([{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(16px)", opacity: 0 }], { duration: 140, easing: "ease-out" });
-      a.onfinish = show;
-    } else show();
+    const step = (now: number) => {
+      const t = now - t0;
+      if (t < VIEW_MS) {
+        const tx = endTx * easeIO(t / VIEW_MS);
+        fly.style.transform = `translateX(${tx}px) skewX(-18deg)`;
+        const [a, b] = edge(old, tx);
+        old.style.clipPath = `polygon(-20% 0, ${a}px 0, ${b}px 100%, -20% 100%)`;
+        return void requestAnimationFrame(step);
+      }
+      if (old.isConnected) old.remove();
+      const k = Math.min(1, (t - VIEW_MS) / BACK_MS);
+      const tx = endTx * (1 - easeOut(k));
+      fly.style.transform = `translateX(${tx}px) skewX(-18deg)`;
+      const [a, b] = edge(neu, tx);
+      neu.style.clipPath = `polygon(-20% 0, ${a}px 0, ${b}px 100%, -20% 100%)`;
+      if (k < 1) return void requestAnimationFrame(step);
+      neu.classList.remove("swapping");
+      neu.style.clipPath = "";
+      fly.remove();
+      stripe.style.opacity = "";
+      busy = false;
+    };
+    requestAnimationFrame(step);
   };
-  root.querySelectorAll<HTMLElement>("[data-panel]").forEach((b) => b.addEventListener("click", () => setPanel(b.dataset.panel as Panel)));
-  if (openPanel) {
-    const p = openPanel;
-    openPanel = null;
-    setPanel(p, false);
-  }
+  show(openPanel, false);
 
   // ----- escolher uma opção: o menu sai pra esquerda antes de trocar de tela -----
   const choose = (c: MenuChoice) => {
     const left = root.querySelector<HTMLElement>(".m2left");
     if (!left || reduceMotion()) return onChoose(c);
     left.style.pointerEvents = "none";
-    const a = left.animate([{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-40px)", opacity: 0 }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "forwards" });
-    panel.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: "forwards" });
-    a.onfinish = () => onChoose(c);
+    const an = left.animate([{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-40px)", opacity: 0 }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "forwards" });
+    an.onfinish = () => onChoose(c);
   };
 
   root.querySelector("#m-friends")!.addEventListener("click", () => showFriends(redraw));
-  root.querySelector("#m-edit")!.addEventListener("click", () => showProfileEditor(redraw, onLogout));
   mountInstallButton(root.querySelector<HTMLElement>("#m-install")!);
-
 }
 
 /** editar perfil (engrenagem): nome, equipe, pintura e sair da conta */

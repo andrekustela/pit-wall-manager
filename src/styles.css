@@ -949,3 +949,22 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .m2trackrec .none { color: rgba(233,237,245,.4); }
 .profbox .seg button:disabled { opacity: .4; cursor: not-allowed; }
 .m2trackrec span { letter-spacing: 0; }
+/* vistas da coluna da esquerda (menu inicial / modos), trocadas pela faixa vermelha */
+.m2stage { position: relative; }
+.m2view { display: flex; flex-direction: column; gap: 10px; }
+.m2view.swapping { position: absolute; top: 0; left: 0; right: 0; }
+.m2pview { width: min(470px, 31vw); }
+.m2pview .m2btn { width: 100%; clip-path: none; }
+.m2pview .m2btn b { font-size: 22px; }
+.m2pview .m2plist { max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.m2vhead { display: flex; align-items: center; gap: 14px; margin-bottom: 2px; }
+.m2vhead b { font-family: var(--pix); font-size: 30px; letter-spacing: .05em; }
+.m2back { font-family: var(--pix); font-size: 14px; letter-spacing: .08em; padding: 8px 12px; background: rgba(29,35,49,.9); border: 1px solid var(--line);
+  transition: transform 160ms var(--ease-out), border-color 160ms ease; }
+.m2back:hover { border-color: #5a6680; }
+.m2back:active { transform: scale(0.97); }
+.m2fly { z-index: 4; pointer-events: none; }
+.m2pview .m2psub { margin-top: 8px; }
+.m2pview .seg { margin: 0; }
+.m2fly.back { z-index: 0; } /* voltando: passa por trás do menu */
+.menu2 .m2 { z-index: 1; } /* o menu fica acima da faixa parada/voltando; na varrida (.m2fly) a faixa passa por cima */
