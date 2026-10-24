@@ -10,7 +10,7 @@ import { fillRanking } from "./ranking";
 import { editMyLivery } from "./liveryEditor";
 import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
-import { mountMenuBackdrop } from "./menuBg";
+import { mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -97,6 +97,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <div class="m2trackname"><span>PISTA EM DESTAQUE</span><b id="m-trackname">${esc((CIRCUITS[bgTrack]?.name ?? "").toUpperCase())}</b><div class="m2trackrec" id="m-trackrec"></div></div>
     </div>`;
 
+  // a faixa vermelha é uma só: o fundo e o menu revezam (o clique do jogador tem prioridade)
+  const lock: StripeLock = { owner: null };
   // ----- fundo: pista troca a cada volta, com a faixa varrendo e o nome deslizando -----
   const stripe = root.querySelector<HTMLElement>(".m2stripe")!;
   const nameEl = root.querySelector<HTMLElement>("#m-trackname")!;
@@ -128,7 +130,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         fill: "forwards",
       });
     };
-  }, (idx) => recs(idx).map((r) => r.who));
+  }, (idx) => recs(idx).map((r) => r.who), lock);
 
   // ----- vistas da coluna da esquerda: menu inicial ou um dos modos -----
   const homeHtml = () => `
@@ -227,8 +229,23 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   const TAN = Math.tan((18 * Math.PI) / 180);
   const easeIO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   let busy = false;
+  /** clique que chegou durante uma animação (vale o último) */
+  let pending: { v: Panel } | null = null;
+  const runPending = () => {
+    const p = pending;
+    pending = null;
+    if (p) show(p.v);
+  };
   const show = (v: Panel, animate = true) => {
-    if (busy) return;
+    // faixa ocupada: guarda o clique; se for a troca de pista, pede pra ela acabar rápido
+    if (animate && !reduceMotion() && (busy || lock.owner === "bg")) {
+      pending = { v };
+      if (lock.owner === "bg") {
+        lock.free = runPending;
+        lock.rush?.();
+      }
+      return;
+    }
     openPanel = v;
     const neu = document.createElement("div");
     neu.className = v ? "m2view m2pview" : "m2view";
@@ -240,6 +257,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       return;
     }
     busy = true;
+    lock.owner = "menu";
     neu.classList.add("swapping");
     stage.appendChild(neu);
     const fly = document.createElement("div");
@@ -280,6 +298,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       fly.remove();
       stripe.style.opacity = "";
       busy = false;
+      releaseStripe(lock);
+      runPending();
     };
     requestAnimationFrame(step);
   };

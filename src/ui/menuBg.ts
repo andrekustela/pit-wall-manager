@@ -17,6 +17,26 @@ const STRIPE_LEFT = 0.33, STRIPE_W = 0.09, STRIPE_CY = 0.55, SKEW = Math.tan((18
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
+/**
+ * Trava da faixa vermelha: o fundo (troca de pista) e o menu (troca de vista) usam a
+ * mesma faixa, então só um anima por vez. `rush` pede pro dono atual acelerar até o
+ * fim; `free` é chamado quando a faixa fica livre.
+ */
+export interface StripeLock {
+  owner: "menu" | "bg" | null;
+  rush?: () => void;
+  free?: () => void;
+}
+
+/** libera a faixa e avisa quem estava esperando */
+export function releaseStripe(lock: StripeLock) {
+  lock.owner = null;
+  lock.rush = undefined;
+  const f = lock.free;
+  lock.free = undefined;
+  f?.();
+}
+
 export function trackIndexByName(name: string): number {
   const i = CIRCUITS.findIndex((c) => c.name.toLowerCase().includes(name.toLowerCase()));
   return i >= 0 ? i : 0;
@@ -77,6 +97,7 @@ export function mountMenuBackdrop(
   onTrack?: (idx: number) => void,
   /** nomes pros 3 carros (1º, 2º e 3º melhor tempo da pista) */
   labels?: (idx: number) => string[],
+  lock: StripeLock = { owner: null },
 ) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const g = cv.getContext("2d")!;
@@ -157,7 +178,11 @@ export function mountMenuBackdrop(
 
   // troca: "exit" (faixa sai pela esquerda) -> "sweep" (nova faixa varre da direita)
   let phase: "run" | "exit" | "sweep" = "run";
-  let phaseT0 = 0;
+  /** progresso da fase atual (0..1); com pressa (o menu quer a faixa) as fases terminam rapidinho */
+  let pk = 0;
+  let last = performance.now();
+  let rushing = false;
+  let frozenAt = 0;
   const nextIdx = () => {
     let i = cur.tr.idx;
     while (CIRCUITS.length > 1 && i === cur.tr.idx) i = Math.floor(Math.random() * CIRCUITS.length);
@@ -235,12 +260,19 @@ export function mountMenuBackdrop(
   const frame = (now: number) => {
     if (!cv.isConnected) {
       window.removeEventListener("resize", onResize);
+      if (lock.owner === "bg") releaseStripe(lock);
       return;
     }
-    // líder completou a volta: começa a troca
-    if (phase === "run" && !reduce && RUNNERS[0].start + ((now - cur.t0) / 1000) * RUNNERS[0].speed >= 1) {
+    const dt = Math.min(100, now - last);
+    last = now;
+    // líder completou a volta: troca a pista — mas só se a faixa estiver livre (senão os carros seguem mais um pouco)
+    if (phase === "run" && !reduce && lock.owner === null && RUNNERS[0].start + ((now - cur.t0) / 1000) * RUNNERS[0].speed >= 1) {
       phase = "exit";
-      phaseT0 = now;
+      pk = 0;
+      rushing = false;
+      frozenAt = now;
+      lock.owner = "bg";
+      lock.rush = () => (rushing = true);
     }
 
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -251,28 +283,29 @@ export function mountMenuBackdrop(
       drawScene(cur, now, null, 0);
     } else if (phase === "exit") {
       // ida: a faixa vai pra direita apagando a pista antiga (só sobra o que ainda está à direita dela)
-      const k = Math.min(1, (now - phaseT0) / EXIT_MS);
-      const tx = easeInOut(k) * farRight();
+      pk = Math.min(1, pk + dt / (rushing ? 110 : EXIT_MS));
+      const tx = easeInOut(pk) * farRight();
       setStripe(tx);
-      drawScene(cur, now, rightOfStripe(tx), 0, phaseT0);
-      if (k >= 1) {
-        next = build(nextIdx(), now + SWEEP_MS * 0.35);
+      drawScene(cur, now, rightOfStripe(tx), 0, frozenAt);
+      if (pk >= 1) {
+        next = build(nextIdx(), now + (rushing ? 0 : SWEEP_MS * 0.35));
         onTrack?.(next.tr.idx);
         phase = "sweep";
-        phaseT0 = now;
+        pk = 0;
       }
     } else if (phase === "sweep" && next) {
       // volta: a faixa vem pra esquerda até o lugar dela, desenhando a pista nova por onde passa
-      const k = Math.min(1, (now - phaseT0) / SWEEP_MS);
-      const e = easeOut(k);
+      pk = Math.min(1, pk + dt / (rushing ? 140 : SWEEP_MS));
+      const e = easeOut(pk);
       const tx = farRight() * (1 - e);
       setStripe(tx);
       drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
-      if (k >= 1) {
+      if (pk >= 1) {
         cur = next;
         next = null;
         phase = "run";
         setStripe(0);
+        releaseStripe(lock);
       }
     }
     raf = requestAnimationFrame(frame);
