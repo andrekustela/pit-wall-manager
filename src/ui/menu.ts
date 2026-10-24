@@ -10,8 +10,12 @@ import { fillRanking } from "./ranking";
 import { editMyLivery } from "./liveryEditor";
 import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
+import { LAP_OPTIONS } from "../net/protocol";
+import { champRounds } from "../sim/championship";
+import { drawTrackThumb } from "./common";
 import { mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
+import { coverScreen } from "./transition";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
 
@@ -37,11 +41,50 @@ export interface MenuChoice {
   code?: string;
   token?: string;
   save?: ChampSave;
+  /** jogo solo montado no menu: começa direto (sem a tela de lobby) */
+  setup?: SoloSetup;
 }
 
-type Panel = "solo" | "online" | "carreira" | null;
+/** jogo solo escolhido no menu */
+export interface SoloSetup {
+  kind: "corrida" | "fds" | "campeonato";
+  /** carro (vaga) que a equipe do jogador usa */
+  teamId: string;
+  trackIndex: number;
+  laps: number;
+  realDrivers: boolean;
+  equalCars: boolean;
+  champPct: number;
+  champName: string;
+}
+
+/** últimas escolhas do jogo solo (o formulário já abre com elas) */
+interface SoloPrefs {
+  track: number; // -1 = sorteada
+  laps: number;
+  realDrivers: boolean;
+  equalCars: boolean;
+  champPct: number;
+}
+function soloPrefs(): SoloPrefs {
+  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[1] ?? LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30 };
+  const x = loadJson<Partial<SoloPrefs>>("pwm.soloCfg") ?? {};
+  return {
+    track: typeof x.track === "number" && (x.track === -1 || CIRCUITS[x.track]) ? x.track : d.track,
+    laps: LAP_OPTIONS.includes(x.laps as number) ? (x.laps as number) : d.laps,
+    realDrivers: x.realDrivers ?? d.realDrivers,
+    equalCars: x.equalCars ?? d.equalCars,
+    champPct: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(x.champPct as number) ? (x.champPct as number) : d.champPct,
+  };
+}
+
+type Panel = "solo" | "online" | "carreira" | "solo-tipo" | "cfg-corrida" | "cfg-fds" | "cfg-camp" | null;
+/** pra onde o "voltar" leva em cada vista */
+const PARENT: Record<string, Panel> = { solo: null, online: null, carreira: null, "solo-tipo": "solo", "cfg-corrida": "solo-tipo", "cfg-fds": "solo-tipo", "cfg-camp": "solo-tipo" };
 /** painel aberto (continua aberto quando o menu é redesenhado, ex.: depois de renomear) */
 let openPanel: Panel = null;
+/** pista do fundo e começo da volta dela: o menu redesenhado (ex.: salvar o perfil) continua de onde estava */
+let bgMemo: { idx: number; t0: number } | null = null;
 
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -58,7 +101,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   if (invite && !openPanel) openPanel = "online";
 
   // pista do fundo: sorteada (as próximas também vêm sorteadas, a cada volta)
-  const bgTrack = Math.floor(Math.random() * CIRCUITS.length);
+  const bgTrack = bgMemo?.idx ?? Math.floor(Math.random() * CIRCUITS.length);
+  if (!bgMemo) bgMemo = { idx: bgTrack, t0: performance.now() };
 
   const champRows = (list: typeof saves) => list
     .map((s) => {
@@ -130,7 +174,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         fill: "forwards",
       });
     };
-  }, (idx) => recs(idx).map((r) => r.who), lock);
+  }, (idx) => recs(idx).map((r) => r.who), lock, bgMemo.t0, (idx, t0) => (bgMemo = { idx, t0 }));
 
   // ----- vistas da coluna da esquerda: menu inicial ou um dos modos -----
   const homeHtml = () => `
@@ -158,6 +202,29 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         <div class="m2join"><input class="txt" id="m-code" maxlength="4" placeholder="CÓDIGO"><button class="m2btn small" id="m-join"><b>ENTRAR NUMA SALA</b><i>▶</i></button></div>
         <h3 class="m2psub">SEUS CAMPEONATOS ONLINE</h3>
         <div class="m2plist">${champRows(onlineSaves) || `<p class="hint">Nenhum ainda. Quem cria a sala com "Campeonato" ligado fica com o campeonato salvo e pode continuar depois.</p>`}</div>`;
+    if (p === "solo-tipo")
+      return `${head("NOVO JOGO SOLO")}
+        <p class="hint" style="margin:0 0 4px">Sua equipe: <b>${esc(myTeam() || "nome original")}</b>${myTeam() ? "" : " (dá pra dar um nome na ⚙)"}</p>
+        <button class="m2btn" data-panel="cfg-corrida"><b>CORRIDA ÚNICA</b><span>Direto pra estratégia e pra corrida (grid sorteado pelo ritmo)</span><i>▶</i></button>
+        <button class="m2btn" data-panel="cfg-fds"><b>FIM DE SEMANA</b><span>Treino livre, classificação Q1/Q2/Q3, estratégia e corrida</span><i>▶</i></button>
+        <button class="m2btn" data-panel="cfg-camp"><b>CAMPEONATO</b><span>Várias etapas, pontos, evolução do carro, mecânicos e troféus</span><i>▶</i></button>`;
+    if (p === "cfg-corrida" || p === "cfg-fds" || p === "cfg-camp") {
+      const sp = soloPrefs();
+      const camp = p === "cfg-camp";
+      const tracks = CIRCUITS.map((c, i) => ({ c, i })).sort((a, b) => a.c.name.localeCompare(b.c.name, "pt-BR"));
+      const toggle = (k: string, on: boolean, t: string, d: string) =>
+        `<label class="toggle m2tog"><input type="checkbox" data-opt="${k}" ${on ? "checked" : ""}><span><b>${t}</b><br><span class="hint" style="margin:0">${d}</span></span></label>`;
+      return `${head(p === "cfg-corrida" ? "CORRIDA ÚNICA" : p === "cfg-fds" ? "FIM DE SEMANA" : "CAMPEONATO")}
+        ${camp
+          ? `<label class="fld"><span>Nome do campeonato</span><input class="txt" data-opt="champName" maxlength="40" placeholder="Ex.: Temporada ${new Date().getFullYear()}"></label>
+             <div class="fld"><span>Quantas pistas</span><div class="seg pctseg" data-seg="champPct">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((x) => `<button data-v="${x}" class="${x === sp.champPct ? "on" : ""}" title="${champRounds(x)} etapas">${x}%</button>`).join("")}</div>
+             <span class="hint" style="margin:4px 0 0" data-rounds>${champRounds(sp.champPct)} etapas, em pistas sorteadas</span></div>`
+          : `<div class="fld"><span>Pista</span><div class="m2track"><select class="txt" data-opt="track"><option value="-1" ${sp.track === -1 ? "selected" : ""}>🎲 Sorteada na hora</option>${tracks.map(({ c, i }) => `<option value="${i}" ${i === sp.track ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select><canvas class="m2trackprev"></canvas></div></div>`}
+        <div class="fld"><span>Voltas da corrida</span><div class="seg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}">${n} VOLTAS</button>`).join("")}</div></div>
+        ${toggle("realDrivers", sp.realDrivers, "Lendas da F1", "Pilotos reais de todas as eras. Desligado = fictícios.")}
+        ${toggle("equalCars", sp.equalCars, "Carros iguais", "Todo mundo com o mesmo carro: ganha quem acerta e decide melhor.")}
+        <button class="m2btn hot" id="m-start" data-kind="${p === "cfg-corrida" ? "corrida" : p === "cfg-fds" ? "fds" : "campeonato"}"><b>COMEÇAR</b><span>${camp ? "1ª etapa: treino livre" : p === "cfg-fds" ? "Começa pelo treino livre" : "Vai direto pra estratégia"}</span><i>▶</i></button>`;
+    }
     if (p === "carreira")
       return `${head("CARREIRA E RANKING")}
         <div class="seg m2ptabs"><button data-ctab="carreira" class="on">SUA CARREIRA</button><button data-ctab="ranking">RANKING</button></div>
@@ -167,9 +234,62 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
 
   const bindView = (el: HTMLElement) => {
     el.querySelectorAll<HTMLElement>("[data-panel]").forEach((bt) => bt.addEventListener("click", () => show(bt.dataset.panel as Panel)));
-    el.querySelector("[data-back]")?.addEventListener("click", () => show(null));
+    el.querySelector("[data-back]")?.addEventListener("click", () => show(openPanel ? PARENT[openPanel] ?? null : null));
     el.querySelector("#m-edit")?.addEventListener("click", () => showProfileEditor(redraw, onLogout));
-    el.querySelector("#m-solo")?.addEventListener("click", () => choose({ mode: "solo", ...get() }));
+    el.querySelector("#m-solo")?.addEventListener("click", () => show("solo-tipo"));
+    // formulário do jogo solo
+    el.querySelectorAll<HTMLElement>("[data-seg]").forEach((seg) =>
+      seg.addEventListener("click", (e) => {
+        const bt = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
+        if (!bt) return;
+        seg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === bt));
+        const r = el.querySelector<HTMLElement>("[data-rounds]");
+        if (r && seg.dataset.seg === "champPct") r.textContent = `${champRounds(Number(bt.dataset.v))} etapas, em pistas sorteadas`;
+      }),
+    );
+    const sel = el.querySelector<HTMLSelectElement>("select[data-opt=track]");
+    const prev = el.querySelector<HTMLCanvasElement>(".m2trackprev");
+    const drawPrev = () => {
+      if (!sel || !prev) return;
+      const i = Number(sel.value);
+      if (i < 0) {
+        const g = prev.getContext("2d")!;
+        prev.width = prev.clientWidth;
+        prev.height = prev.clientHeight;
+        g.fillStyle = "#8a93a6";
+        g.font = "600 30px Oswald, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText("?", prev.width / 2, prev.height / 2);
+      } else drawTrackThumb(prev, i);
+    };
+    sel?.addEventListener("change", drawPrev);
+    if (sel) requestAnimationFrame(drawPrev);
+    el.querySelector("#m-start")?.addEventListener("click", (e) => {
+      const kind = (e.currentTarget as HTMLElement).dataset.kind as SoloSetup["kind"];
+      const segV = (k: string, d: number) => Number(el.querySelector<HTMLElement>(`[data-seg=${k}] .on`)?.dataset.v ?? d);
+      const chk = (k: string) => !!el.querySelector<HTMLInputElement>(`[data-opt=${k}]`)?.checked;
+      const sp = soloPrefs();
+      const prefs: SoloPrefs = {
+        track: sel ? Number(sel.value) : sp.track,
+        laps: segV("laps", sp.laps),
+        realDrivers: chk("realDrivers"),
+        equalCars: chk("equalCars"),
+        champPct: segV("champPct", sp.champPct),
+      };
+      storeSet("pwm.soloCfg", JSON.stringify(prefs));
+      const setup: SoloSetup = {
+        kind,
+        teamId: storeGet("pwm.myCar") || "fal",
+        trackIndex: prefs.track >= 0 ? prefs.track : Math.floor(Math.random() * CIRCUITS.length),
+        laps: prefs.laps,
+        realDrivers: prefs.realDrivers,
+        equalCars: prefs.equalCars,
+        champPct: prefs.champPct,
+        champName: el.querySelector<HTMLInputElement>("[data-opt=champName]")?.value.trim() ?? "",
+      };
+      choose({ mode: "solo", ...get(), setup });
+    });
     el.querySelector("#m-create")?.addEventListener("click", () => choose({ mode: "create", ...get() }));
     const codeInp = el.querySelector<HTMLInputElement>("#m-code");
     if (codeInp) {
@@ -307,11 +427,11 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
 
   // ----- escolher uma opção: o menu sai pra esquerda antes de trocar de tela -----
   const choose = (c: MenuChoice) => {
-    const left = root.querySelector<HTMLElement>(".m2left");
-    if (!left || reduceMotion()) return onChoose(c);
-    left.style.pointerEvents = "none";
-    const an = left.animate([{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-40px)", opacity: 0 }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "forwards" });
-    an.onfinish = () => onChoose(c);
+    if (busy || lock.owner) return; // a faixa está ocupada: espera a animação acabar
+    root.querySelector<HTMLElement>(".m2left")!.style.pointerEvents = "none";
+    lock.owner = "menu";
+    stripe.style.opacity = "0"; // a faixa que cobre a tela sai do lugar desta
+    void coverScreen().then(() => onChoose(c));
   };
 
   root.querySelector("#m-friends")!.addEventListener("click", () => showFriends(redraw));

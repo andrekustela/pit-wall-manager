@@ -1,6 +1,6 @@
 import "./fonts.css";
 import "./styles.css";
-import { enterScreen, wipe } from "./ui/transition";
+import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
 import { saveLocalLap } from "./ui/records";
 import { sound } from "./audio/sound";
 import { music } from "./audio/music";
@@ -13,7 +13,7 @@ import type { QualiResult } from "./sim/weekend";
 import { storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
 import { LobbyScreen } from "./ui/lobby";
-import { showMenu, type MenuChoice } from "./ui/menu";
+import { type SoloSetup, showMenu, type MenuChoice } from "./ui/menu";
 import { PodiumScreen } from "./ui/podium";
 import { PracticeScreen } from "./ui/practice";
 import { QualiScreen } from "./ui/quali";
@@ -100,8 +100,13 @@ class App {
       this.guest = false;
       this.menu();
     });
+    if (isCovered()) revealScreen(true); // a faixa para no lugar dela no menu
     if (AUTO) this.connect({ mode: "solo", name: "Teste", teamName: "Equipe Teste" });
   }
+
+  /** jogo solo montado no menu (tipo, pista, regras): começa direto, sem a tela de lobby */
+  private autoSetup: SoloSetup | null = null;
+  private autoRunning = false;
 
   private connect(c: MenuChoice, retry = 0) {
     // campeonato online salvo: cria uma sala nova no servidor com ele (os amigos entram pelo código)
@@ -140,6 +145,26 @@ class App {
     // a pintura do carro/emblema do jogador vai junto
     const liv = getLivery();
     if (liv) conn.send({ t: "livery", livery: liv });
+    // solo montado no menu: equipe, regras e já começa
+    this.autoSetup = c.setup ?? null;
+    this.autoRunning = false;
+    if (c.setup) {
+      const s = c.setup;
+      conn.send({ t: "team", teamId: s.teamId });
+      conn.send({ t: "profile", name: c.name, teamName: c.teamName });
+      conn.send({
+        t: "options",
+        laps: s.laps,
+        trackIndex: s.trackIndex,
+        realDrivers: s.realDrivers,
+        equalCars: s.equalCars,
+        champ: s.kind === "campeonato",
+        champPct: s.champPct,
+        champName: s.champName,
+        quick: s.kind === "corrida",
+      });
+      conn.send({ t: "startWeekend" });
+    }
   }
 
   private leave() {
@@ -217,12 +242,21 @@ class App {
       this.screen?.update?.(l);
       return;
     }
+    // jogo montado no menu: não mostra o lobby (nem antes de começar, nem no fim: volta pro menu)
+    if (l.phase === "lobby" && this.autoSetup) {
+      if (this.autoRunning) {
+        this.autoSetup = null;
+        this.autoRunning = false;
+        this.leave();
+      }
+      return;
+    }
+    if (this.autoSetup) this.autoRunning = true;
     if (l.phase === "race") return; // a corrida começa com a mensagem "start"
     if (l.phase === "quali" && !this.quali) return; // espera os tempos
     this.teardown();
     this.screenPhase = l.phase;
-    wipe();
-    queueMicrotask(() => enterScreen(app));
+    wipe(); // cobre na hora (ou já veio coberta pela faixa do menu); revela no fim, com a tela nova montada
     music.setPlaying(true); // fora da corrida: trilha tocando
     const conn = this.conn!;
     switch (l.phase) {
@@ -265,6 +299,8 @@ class App {
     }
     window.scrollTo(0, 0);
     updateWaitBar(l); // online: painel de quem já está pronto
+    revealScreen();
+    enterScreen(app);
   }
 
   /** soma a corrida nas estatísticas da conta (melhor carro da sua equipe) */
@@ -304,7 +340,9 @@ class App {
     music.setPlaying(false); // na corrida, só o som dos carros
     this.teardown();
     this.screenPhase = "race";
+    wipe();
     app.innerHTML = `<canvas id="view"></canvas>`;
+    revealScreen();
     const race = new Race(opts);
     const my = this.myTeam();
     const mine = race.cars.filter((c) => c.team.id === my).sort((a, b) => a.position - b.position);

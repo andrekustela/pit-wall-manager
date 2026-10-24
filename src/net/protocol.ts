@@ -81,7 +81,7 @@ export type ClientMsg =
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; champName?: string; realDrivers?: boolean }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; quick?: boolean; champName?: string; realDrivers?: boolean }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }

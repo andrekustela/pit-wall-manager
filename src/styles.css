@@ -968,3 +968,17 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .m2pview .seg { margin: 0; }
 .m2fly.back { z-index: 0; } /* voltando: passa por trás do menu */
 .menu2 .m2 { z-index: 1; } /* o menu fica acima da faixa parada/voltando; na varrida (.m2fly) a faixa passa por cima */
+/* transição entre telas: a faixa cobre (indo pra esquerda) e revela (voltando pra direita) */
+.tshade { position: fixed; inset: 0; z-index: 80; background: radial-gradient(ellipse at 70% 40%, #182034 0%, #0b0e15 62%, #07090d 100%); pointer-events: none; }
+.tband { position: fixed; top: -10vh; left: 33vw; width: 9vw; height: 130vh; z-index: 81; pointer-events: none; transform: skewX(-18deg);
+  background: linear-gradient(180deg, rgba(232,32,42,.35) 0%, rgba(232,32,42,.75) 45%, rgba(232,32,42,.4) 100%);
+  border-left: 2px solid rgba(255,90,96,.8); border-right: 2px solid rgba(255,90,96,.35); }
+/* formulário do jogo solo (no menu) */
+.m2pview .fld { margin: 0; }
+.m2pview .fld > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.m2track { display: grid; grid-template-columns: 1fr 130px; gap: 8px; align-items: stretch; }
+.m2track select { font-family: var(--font); font-size: 15px; }
+.m2trackprev { width: 130px; height: 64px; background: #0d1119; border: 1px solid var(--line); }
+.m2tog { align-items: flex-start; padding: 8px 10px; background: rgba(20,25,36,.7); border: 1px solid var(--line); }
+.m2pview .seg button { font-family: var(--pix); letter-spacing: .05em; }
+.m2pview .pctseg button { padding-left: 0; padding-right: 0; }

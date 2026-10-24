@@ -322,6 +322,7 @@ export class Room {
         if (msg.champName !== undefined) this.champName = clean(String(msg.champName), 40);
         if (msg.champPct !== undefined && [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(msg.champPct)) this.champPct = msg.champPct;
         if (msg.realDrivers !== undefined) this.realDrivers = !!msg.realDrivers;
+        if (msg.quick !== undefined) this.quick = !!msg.quick;
         this.broadcastLobby();
         break;
       case "startWeekend":
@@ -569,8 +570,16 @@ export class Room {
       liveries: Object.fromEntries(players.filter((p) => p.teamId && p.livery).map((p) => [p.teamId!, p.livery!])),
     };
     if (ch) engineCheck(ch, this.lineup, new Set(players.map((p) => p.teamId!)));
+    // corrida única: sem treino e sem classificação na tela (o grid sai de uma classificação simulada)
+    if (this.quick && !ch) {
+      this.startQuali();
+      this.setPhase("strategy");
+      return;
+    }
     this.setPhase("practice");
   }
+  /** corrida única: vai direto pra estratégia */
+  private quick = false;
 
   /** avança de fase quando todo mundo (conectado) está pronto */
   private checkAdvance() {

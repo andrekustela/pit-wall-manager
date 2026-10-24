@@ -98,6 +98,10 @@ export function mountMenuBackdrop(
   /** nomes pros 3 carros (1º, 2º e 3º melhor tempo da pista) */
   labels?: (idx: number) => string[],
   lock: StripeLock = { owner: null },
+  /** continuar uma volta já começada (quando o menu é redesenhado): início dela em performance.now() */
+  startT0?: number,
+  /** avisa a pista atual e quando a volta dela começou (pra continuar depois de redesenhar) */
+  onState?: (idx: number, t0: number) => void,
 ) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const g = cv.getContext("2d")!;
@@ -169,7 +173,7 @@ export function mountMenuBackdrop(
     l.lineWidth = 1;
     for (let x = 0; x < W; x += 48) { l.beginPath(); l.moveTo(x, 0); l.lineTo(x, H); l.stroke(); }
     for (let y = 0; y < H; y += 48) { l.beginPath(); l.moveTo(0, y); l.lineTo(W, y); l.stroke(); }
-    cur = build(cur ? cur.tr.idx : trackIndex, cur ? cur.t0 : performance.now());
+    cur = build(cur ? cur.tr.idx : trackIndex, cur ? cur.t0 : startT0 ?? performance.now());
     if (next) next = build(next.tr.idx, next.t0);
   };
   layout();
@@ -303,6 +307,7 @@ export function mountMenuBackdrop(
       if (pk >= 1) {
         cur = next;
         next = null;
+        onState?.(cur.tr.idx, cur.t0);
         phase = "run";
         setStripe(0);
         releaseStripe(lock);
