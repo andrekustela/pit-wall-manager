@@ -1040,3 +1040,13 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .calcard.next .calinfo { color: var(--accent); font-family: var(--pix); letter-spacing: .08em; }
 @media (prefers-reduced-motion: reduce) { .calcard { animation: none; } }
 .hbtn.home { font-size: 18px; }
+/* na corrida os botões do canto vão pra direita, logo acima do minimapa (lá só tem pista) */
+body:has(#view) .helpbtns { left: auto; right: 12px; bottom: 200px; flex-direction: row-reverse; }
+@media (max-width: 900px) { body:has(#view) .helpbtns { bottom: auto; top: 12px; } }
+body:has(#view) .helpbtns { flex-direction: column-reverse; align-items: flex-end; bottom: 196px; }
+body:has(#view) .helpbtns .vol { display: none; }
+/* telas do jogo (treino, classificação, estratégia, lobby, sede, pódio): botões no canto superior direito,
+   com espaço reservado no topo — a página rola por baixo sem nada ficar coberto */
+body:has(.screen:not(.menu2)) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px; }
+.screen:not(.menu2) { padding-top: 64px; padding-bottom: 40px; }
+body:has(.screen:not(.menu2)) .readyboard { top: 58px; }
