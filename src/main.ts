@@ -1,4 +1,6 @@
+import "./fonts.css";
 import "./styles.css";
+import { enterScreen, wipe } from "./ui/transition";
 import { sound } from "./audio/sound";
 import { music } from "./audio/music";
 import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
@@ -90,6 +92,7 @@ class App {
       });
       return;
     }
+    if (this.screenPhase && this.screenPhase !== "menu") wipe(); // voltando do jogo pro menu
     this.screenPhase = "menu";
     showMenu(app, (c) => this.connect(c), async () => {
       await account.signOut();
@@ -217,6 +220,8 @@ class App {
     if (l.phase === "quali" && !this.quali) return; // espera os tempos
     this.teardown();
     this.screenPhase = l.phase;
+    wipe();
+    queueMicrotask(() => enterScreen(app));
     music.setPlaying(true); // fora da corrida: trilha tocando
     const conn = this.conn!;
     switch (l.phase) {

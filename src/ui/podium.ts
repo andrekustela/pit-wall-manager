@@ -107,7 +107,7 @@ export class PodiumScreen {
       g.fillStyle = "#2b3242";
       g.fillRect(0, 62, W, 4);
       g.fillStyle = "#e8202a";
-      g.font = "8px Silkscreen, monospace";
+      g.font = "600 9px Oswald, sans-serif";
       g.textAlign = "center";
       g.fillText("PIT WALL MANAGER · GRANDE PRÊMIO", W / 2, 10);
       // chão
@@ -123,14 +123,14 @@ export class PodiumScreen {
         g.fillStyle = "#aeb4bf";
         g.fillRect(s.x - 26, baseY - s.h, 52, 3);
         g.fillStyle = "#1b2233";
-        g.font = "16px Silkscreen, monospace";
+        g.font = "700 17px Oswald, sans-serif";
         g.fillText(s.n, s.x, baseY - s.h + 22);
         // boneco
         const jump = s.n === "1" ? Math.abs(Math.sin(t * 4)) * 4 : s.n === "2" ? Math.abs(Math.sin(t * 3 + 1)) * 2 : 0;
         this.person(g, s.x, baseY - s.h - Math.round(jump), s.car, s.n === "1", t);
         // nome
         g.fillStyle = "#fff";
-        g.font = "8px Silkscreen, monospace";
+        g.font = "600 9px Oswald, sans-serif";
         g.fillText(s.car.driver.short, s.x, baseY + 12);
         g.fillStyle = s.car.team.color;
         g.fillRect(s.x - 12, baseY + 15, 24, 2);

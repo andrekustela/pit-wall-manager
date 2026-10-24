@@ -319,7 +319,7 @@ export class Renderer {
   }
 
   private label(o: CanvasRenderingContext2D, x: number, y: number, text: string, bg: string, fg: string, placed: { x: number; y: number; w: number }[]) {
-    o.font = "11px Silkscreen, monospace";
+    o.font = "600 12px Oswald, sans-serif";
     o.textAlign = "center";
     o.textBaseline = "middle";
     const w = Math.ceil(o.measureText(text).width) + 10;

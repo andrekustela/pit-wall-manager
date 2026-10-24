@@ -499,10 +499,10 @@ export class OnboardCam {
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.fillStyle = "#e9edf5";
-    g.font = `700 ${Math.max(6, Math.round(wh * 0.55))}px "Silkscreen", monospace`;
+    g.font = `700 ${Math.max(6, Math.round(wh * 0.55))}px "Oswald", sans-serif`;
     g.fillText(gear, -ww * 0.22, -wh * 0.27);
     g.fillStyle = "#9fe2ff";
-    g.font = `700 ${Math.max(5, Math.round(wh * 0.3))}px "Silkscreen", monospace`;
+    g.font = `700 ${Math.max(5, Math.round(wh * 0.3))}px "Oswald", sans-serif`;
     g.fillText(String(kmh), ww * 0.28, -wh * 0.27);
     // luzes de giro
     const inGear = kmh <= 20 ? kmh / 20 : ((kmh - 20) % 40) / 40;

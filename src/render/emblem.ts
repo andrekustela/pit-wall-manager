@@ -33,7 +33,7 @@ function symbol(e: Emblem): string {
     default: {
       const t = e.initials || "PW";
       const size = t.length >= 3 ? 30 : t.length === 2 ? 38 : 48;
-      return `<text x="50" y="${52 + size * 0.36}" text-anchor="middle" font-family="Silkscreen, Arial Black, sans-serif" font-weight="900" font-size="${size}" fill="${f}">${t.replace(/[<>&"]/g, "")}</text>`;
+      return `<text x="50" y="${52 + size * 0.36}" text-anchor="middle" font-family="Oswald, Arial Black, sans-serif" font-weight="700" font-size="${size}" fill="${f}">${t.replace(/[<>&"]/g, "")}</text>`;
     }
   }
 }

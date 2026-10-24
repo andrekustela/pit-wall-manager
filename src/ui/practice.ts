@@ -243,7 +243,7 @@ export class PracticeScreen {
       g.fillStyle = "#ffcc00";
       g.fillRect(x - 4, y - 4, 8, 8);
       g.fillStyle = "#fff";
-      g.font = "12px Silkscreen, monospace";
+      g.font = "600 13px Oswald, sans-serif";
       g.fillText(`${Math.round(prof.v[idx % track.L] * 3.6)} km/h`, 8, 16);
       if (f < 1) requestAnimationFrame(frame);
       else done();

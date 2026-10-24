@@ -40,6 +40,8 @@ export interface Profile {
   livery?: unknown;
   /** melhor volta em cada pista (índice da pista -> tempo e piloto) */
   laps?: Record<string, { time: number; driver: string }>;
+  /** amigos (ids das contas) */
+  friends?: string[];
 }
 
 export const EMPTY_STATS: PlayerStats = { races: 0, wins: 0, podiums: 0, poles: 0, points: 0, dnfs: 0, titles: 0, champs: 0, best: null };
@@ -149,7 +151,8 @@ class Account {
       } catch {
         champs = null;
       }
-      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {}, livery: d.livery ?? null };
+      this.profile = { id: this.user.uid, name: d.name ?? "Engenheiro", team_name: d.team_name ?? "", stats: d.stats ?? {}, champs, laps: d.laps ?? {}, livery: d.livery ?? null, friends: Array.isArray(d.friends) ? d.friends : [] };
+      void this.publish(); // aparece pros amigos (e no ranking) assim que entra
       return;
     }
     const fresh: Profile = {
@@ -161,6 +164,7 @@ class Account {
     };
     this.profile = fresh;
     await setDoc(this.ref(), { name: fresh.name, team_name: fresh.team_name, stats: {}, champs: null, updated_at: serverTimestamp() });
+    void this.publish();
   }
 
   private async save(patch: Partial<Profile>) {
@@ -174,7 +178,9 @@ class Account {
   }
 
   setNames(name: string, teamName: string) {
-    if (this.profile && (this.profile.name !== name || this.profile.team_name !== teamName)) void this.save({ name, team_name: teamName });
+    if (this.profile && (this.profile.name !== name || this.profile.team_name !== teamName)) {
+      void this.save({ name, team_name: teamName }).then(() => this.publish());
+    }
   }
 
   /** pintura do carro e emblema na conta */
@@ -224,6 +230,32 @@ class Account {
     ).catch((e) => console.warn("ranking: não publicou", e));
   }
 
+  /** código de amigo: começo do id da conta (6 letras/números) */
+  friendCode(): string {
+    return (this.user?.uid ?? "").slice(0, 6).toUpperCase();
+  }
+
+  /** adiciona um amigo pelo código; devolve o amigo ou uma mensagem de erro */
+  async addFriend(code: string): Promise<RankRow | string> {
+    const c = code.trim().toUpperCase();
+    if (!this.profile || !this.user) return "Entre na sua conta pra adicionar amigos.";
+    if (c.length !== 6) return "O código tem 6 letras/números.";
+    if (c === this.friendCode()) return "Esse é o seu próprio código.";
+    const rows = await this.ranking();
+    if (rows === null) return "O ranking ainda não foi liberado no Firebase.";
+    const f = rows.find((r) => r.id.slice(0, 6).toUpperCase() === c);
+    if (!f) return "Não achei ninguém com esse código. Peça pro seu amigo entrar no jogo uma vez com a conta dele.";
+    const list = this.profile.friends ?? [];
+    if (list.includes(f.id)) return `${f.name} já está na sua lista.`;
+    await this.save({ friends: [...list, f.id] });
+    return f;
+  }
+
+  async removeFriend(id: string) {
+    if (!this.profile) return;
+    await this.save({ friends: (this.profile.friends ?? []).filter((x) => x !== id) });
+  }
+
   /** ranking de todo mundo que joga (null = sem permissão: falta liberar a regra no Firebase) */
   async ranking(): Promise<RankRow[] | null> {
     if (!accountsEnabled() || !this.user) return [];
@@ -231,7 +263,7 @@ class Account {
       const snap = await getDocs(collection(F().db, "leaderboard"));
       return snap.docs.map((d) => {
         const x = d.data();
-        return { id: d.id, name: x.name ?? "?", team_name: x.team_name ?? "", stats: { ...EMPTY_STATS, ...(x.stats ?? {}) }, laps: x.laps ?? {} };
+        return { id: d.id, name: x.name ?? "?", team_name: x.team_name ?? "", stats: { ...EMPTY_STATS, ...(x.stats ?? {}) }, laps: x.laps ?? {}, livery: x.livery ?? null, updated: x.updated_at?.toMillis?.() ?? 0 };
       });
     } catch (e) {
       if ((e as { code?: string }).code === "permission-denied") return null;
@@ -246,6 +278,9 @@ export interface RankRow {
   team_name: string;
   stats: PlayerStats;
   laps: Record<string, { time: number; driver: string }>;
+  livery?: unknown;
+  /** última vez que entrou ou correu (ms) */
+  updated?: number;
 }
 
 export const account = new Account();
