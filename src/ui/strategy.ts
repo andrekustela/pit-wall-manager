@@ -44,7 +44,7 @@ export class StrategyScreen {
     this.cons = fuelPerLap(w.laps);
     this.maxLaps = Math.floor((FUEL_MAX - 1) / this.cons);
     root.innerHTML = `
-      <div class="screen"><div class="wrap" style="max-width:1100px">
+      <div class="screen"><div class="wrap">
         <h1 class="title">ESTRA<span>TÉGIA</span></h1>
         <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · ${w.laps} voltas · o tanque cabe combustível pra ${Math.min(this.maxLaps, w.laps)} voltas</p>
         <div class="box" style="margin-bottom:12px"><h3>PREVISÃO</h3>

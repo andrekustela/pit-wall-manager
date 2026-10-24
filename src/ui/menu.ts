@@ -12,7 +12,7 @@ import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
 import { LAP_OPTIONS } from "../net/protocol";
 import { champRounds } from "../sim/championship";
-import { drawTrackThumb } from "./common";
+import { mountTrackPicker } from "./trackPicker";
 import { mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen } from "./transition";
@@ -211,7 +211,6 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     if (p === "cfg-corrida" || p === "cfg-fds" || p === "cfg-camp") {
       const sp = soloPrefs();
       const camp = p === "cfg-camp";
-      const tracks = CIRCUITS.map((c, i) => ({ c, i })).sort((a, b) => a.c.name.localeCompare(b.c.name, "pt-BR"));
       const toggle = (k: string, on: boolean, t: string, d: string) =>
         `<label class="toggle m2tog"><input type="checkbox" data-opt="${k}" ${on ? "checked" : ""}><span><b>${t}</b><br><span class="hint" style="margin:0">${d}</span></span></label>`;
       return `${head(p === "cfg-corrida" ? "CORRIDA ÚNICA" : p === "cfg-fds" ? "FIM DE SEMANA" : "CAMPEONATO")}
@@ -219,7 +218,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
           ? `<label class="fld"><span>Nome do campeonato</span><input class="txt" data-opt="champName" maxlength="40" placeholder="Ex.: Temporada ${new Date().getFullYear()}"></label>
              <div class="fld"><span>Quantas pistas</span><div class="seg pctseg" data-seg="champPct">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((x) => `<button data-v="${x}" class="${x === sp.champPct ? "on" : ""}" title="${champRounds(x)} etapas">${x}%</button>`).join("")}</div>
              <span class="hint" style="margin:4px 0 0" data-rounds>${champRounds(sp.champPct)} etapas, em pistas sorteadas</span></div>`
-          : `<div class="fld"><span>Pista</span><div class="m2track"><select class="txt" data-opt="track"><option value="-1" ${sp.track === -1 ? "selected" : ""}>🎲 Sorteada na hora</option>${tracks.map(({ c, i }) => `<option value="${i}" ${i === sp.track ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select><canvas class="m2trackprev"></canvas></div></div>`}
+          : `<div class="fld"><span>Pista</span><div data-tpick></div></div>`}
         <div class="fld"><span>Voltas da corrida</span><div class="seg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}">${n} VOLTAS</button>`).join("")}</div></div>
         ${toggle("realDrivers", sp.realDrivers, "Lendas da F1", "Pilotos reais de todas as eras. Desligado = fictícios.")}
         ${toggle("equalCars", sp.equalCars, "Carros iguais", "Todo mundo com o mesmo carro: ganha quem acerta e decide melhor.")}
@@ -247,31 +246,16 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         if (r && seg.dataset.seg === "champPct") r.textContent = `${champRounds(Number(bt.dataset.v))} etapas, em pistas sorteadas`;
       }),
     );
-    const sel = el.querySelector<HTMLSelectElement>("select[data-opt=track]");
-    const prev = el.querySelector<HTMLCanvasElement>(".m2trackprev");
-    const drawPrev = () => {
-      if (!sel || !prev) return;
-      const i = Number(sel.value);
-      if (i < 0) {
-        const g = prev.getContext("2d")!;
-        prev.width = prev.clientWidth;
-        prev.height = prev.clientHeight;
-        g.fillStyle = "#8a93a6";
-        g.font = "600 30px Oswald, sans-serif";
-        g.textAlign = "center";
-        g.textBaseline = "middle";
-        g.fillText("?", prev.width / 2, prev.height / 2);
-      } else drawTrackThumb(prev, i);
-    };
-    sel?.addEventListener("change", drawPrev);
-    if (sel) requestAnimationFrame(drawPrev);
+    // pista: lista com busca que só aceita uma pista que existe
+    const tpHost = el.querySelector<HTMLElement>("[data-tpick]");
+    const tp = tpHost ? mountTrackPicker(tpHost, soloPrefs().track) : null;
     el.querySelector("#m-start")?.addEventListener("click", (e) => {
       const kind = (e.currentTarget as HTMLElement).dataset.kind as SoloSetup["kind"];
       const segV = (k: string, d: number) => Number(el.querySelector<HTMLElement>(`[data-seg=${k}] .on`)?.dataset.v ?? d);
       const chk = (k: string) => !!el.querySelector<HTMLInputElement>(`[data-opt=${k}]`)?.checked;
       const sp = soloPrefs();
       const prefs: SoloPrefs = {
-        track: sel ? Number(sel.value) : sp.track,
+        track: tp ? tp.get() : sp.track,
         laps: segV("laps", sp.laps),
         realDrivers: chk("realDrivers"),
         equalCars: chk("equalCars"),

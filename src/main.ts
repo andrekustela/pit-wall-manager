@@ -1,6 +1,7 @@
 import "./fonts.css";
 import "./styles.css";
 import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
+import { showCalendar } from "./ui/calendar";
 import { saveLocalLap } from "./ui/records";
 import { sound } from "./audio/sound";
 import { music } from "./audio/music";
@@ -269,9 +270,13 @@ class App {
         this.quali = null;
         this.screen = new PracticeScreen(app, conn, l);
         // pilotos acabaram de ser sorteados (fim de semana novo ou 1ª etapa do campeonato)
-        if (l.weekend && this.draftSeen !== l.weekend.seed && (!l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1))) {
+        if (l.weekend && this.draftSeen !== l.weekend.seed) {
           this.draftSeen = l.weekend.seed;
-          if (!AUTO) showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
+          const draft = !l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1);
+          const openDraft = () => draft && !AUTO && showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
+          // começo de temporada do campeonato: primeiro o calendário (pistas sorteadas), depois o sorteio dos pilotos
+          if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
+          else openDraft();
         }
         if (AUTO) conn.send({ t: "ready", ready: true });
         break;

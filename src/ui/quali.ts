@@ -25,7 +25,7 @@ export class QualiScreen {
     const n = results.length;
     const [c1, c2] = qualiCuts(n);
     root.innerHTML = `
-      <div class="screen"><div class="wrap" style="max-width:900px">
+      <div class="screen"><div class="wrap">
         <h1 class="title">CLASSIFICA<span>ÇÃO</span></h1>
         <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · Q1, Q2 e Q3 · ${wetLabel(wet)}</p>
         <div class="qsessions">

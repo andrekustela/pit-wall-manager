@@ -9,12 +9,13 @@ import { TEAMS } from "../sim/data";
 import { profileOf } from "../sim/drivers";
 import { CIRCUITS } from "../sim/track";
 import { devInner } from "./devPanel";
+import { calendarHtml, drawCalendarThumbs } from "./calendar";
 import { driverCardHtml } from "./driverCard";
 import { editMyLivery } from "./liveryEditor";
 import { emblemSvg } from "../render/emblem";
 import { drawTrackThumb, esc, teamDrivers, teamName, teamOfDriver, updateWaitBar } from "./common";
 
-type Tab = "resumo" | "fabrica" | "mecanicos" | "trofeus" | "pilotos" | "mercado";
+type Tab = "resumo" | "calendario" | "fabrica" | "mecanicos" | "trofeus" | "pilotos" | "mercado";
 
 const TABS: [Tab, string][] = [
   ["resumo", "RESUMO"],
@@ -22,6 +23,7 @@ const TABS: [Tab, string][] = [
   ["mecanicos", "MECÂNICOS"],
   ["trofeus", "TROFÉUS"],
   ["pilotos", "PILOTOS"],
+  ["calendario", "CALENDÁRIO"],
 ];
 
 export class HqScreen {
@@ -87,7 +89,7 @@ export class HqScreen {
     const tcol = me.livery?.base ?? TEAMS.find((t) => t.id === team)?.color ?? "#fff";
     const cars = l.lineup[team] ?? [];
     const body =
-      this.tab === "resumo" ? this.resumo() : this.tab === "fabrica" ? devInner(l) : this.tab === "mecanicos" ? this.mecanicos() : this.tab === "trofeus" ? this.trofeus() : this.tab === "mercado" ? this.mercado() : this.pilotos();
+      this.tab === "resumo" ? this.resumo() : this.tab === "fabrica" ? devInner(l) : this.tab === "mecanicos" ? this.mecanicos() : this.tab === "trofeus" ? this.trofeus() : this.tab === "mercado" ? this.mercado() : this.tab === "calendario" ? calendarHtml(ch) : this.pilotos();
     this.root.innerHTML = `
       <div class="screen"><div class="wrap hq">
         <div class="hqhead" style="border-left-color:${tcol}">
@@ -103,6 +105,7 @@ export class HqScreen {
         <div class="row-btns" style="margin-top:18px;align-items:center">${ch.finished && this.lobby.hostId === this.lobby.you ? `<button class="go" id="hq-season" style="margin:0">🏁 NOVA TEMPORADA ${(ch.season ?? 1) + 1} ▶</button>` : ""}<button class="${ch.finished ? "btn" : "go"}" id="hq-go" style="margin:0"></button></div>
       </div></div>`;
     this.renderGo();
+    if (this.tab === "calendario") drawCalendarThumbs(this.root);
     const cv = this.root.querySelector<HTMLCanvasElement>("canvas.hqtrack");
     const next = ch.rounds[ch.round + 1];
     if (cv && next !== undefined) requestAnimationFrame(() => drawTrackThumb(cv, next, undefined, true));

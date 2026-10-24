@@ -57,7 +57,7 @@ export class PracticeScreen {
     const me = lobby.players.find((p) => p.id === lobby.you)!;
     const track = CIRCUITS[w.trackIndex];
     root.innerHTML = `
-      <div class="screen"><div class="wrap" style="max-width:1100px">
+      <div class="screen"><div class="wrap">
         <h1 class="title">TREINO <span>LIVRE</span></h1>
         <p class="sub">${esc(champLabel(lobby))}${esc(track.name)} · ${esc(teamName(lobby, me.teamId!))} · Cada piloto tem ${PRACTICE_LAPS} voltas de teste. Ninguém mais vê seus tempos.</p>
         ${this.conditionsHtml(w)}

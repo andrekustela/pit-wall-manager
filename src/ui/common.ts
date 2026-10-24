@@ -226,3 +226,28 @@ export function natBadge(p: { nat: string; country: string }): string {
   const code = [...p.nat].map((ch) => String.fromCharCode((ch.codePointAt(0) ?? 0) - 0x1f1e6 + 65)).join("");
   return `<span class="natb" title="${esc(p.country)}">${esc(code)}</span>`;
 }
+
+/** etiquetas da pista (rua, noturna, chuvosa...) pra mostrar em listas e cartões */
+export function trackTags(trackIndex: number): { t: string; c: string; tip: string }[] {
+  const d = CIRCUITS[trackIndex];
+  if (!d) return [];
+  const tags: { t: string; c: string; tip: string }[] = [];
+  if (d.street) tags.push({ t: "RUA", c: "rua", tip: "Circuito de rua: muro colado na pista" });
+  if (d.night) tags.push({ t: "NOTURNA", c: "noite", tip: "Corrida de noite, com refletores" });
+  if (d.rainChance >= 0.4) tags.push({ t: "CHUVOSA", c: "chuva", tip: `Chance de chuva de ${Math.round(d.rainChance * 100)}%` });
+  else if (d.rainChance <= 0.05) tags.push({ t: "SECA", c: "seca", tip: "Quase nunca chove" });
+  if (d.marks?.t0 !== undefined) tags.push({ t: "TÚNEL", c: "tunel", tip: "Tem um trecho coberto" });
+  if (d.minHeight >= 6) tags.push({ t: "ONDULADA", c: "ond", tip: "Asfalto irregular: carro baixo bate no chão" });
+  if ((d.overtake ?? 1) <= 0.8) tags.push({ t: "DIFÍCIL ULTRAPASSAR", c: "ultra-", tip: "Pouco espaço pra ultrapassar" });
+  else if ((d.overtake ?? 1) >= 1.2) tags.push({ t: "FÁCIL ULTRAPASSAR", c: "ultra", tip: "Boas zonas de ultrapassagem" });
+  if (d.targetLength >= 6000) tags.push({ t: "LONGA", c: "long", tip: `${(d.targetLength / 1000).toFixed(1).replace(".", ",")} km` });
+  else if (d.targetLength <= 3800) tags.push({ t: "CURTA", c: "curta", tip: `${(d.targetLength / 1000).toFixed(1).replace(".", ",")} km` });
+  return tags;
+}
+
+export function trackTagsHtml(trackIndex: number, max = 9): string {
+  return trackTags(trackIndex)
+    .slice(0, max)
+    .map((x) => `<em class="ttag ${x.c}" title="${x.tip}">${x.t}</em>`)
+    .join("");
+}
