@@ -1,0 +1,54 @@
+{
+  "name": "pit-wall-manager",
+  "productName": "Pit Wall Manager",
+  "version": "0.1.0",
+  "description": "Pit Wall Manager - versão de PC",
+  "author": "Kustela",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "npm --prefix .. run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.kustela.pitwallmanager",
+    "productName": "Pit Wall Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "dist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.png"
+    },
+    "portable": {
+      "artifactName": "PitWallManager.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}
