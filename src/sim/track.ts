@@ -371,6 +371,10 @@ export class Track {
 }
 
 const trackCache = new Map<number, Track>();
+/** a pista já foi montada (está no cache)? */
+export function isTrackBuilt(index: number): boolean {
+  return trackCache.has(index);
+}
 export function getTrack(index: number): Track {
   let t = trackCache.get(index);
   if (!t) {

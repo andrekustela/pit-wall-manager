@@ -114,7 +114,7 @@ export class PracticeScreen {
         if (ok) this.conn.send({ t: "newEngine", carId: d.id });
       });
       this.renderEngine(panel);
-      requestAnimationFrame(() => drawTrackThumb(el.querySelector("canvas")!, w.trackIndex));
+      requestAnimationFrame(() => drawTrackThumb(el.querySelector("canvas")!, w.trackIndex, undefined, true));
       this.renderPanel(panel);
     }
     bindBackButton(root, (m) => conn.send(m), "Voltar pro lobby? Dá pra trocar equipe, pista e regras, mas o fim de semana recomeça.");
@@ -234,7 +234,7 @@ export class PracticeScreen {
       const f = Math.min(1, (now - t0) / DUR);
       const target = f * cum[track.L];
       while (idx < track.L && cum[idx + 1] < target) idx++;
-      const tf = drawTrackThumb(cv, w.trackIndex, "#5b616e");
+      const tf = drawTrackThumb(cv, w.trackIndex, "#5b616e", true);
       const g = cv.getContext("2d")!;
       const pt = track.pts[idx % track.L];
       const x = tf.ox + (pt.x - tf.minX) * tf.sc, y = tf.oy + (pt.y - tf.minY) * tf.sc;

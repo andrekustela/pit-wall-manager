@@ -105,7 +105,7 @@ export class HqScreen {
     this.renderGo();
     const cv = this.root.querySelector<HTMLCanvasElement>("canvas.hqtrack");
     const next = ch.rounds[ch.round + 1];
-    if (cv && next !== undefined) requestAnimationFrame(() => drawTrackThumb(cv, next));
+    if (cv && next !== undefined) requestAnimationFrame(() => drawTrackThumb(cv, next, undefined, true));
   }
 
   private renderGo() {

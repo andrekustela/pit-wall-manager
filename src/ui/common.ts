@@ -1,6 +1,6 @@
 import type { LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
-import { CIRCUITS, getTrack } from "../sim/track";
+import { CIRCUITS, getTrack, isTrackBuilt } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
 import { profileOf, type DriverProfile } from "../sim/drivers";
 
@@ -76,8 +76,12 @@ export function updateWaitBar(lobby: LobbyState | null) {
   el.innerHTML = `<div class="rhead">JOGADORES · ${esc(READY_WHAT[lobby!.phase] ?? "pronto")}</div>${rows}<div class="rfoot">${foot}</div>`;
 }
 
-/** desenha a silhueta da pista num canvas */
-export function drawTrackThumb(cv: HTMLCanvasElement, trackIndex: number, color = "#e9edf5") {
+/**
+ * Desenha a silhueta da pista num canvas. `exact` = usa a pista montada do jogo
+ * (largada no lugar certo; obrigatório quando algo anda por cima, como a volta de
+ * teste do treino). Sem isso usa o traçado cru (bem mais rápido, pra grade de pistas).
+ */
+export function drawTrackThumb(cv: HTMLCanvasElement, trackIndex: number, color = "#e9edf5", exact = false) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = cv.clientWidth || 220, h = cv.clientHeight || 90;
   cv.width = w * dpr;
@@ -86,7 +90,8 @@ export function drawTrackThumb(cv: HTMLCanvasElement, trackIndex: number, color 
   g.scale(dpr, dpr);
   // traçado já desenhado em pontos densos: usa direto (montar a pista inteira é mais caro)
   const def = CIRCUITS[trackIndex];
-  const t = def.points.length > 200 ? { pts: def.points.map(([x, y]) => ({ x, y })) } : getTrack(trackIndex);
+  const built = exact || def.points.length <= 200 || isTrackBuilt(trackIndex);
+  const t = built ? getTrack(trackIndex) : { pts: def.points.map(([x, y]) => ({ x, y })) };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of t.pts) {
     minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
@@ -108,9 +113,21 @@ export function drawTrackThumb(cv: HTMLCanvasElement, trackIndex: number, color 
   g.strokeStyle = color;
   g.lineWidth = 2.5;
   g.stroke();
-  const s0 = t.pts[0];
-  g.fillStyle = "#e8202a";
-  g.fillRect(ox + (s0.x - minX) * sc - 2, oy + (s0.y - minY) * sc - 4, 4, 8);
+  // largada: só com a pista montada (no traçado cru o começo não é a largada)
+  if (built) {
+    const s0 = t.pts[0], s1 = t.pts[Math.min(3, t.pts.length - 1)];
+    g.save();
+    g.translate(ox + (s0.x - minX) * sc, oy + (s0.y - minY) * sc);
+    g.rotate(Math.atan2(s1.y - s0.y, s1.x - s0.x));
+    g.fillStyle = "#000";
+    g.fillRect(-2.5, -6, 5, 12);
+    for (let r = 0; r < 4; r++)
+      for (let c = 0; c < 2; c++) {
+        g.fillStyle = (r + c) % 2 ? "#111" : "#fff";
+        g.fillRect(-2 + c * 2, -4 + r * 2, 2, 2);
+      }
+    g.restore();
+  }
   return { ox, oy, sc, minX, minY };
 }
 

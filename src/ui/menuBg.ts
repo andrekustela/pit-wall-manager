@@ -9,8 +9,8 @@ const RUNNERS = [
   { color: "#38c6ff", speed: 0.056, start: -0.04 },
   { color: "#ffc21a", speed: 0.053, start: -0.08 },
 ];
-/** faixa saindo pela esquerda / a nova entrando pela direita (ms) */
-const EXIT_MS = 420;
+/** ida da faixa pra direita (apagando) / volta pra esquerda (desenhando a nova), em ms */
+const EXIT_MS = 760;
 const SWEEP_MS = 1100;
 /** geometria da faixa (igual ao CSS de .m2stripe): esquerda em 33vw, 9vw de largura, inclinada -18° em volta de 55vh */
 const STRIPE_LEFT = 0.33, STRIPE_W = 0.09, STRIPE_CY = 0.55, SKEW = Math.tan((18 * Math.PI) / 180);
@@ -225,6 +225,8 @@ export function mountMenuBackdrop(
     p.closePath();
     return p;
   };
+  /** até onde a faixa vai pra direita (sai da tela, mesmo inclinada) */
+  const farRight = () => W * (1 - STRIPE_LEFT) + W * 0.05 + H * SKEW * 0.6;
   const setStripe = (tx: number) => {
     if (stripe) stripe.style.transform = `translateX(${tx}px) skewX(-18deg)`;
   };
@@ -248,10 +250,11 @@ export function mountMenuBackdrop(
     if (phase === "run") {
       drawScene(cur, now, null, 0);
     } else if (phase === "exit") {
-      // a faixa de agora sai pela esquerda; a pista ainda é a antiga (carros parados na largada)
+      // ida: a faixa vai pra direita apagando a pista antiga (só sobra o que ainda está à direita dela)
       const k = Math.min(1, (now - phaseT0) / EXIT_MS);
-      setStripe(-easeInOut(k) * W * (STRIPE_LEFT + STRIPE_W + 0.12));
-      drawScene(cur, now, null, 0, phaseT0);
+      const tx = easeInOut(k) * farRight();
+      setStripe(tx);
+      drawScene(cur, now, rightOfStripe(tx), 0, phaseT0);
       if (k >= 1) {
         next = build(nextIdx(), now + SWEEP_MS * 0.35);
         onTrack?.(next.tr.idx);
@@ -259,21 +262,12 @@ export function mountMenuBackdrop(
         phaseT0 = now;
       }
     } else if (phase === "sweep" && next) {
-      // nova faixa vem da direita até o lugar dela; atrás dela já é a pista nova
+      // volta: a faixa vem pra esquerda até o lugar dela, desenhando a pista nova por onde passa
       const k = Math.min(1, (now - phaseT0) / SWEEP_MS);
       const e = easeOut(k);
-      const startTx = W * (1 - STRIPE_LEFT) + W * 0.12;
-      const tx = startTx * (1 - e);
+      const tx = farRight() * (1 - e);
       setStripe(tx);
-      const clipNew = rightOfStripe(tx);
-      const clipOld = new Path2D();
-      clipOld.rect(0, 0, cv.width, cv.height);
-      clipOld.addPath(clipNew); // "evenodd": tudo menos a região da pista nova
-      g.save();
-      g.clip(clipOld, "evenodd");
-      drawScene(cur, now, null, -60 * e, now, 1 - Math.max(0, (e - 0.55) / 0.45)); // a antiga escorrega pra esquerda e some no fim
-      g.restore();
-      drawScene(next, Math.max(now, next.t0), clipNew, 80 * (1 - e)); // a nova chega da direita
+      drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
       if (k >= 1) {
         cur = next;
         next = null;

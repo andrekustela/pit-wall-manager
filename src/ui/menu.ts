@@ -10,7 +10,7 @@ import { fillRanking } from "./ranking";
 import { editMyLivery } from "./liveryEditor";
 import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
-import { mountMenuBackdrop, trackIndexByName } from "./menuBg";
+import { mountMenuBackdrop } from "./menuBg";
 import { showFriends } from "./friends";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -57,9 +57,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   const invite = inv && /^[A-Z]{4}$/.test(inv) ? inv : null;
   if (invite && !openPanel) openPanel = "online";
 
-  // pista do fundo: a próxima etapa do campeonato em andamento, senão Interlagos
-  const live = saves.find((s) => !s.champ.finished);
-  const bgTrack = live ? live.champ.rounds[live.champ.results.length] ?? trackIndexByName("Interlagos") : trackIndexByName("Interlagos");
+  // pista do fundo: sorteada (as próximas também vêm sorteadas, a cada volta)
+  const bgTrack = Math.floor(Math.random() * CIRCUITS.length);
 
   const champRows = (list: typeof saves) => list
     .map((s) => {
