@@ -1,6 +1,7 @@
 // Fundo animado do menu: um circuito grande com brilho e alguns "carros" de luz
-// dando volta, com rastro. A cada volta completa do líder a pista troca (some,
-// a nova entra crescendo um pouco) e o menu é avisado pra animar a faixa e o nome.
+// dando volta, com rastro. Quando o líder completa a volta, a faixa vermelha sai
+// pela esquerda e outra entra pela direita "varrendo" a tela: atrás dela (à
+// direita) já aparece a pista nova; na frente (à esquerda) ainda é a antiga.
 import { CIRCUITS, getTrack, type Vec } from "../sim/track";
 
 const RUNNERS = [
@@ -8,8 +9,12 @@ const RUNNERS = [
   { color: "#38c6ff", speed: 0.056, start: -0.04 },
   { color: "#ffc21a", speed: 0.053, start: -0.08 },
 ];
-const OUT_MS = 380;
-const IN_MS = 620;
+/** faixa saindo pela esquerda / a nova entrando pela direita (ms) */
+const EXIT_MS = 420;
+const SWEEP_MS = 1100;
+/** geometria da faixa (igual ao CSS de .m2stripe): esquerda em 33vw, 9vw de largura, inclinada -18° em volta de 55vh */
+const STRIPE_LEFT = 0.33, STRIPE_W = 0.09, STRIPE_CY = 0.55, SKEW = Math.tan((18 * Math.PI) / 180);
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
 export function trackIndexByName(name: string): number {
@@ -53,36 +58,40 @@ function pointAt(t: TrackGeo, u: number) {
   return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
 }
 
+/** pista pronta pra desenhar: geometria + imagem do traçado + escala na tela */
+interface Scene {
+  tr: TrackGeo;
+  layer: HTMLCanvasElement;
+  map: { sc: number; ox: number; oy: number };
+  t0: number; // quando a volta começou
+}
+
 /**
- * Monta o fundo no canvas. `onTrack(idx)` é chamado quando a pista troca
- * (pra animar a faixa e o nome). Devolve uma função pra parar.
+ * Monta o fundo no canvas. `stripe` é a faixa vermelha (o fundo move ela durante a
+ * troca). `onTrack(idx)` avisa quando a pista nova começa a entrar.
  */
-export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, onTrack?: (idx: number) => void) {
+export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, stripe?: HTMLElement | null, onTrack?: (idx: number) => void) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const g = cv.getContext("2d")!;
-  let tr = geo(trackIndex);
   let grid: HTMLCanvasElement | null = null;
-  let layer: HTMLCanvasElement | null = null;
-  let map = { sc: 1, ox: 0, oy: 0 };
   let W = 0, H = 0, dpr = 1;
 
-  const toScreen = (p: { x: number; y: number }) => ({ x: map.ox + p.x * map.sc, y: map.oy + p.y * map.sc });
-
-  const drawTrack = () => {
+  const build = (idx: number, t0: number): Scene => {
+    const tr = geo(idx);
     const [minX, minY, maxX, maxY] = tr.bounds;
     const areaX = W * 0.42, areaW = W * 0.54, areaY = H * 0.12, areaH = H * 0.72;
     const sc = Math.min(areaW / (maxX - minX), areaH / (maxY - minY));
-    map = { sc, ox: areaX + (areaW - (maxX - minX) * sc) / 2 - minX * sc, oy: areaY + (areaH - (maxY - minY) * sc) / 2 - minY * sc };
-    layer = document.createElement("canvas");
+    const map = { sc, ox: areaX + (areaW - (maxX - minX) * sc) / 2 - minX * sc, oy: areaY + (areaH - (maxY - minY) * sc) / 2 - minY * sc };
+    const layer = document.createElement("canvas");
     layer.width = cv.width;
     layer.height = cv.height;
     const l = layer.getContext("2d")!;
     l.setTransform(dpr, 0, 0, dpr, 0, 0);
     const path = new Path2D();
     tr.pts.forEach((p, i) => {
-      const s = toScreen(p);
-      if (i) path.lineTo(s.x, s.y);
-      else path.moveTo(s.x, s.y);
+      const x = map.ox + p.x * map.sc, y = map.oy + p.y * map.sc;
+      if (i) path.lineTo(x, y);
+      else path.moveTo(x, y);
     });
     path.closePath();
     l.lineJoin = "round";
@@ -99,11 +108,14 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, onT
     l.strokeStyle = "rgba(233,237,245,0.85)";
     l.lineWidth = 2;
     l.stroke(path);
-    const s0 = toScreen(pointAt(tr, 0));
+    const s0 = pointAt(tr, 0);
     l.fillStyle = "#fff";
-    l.fillRect(s0.x - 2, s0.y - 9, 4, 18);
+    l.fillRect(map.ox + s0.x * map.sc - 2, map.oy + s0.y * map.sc - 9, 4, 18);
+    return { tr, layer, map, t0 };
   };
 
+  let cur: Scene;
+  let next: Scene | null = null;
   const layout = () => {
     dpr = Math.min(2, window.devicePixelRatio || 1);
     W = cv.clientWidth;
@@ -119,21 +131,70 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, onT
     l.lineWidth = 1;
     for (let x = 0; x < W; x += 48) { l.beginPath(); l.moveTo(x, 0); l.lineTo(x, H); l.stroke(); }
     for (let y = 0; y < H; y += 48) { l.beginPath(); l.moveTo(0, y); l.lineTo(W, y); l.stroke(); }
-    drawTrack();
+    cur = build(cur ? cur.tr.idx : trackIndex, cur ? cur.t0 : performance.now());
+    if (next) next = build(next.tr.idx, next.t0);
   };
   layout();
   const onResize = () => layout();
   window.addEventListener("resize", onResize);
 
-  // relógio da volta (recomeça a cada pista nova)
-  let lapT0 = performance.now();
-  let phase: "run" | "out" | "in" = "run";
+  // troca: "exit" (faixa sai pela esquerda) -> "sweep" (nova faixa varre da direita)
+  let phase: "run" | "exit" | "sweep" = "run";
   let phaseT0 = 0;
-
-  const nextTrack = () => {
-    let i = tr.idx;
-    while (CIRCUITS.length > 1 && i === tr.idx) i = Math.floor(Math.random() * CIRCUITS.length);
+  const nextIdx = () => {
+    let i = cur.tr.idx;
+    while (CIRCUITS.length > 1 && i === cur.tr.idx) i = Math.floor(Math.random() * CIRCUITS.length);
     return i;
+  };
+
+  /** desenha uma pista e os carros dela, recortada por `clip` (ou inteira) e deslocada em x */
+  const drawScene = (s: Scene, now: number, clip: Path2D | null, dx: number, frozenAt?: number, alpha = 1) => {
+    g.save();
+    g.globalAlpha = alpha;
+    if (clip) g.clip(clip);
+    g.setTransform(1, 0, 0, 1, dx * dpr, 0);
+    g.drawImage(s.layer, 0, 0);
+    g.setTransform(dpr, 0, 0, dpr, dx * dpr, 0);
+    const t = ((frozenAt ?? now) - s.t0) / 1000;
+    for (const r of RUNNERS) {
+      const u = r.start + t * r.speed;
+      if (u < 0) continue; // ainda não largou
+      for (let k = 14; k >= 0; k--) {
+        const uk = u - k * 0.0035;
+        if (uk < 0) continue;
+        const p = pointAt(s.tr, uk);
+        g.globalAlpha = alpha * (1 - k / 15) * 0.8;
+        g.fillStyle = r.color;
+        g.beginPath();
+        g.arc(s.map.ox + p.x * s.map.sc, s.map.oy + p.y * s.map.sc, k === 0 ? 5 : 3.2 - k * 0.15, 0, Math.PI * 2);
+        g.fill();
+      }
+      const p = pointAt(s.tr, u);
+      g.globalAlpha = alpha;
+      g.shadowColor = r.color;
+      g.shadowBlur = 18;
+      g.fillStyle = "#fff";
+      g.beginPath();
+      g.arc(s.map.ox + p.x * s.map.sc, s.map.oy + p.y * s.map.sc, 2.4, 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+    }
+    g.restore();
+  };
+
+  /** região à direita do centro da faixa (deslocada `tx` px da posição de descanso) */
+  const rightOfStripe = (tx: number) => {
+    const xc = (y: number) => W * (STRIPE_LEFT + STRIPE_W / 2) + tx - SKEW * (y - H * STRIPE_CY);
+    const p = new Path2D();
+    p.moveTo(xc(0) * dpr, 0);
+    p.lineTo(cv.width + 10, 0);
+    p.lineTo(cv.width + 10, cv.height);
+    p.lineTo(xc(H) * dpr, cv.height);
+    p.closePath();
+    return p;
+  };
+  const setStripe = (tx: number) => {
+    if (stripe) stripe.style.transform = `translateX(${tx}px) skewX(-18deg)`;
   };
 
   let raf = 0;
@@ -142,66 +203,52 @@ export function mountMenuBackdrop(cv: HTMLCanvasElement, trackIndex: number, onT
       window.removeEventListener("resize", onResize);
       return;
     }
-    const t = (now - lapT0) / 1000;
-    // líder completou a volta: troca de pista
-    if (phase === "run" && RUNNERS[0].start + t * RUNNERS[0].speed >= 1 && !reduce) {
-      phase = "out";
+    // líder completou a volta: começa a troca
+    if (phase === "run" && !reduce && RUNNERS[0].start + ((now - cur.t0) / 1000) * RUNNERS[0].speed >= 1) {
+      phase = "exit";
       phaseT0 = now;
-    }
-    let alpha = 1, scale = 1;
-    if (phase === "out") {
-      const k = Math.min(1, (now - phaseT0) / OUT_MS);
-      alpha = 1 - k;
-      scale = 1 + 0.04 * k;
-      if (k >= 1) {
-        tr = geo(nextTrack());
-        drawTrack();
-        onTrack?.(tr.idx);
-        phase = "in";
-        phaseT0 = now;
-        lapT0 = now;
-      }
-    } else if (phase === "in") {
-      const k = Math.min(1, (now - phaseT0) / IN_MS);
-      alpha = easeOut(k);
-      scale = 0.94 + 0.06 * easeOut(k);
-      if (k >= 1) phase = "run";
     }
 
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, cv.width, cv.height);
     if (grid) g.drawImage(grid, 0, 0);
-    // pista e carros com o mesmo zoom/opacidade (em volta do centro da área da pista)
-    const cx = W * 0.69 * dpr, cy = H * 0.48 * dpr;
-    g.setTransform(scale, 0, 0, scale, cx * (1 - scale), cy * (1 - scale));
-    g.globalAlpha = alpha;
-    if (layer) g.drawImage(layer, 0, 0);
-    g.setTransform(dpr * scale, 0, 0, dpr * scale, cx * (1 - scale), cy * (1 - scale));
-    const tt = phase === "out" ? (phaseT0 - lapT0) / 1000 : t;
-    for (const r of RUNNERS) {
-      const u = r.start + tt * r.speed;
-      if (u < 0) continue; // ainda não largou
-      for (let k = 14; k >= 0; k--) {
-        const uk = u - k * 0.0035;
-        if (uk < 0) continue;
-        const s = toScreen(pointAt(tr, uk));
-        g.globalAlpha = alpha * (1 - k / 15) * 0.8;
-        g.fillStyle = r.color;
-        g.beginPath();
-        g.arc(s.x, s.y, k === 0 ? 5 : 3.2 - k * 0.15, 0, Math.PI * 2);
-        g.fill();
+
+    if (phase === "run") {
+      drawScene(cur, now, null, 0);
+    } else if (phase === "exit") {
+      // a faixa de agora sai pela esquerda; a pista ainda é a antiga (carros parados na largada)
+      const k = Math.min(1, (now - phaseT0) / EXIT_MS);
+      setStripe(-easeInOut(k) * W * (STRIPE_LEFT + STRIPE_W + 0.12));
+      drawScene(cur, now, null, 0, phaseT0);
+      if (k >= 1) {
+        next = build(nextIdx(), now + SWEEP_MS * 0.35);
+        onTrack?.(next.tr.idx);
+        phase = "sweep";
+        phaseT0 = now;
       }
-      const s = toScreen(pointAt(tr, u));
-      g.globalAlpha = alpha;
-      g.shadowColor = r.color;
-      g.shadowBlur = 18;
-      g.fillStyle = "#fff";
-      g.beginPath();
-      g.arc(s.x, s.y, 2.4, 0, Math.PI * 2);
-      g.fill();
-      g.shadowBlur = 0;
+    } else if (phase === "sweep" && next) {
+      // nova faixa vem da direita até o lugar dela; atrás dela já é a pista nova
+      const k = Math.min(1, (now - phaseT0) / SWEEP_MS);
+      const e = easeOut(k);
+      const startTx = W * (1 - STRIPE_LEFT) + W * 0.12;
+      const tx = startTx * (1 - e);
+      setStripe(tx);
+      const clipNew = rightOfStripe(tx);
+      const clipOld = new Path2D();
+      clipOld.rect(0, 0, cv.width, cv.height);
+      clipOld.addPath(clipNew); // "evenodd": tudo menos a região da pista nova
+      g.save();
+      g.clip(clipOld, "evenodd");
+      drawScene(cur, now, null, -60 * e, now, 1 - Math.max(0, (e - 0.55) / 0.45)); // a antiga escorrega pra esquerda e some no fim
+      g.restore();
+      drawScene(next, Math.max(now, next.t0), clipNew, 80 * (1 - e)); // a nova chega da direita
+      if (k >= 1) {
+        cur = next;
+        next = null;
+        phase = "run";
+        setStripe(0);
+      }
     }
-    g.globalAlpha = 1;
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);

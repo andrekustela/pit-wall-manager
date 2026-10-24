@@ -111,15 +111,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   // ----- fundo: pista troca a cada volta, com a faixa varrendo e o nome deslizando -----
   const stripe = root.querySelector<HTMLElement>(".m2stripe")!;
   const nameEl = root.querySelector<HTMLElement>("#m-trackname")!;
-  mountMenuBackdrop(root.querySelector<HTMLCanvasElement>(".menubg")!, bgTrack, (idx) => {
-    stripe.animate(
-      [
-        { transform: "translateX(0) skewX(-18deg)", opacity: 1 },
-        { transform: "translateX(62vw) skewX(-18deg)", opacity: 0.9, offset: 0.55 },
-        { transform: "translateX(0) skewX(-18deg)", opacity: 1 },
-      ],
-      { duration: 900, easing: "cubic-bezier(0.77, 0, 0.175, 1)" },
-    );
+  mountMenuBackdrop(root.querySelector<HTMLCanvasElement>(".menubg")!, bgTrack, stripe, (idx) => {
     const out = nameEl.animate([{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-8px)", opacity: 0 }], { duration: 160, easing: "ease-out", fill: "forwards" });
     out.onfinish = () => {
       nameEl.textContent = (CIRCUITS[idx]?.name ?? "").toUpperCase();
