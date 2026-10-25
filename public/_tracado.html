@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Traçado ideal das pistas</title>
+<style>body{margin:0;background:#0b0e15;color:#e9edf5;font:14px sans-serif;padding:16px}h1{font-size:22px;margin:0 0 6px}p{color:#8a93a6;margin:0 0 14px;max-width:900px}
+.grid{display:flex;flex-wrap:wrap;gap:12px}.c{background:#141925;border:1px solid #262d3d;padding:8px}.c b{display:block}.c small{color:#8a93a6}
+canvas{display:block;margin-top:6px;cursor:zoom-in}#big{position:fixed;inset:0;background:#0b0e15ee;display:none;align-items:center;justify-content:center}#big canvas{cursor:zoom-out}</style></head>
+<body><h1>Traçado ideal (carro de teste da IA)</h1>
+<p>Cinza = meio da pista; vermelho = traçado mais rápido que o carro de teste achou (dentro do asfalto), com o ganho de tempo sobre andar pelo meio. Clique numa pista pra ampliar. Nada disso está valendo no jogo ainda: é pra você conferir.</p>
+<div class="grid" id="g"></div><div id="big"></div>
+<script type="module">
+import { ACTIVE_TRACKS, CIRCUITS, TRACK_WIDTH, getTrack } from "/src/sim/track.ts";
+import { LINE_STEP, RACING_LINES } from "/src/sim/racingLines.ts";
+const fmt = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, "0")}`;
+function draw(cv, i, size) {
+  const t = getTrack(i), L = t.L, line = RACING_LINES[CIRCUITS[i].name];
+  const P = [], C = [];
+  const N = line ? line.o.length : 0;
+  const off = (s) => {
+    if (!line) return 0;
+    const u = s / LINE_STEP, j = Math.floor(u) % N, f = u - Math.floor(u), o = line.o;
+    const p0 = o[(j - 1 + N) % N], p1 = o[j], p2 = o[(j + 1) % N], p3 = o[(j + 2) % N];
+    return 0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (-p0 + 3 * p1 - 3 * p2 + p3) * f * f * f);
+  };
+  for (let s = 0; s < L; s += 2) { C.push(t.pose(s, 0)); P.push(t.pose(s, off(s))); }
+  const xs = C.map((p) => p.x), ys = C.map((p) => p.y);
+  const mx = Math.min(...xs), my = Math.min(...ys), sc = (size - 20) / Math.max(Math.max(...xs) - mx, Math.max(...ys) - my);
+  const W = (Math.max(...xs) - mx) * sc + 20, H = (Math.max(...ys) - my) * sc + 20;
+  cv.width = W; cv.height = H;
+  const g = cv.getContext("2d");
+  const X = (p) => 10 + (p.x - mx) * sc, Y = (p) => 10 + (p.y - my) * sc;
+  g.lineJoin = "round";
+  g.strokeStyle = "#3a4150"; g.lineWidth = Math.max(2, TRACK_WIDTH * sc);
+  g.beginPath(); C.forEach((p, k) => (k ? g.lineTo(X(p), Y(p)) : g.moveTo(X(p), Y(p)))); g.closePath(); g.stroke();
+  g.strokeStyle = "#8a93a6"; g.lineWidth = 1; g.setLineDash([4, 4]);
+  g.beginPath(); C.forEach((p, k) => (k ? g.lineTo(X(p), Y(p)) : g.moveTo(X(p), Y(p)))); g.closePath(); g.stroke(); g.setLineDash([]);
+  if (line) { g.strokeStyle = "#ff3b3b"; g.lineWidth = Math.max(1.5, size / 260);
+    g.beginPath(); P.forEach((p, k) => (k ? g.lineTo(X(p), Y(p)) : g.moveTo(X(p), Y(p)))); g.closePath(); g.stroke(); }
+  g.fillStyle = "#fff"; g.beginPath(); g.arc(X(C[0]), Y(C[0]), 4, 0, Math.PI * 2); g.fill();
+}
+const G = document.getElementById("g"), big = document.getElementById("big");
+for (const i of [...ACTIVE_TRACKS].sort((a, b) => CIRCUITS[a].name.localeCompare(CIRCUITS[b].name, "pt-BR"))) {
+  const line = RACING_LINES[CIRCUITS[i].name];
+  const d = document.createElement("div"); d.className = "c";
+  d.innerHTML = `<b>${CIRCUITS[i].name}</b><small>${line ? `${fmt(line.lap + line.gain)} → ${fmt(line.lap)} (−${line.gain.toFixed(2)} s)` : "sem traçado"}</small>`;
+  const cv = document.createElement("canvas"); draw(cv, i, 300); d.appendChild(cv); G.appendChild(d);
+  cv.onclick = () => { big.innerHTML = ""; const b = document.createElement("canvas"); draw(b, i, Math.min(innerWidth, innerHeight) - 40); big.appendChild(b); big.style.display = "flex"; };
+}
+big.onclick = () => (big.style.display = "none");
+</script></body></html>
