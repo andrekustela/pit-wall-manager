@@ -18,8 +18,6 @@ export class Renderer {
     return this.world.ready;
   }
   private cam = { x: 0, y: 0, ready: false };
-  /** quanto a câmera está adiantada na frente do carro seguido (m) */
-  private look = { x: 0, y: 0 };
   private drops: { x: number; y: number; l: number }[] = [];
   private screenPos = new Map<string, { x: number; y: number }>();
   private dpr = 1;
@@ -229,13 +227,7 @@ export class Renderer {
       if (this.cam.ready) this.camFrom = { x: this.cam.x, y: this.cam.y, t: performance.now() };
       this.lastFollow = this.followId;
     }
-    // olhar à frente: a câmera se adianta na direção do carro (mais quanto mais rápido), suave
-    const fc = race.cars.find((c) => c.id === this.followId);
-    const ahead = fc && !fc.retired && fc.pit === "none" ? Math.min(22, fc.v * 0.3) : 0;
-    const kLook = Math.min(1, realDt * 2.5);
-    this.look.x += (Math.cos(tp.h) * ahead - this.look.x) * kLook;
-    this.look.y += (Math.sin(tp.h) * ahead - this.look.y) * kLook;
-    let cx = tp.x + this.look.x, cy = tp.y + this.look.y;
+    let cx = tp.x, cy = tp.y;
     if (this.camFrom) {
       const k = Math.min(1, (performance.now() - this.camFrom.t) / 600);
       const e = 1 - Math.pow(1 - k, 3);

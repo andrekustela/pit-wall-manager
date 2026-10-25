@@ -152,11 +152,10 @@ export class DriverRequests {
       this.el.innerHTML = `<div class="reqtop"><b>📻 ${esc(c.driver.short)} PEDE</b><span>${esc(ask[2])}</span></div>
         <div class="reqbtns"><button class="btn small primary" data-ans="sim">✓ ACEITAR <kbd>S</kbd></button><button class="btn small" data-ans="nao">✗ RECUSAR <kbd>N</kbd></button>
         <span class="hint" style="margin:0">ou fale "sim" / "não" (V)</span></div><div class="reqbar"><i></i></div>`;
-      // no card do piloto que pediu, logo embaixo do nome (sem card: no topo da tela)
+      // balão preso no card do piloto que pediu, flutuando logo acima dele (o card não muda de
+      // tamanho, expandido ou minimizado); sem card: no topo da tela
       const card = document.querySelector<HTMLElement>(`.driver.panel[data-id="${c.id}"]`);
-      const top = card?.querySelector(".top");
-      if (top) top.after(this.el);
-      else if (card) card.prepend(this.el);
+      if (card) card.appendChild(this.el);
       else document.body.appendChild(this.el);
       this.el.classList.toggle("incard", !!card);
       this.el.hidden = false;

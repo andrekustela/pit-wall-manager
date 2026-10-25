@@ -268,7 +268,7 @@ label.fld span { display: block; margin-bottom: 4px; }
 .teamtoggle { box-shadow: 0 0 0 2px #000; }
 .mini-line { display: none; font-size: 13px; align-items: center; gap: 6px; }
 .team.compact .driver { width: 300px; padding: 6px 8px; }
-.team.compact .driver > *:not(.top):not(.mini-line):not(.boxbtn):not(.statuscol) { display: none !important; }
+.team.compact .driver > *:not(.top):not(.mini-line):not(.boxbtn):not(.statuscol):not(.reqbox) { display: none !important; }
 .team.compact .driver .top { margin-bottom: 4px; }
 .team.compact .mini-line { display: flex; margin-bottom: 4px; }
 .team.compact .boxbtn { margin-top: 2px; padding: 4px; font-size: 11px; }
@@ -1192,10 +1192,18 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .driver.panel button kbd { display: none; margin-left: 4px; padding: 0 3px; border: 1px solid currentColor; border-radius: 3px; font: 9px var(--pix, monospace); opacity: .55; line-height: 12px; }
 .driver.panel.follow button kbd { display: inline-block; }
 .driver.panel.follow .boxbtn::after { content: "B"; margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font: 10px var(--pix, monospace); opacity: .55; }
-/* pedido do piloto dentro do card dele (embaixo do nome) */
-.reqbox.incard { position: static; transform: none; width: auto; margin: 4px 0 6px; padding: 8px 10px 0; animation: reqin2 240ms cubic-bezier(0.23, 1, 0.32, 1); z-index: auto; box-shadow: 0 0 0 1px #ffd23f55; }
+/* pedido do piloto: balão preso no card dele, logo acima, com setinha apontando pro piloto */
+.driver.panel { position: relative; }
+.reqbox.incard { position: absolute; left: 8px; right: 8px; top: auto; bottom: calc(100% + 10px); transform: none; width: auto; z-index: 20; padding: 8px 10px 0;
+  animation: reqin2 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+.reqbox.incard::after { content: ""; position: absolute; left: 34px; top: 100%; border: 8px solid transparent; border-top-color: #ffd23f; }
 .reqbox.incard .reqtop b { font-size: 11px; }
 .reqbox.incard .reqtop span { font-size: 13px; margin: 2px 0 6px; }
 .reqbox.incard .reqbtns .hint { display: none; }
 .reqbox.incard .reqbar { margin: 8px -10px 0; }
-@keyframes reqin2 { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes reqin2 { from { opacity: 0; transform: translateY(6px); } }
+.team.compact .reqbox.incard[hidden] { display: none !important; }
+/* balão encostado pro lado de fora de cada card (não cobre o botão de minimizar, que fica no meio) */
+.driver.panel:first-child .reqbox.incard { right: 22%; }
+.driver.panel:last-child:not(:first-child) .reqbox.incard { left: 22%; }
+.driver.panel:last-child:not(:first-child) .reqbox.incard::after { left: auto; right: 34px; }
