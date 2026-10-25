@@ -111,3 +111,69 @@ export function drawCockpit3d(g: CanvasRenderingContext2D, W: number, H: number,
   g.restore();
   return true;
 }
+
+// ---------- carros à frente (vistos de trás) ----------
+let rear: { base: ImageData; mask: ImageData; widM: number; ground: number } | null = null;
+let rearLoading = false;
+const rearCache = new Map<string, HTMLCanvasElement>();
+
+function rearReady(): boolean {
+  if (rear) return true;
+  if (!rearLoading) {
+    rearLoading = true;
+    const img = (n: string) =>
+      new Promise<HTMLImageElement>((ok, fail) => {
+        const i = new Image();
+        i.onload = () => ok(i);
+        i.onerror = fail;
+        i.src = `/onboard/${n}.png`;
+      });
+    void Promise.all([fetch("/onboard/tras.json").then((r) => r.json() as Promise<{ widM: number }>), img("base_tras"), img("mask_tras")])
+      .then(([info, b, m]) => {
+        const base = pixels(b);
+        // linha do chão: a última com pixel (embaixo dos pneus)
+        let ground = base.height - 1;
+        for (let y = base.height - 1; y > 0; y--) {
+          let hit = false;
+          for (let x = 0; x < base.width && !hit; x++) hit = base.data[(y * base.width + x) * 4 + 3] > 20;
+          if (hit) {
+            ground = y;
+            break;
+          }
+        }
+        rear = { base, mask: pixels(m), widM: info.widM, ground };
+      })
+      .catch(() => {});
+  }
+  return false;
+}
+
+/** carro à frente na onboard, visto de trás (false = use o vetor). (x, y) = ponto no chão; k = px por metro */
+export function drawRearCar(g: CanvasRenderingContext2D, team: Team, x: number, y: number, k: number, rainLight: boolean): boolean {
+  if (!car3dPref.on || !rearReady() || !rear) return false;
+  const key = `${team.id}|${liveryKey(team.livery)}`;
+  let c = rearCache.get(key);
+  if (!c) {
+    if (rearCache.size > 30) rearCache.clear();
+    const lv = team.livery;
+    c = paint([rear.base, rear.mask], rgb(lv?.base ?? team.color), rgb(lv?.wing ?? lv?.accent ?? team.accent));
+    rearCache.set(key, c);
+  }
+  // escala: a imagem tem widM metros de largura (o carro 3D tem ~2 m; o vetor usava ~2 m também)
+  const pxPerM = c.width / rear.widM, s = k / pxPerM;
+  const w = c.width * s, h = c.height * s;
+  // sombra no chão
+  g.fillStyle = "rgba(0,0,0,.35)";
+  g.beginPath();
+  g.ellipse(x, y, w * 0.45, Math.max(1, k * 0.16), 0, 0, Math.PI * 2);
+  g.fill();
+  g.drawImage(c, x - w / 2, y - rear.ground * s, w, h);
+  if (rainLight) {
+    g.fillStyle = "#ff3030";
+    g.shadowColor = "#ff3030";
+    g.shadowBlur = Math.max(2, k * 0.25);
+    g.fillRect(x - k * 0.05, y - k * 0.5, k * 0.1, k * 0.07);
+    g.shadowBlur = 0;
+  }
+  return true;
+}

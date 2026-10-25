@@ -5,7 +5,7 @@
 // retrovisores e o volante com marcha, velocidade e luzes de giro.
 import type { Race } from "../sim/race";
 import { TRACK_WIDTH, type Track } from "../sim/track";
-import { drawCockpit3d } from "./onboard3d";
+import { drawCockpit3d, drawRearCar } from "./onboard3d";
 import type { CarState } from "../sim/types";
 
 const COMPOUND_COLOR: Record<string, string> = { S: "#ff3b3b", M: "#ffd23b", H: "#f2f2f2", I: "#3bd16f", W: "#2e8bff" };
@@ -337,6 +337,8 @@ export class OnboardCam {
   private drawCar(g: CanvasRenderingContext2D, p: Pt, c: CarState, wet: number) {
     const k = p.k; // px por metro
     if (k < 0.6) return;
+    // carro 3D visto de trás (com a luz de chuva piscando)
+    if (drawRearCar(g, c.team, p.x, p.y, k, wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0)) return;
     const x = p.x, y = p.y;
     const col = c.team.color, acc = c.team.accent;
     const r = (dx: number, dy: number, w: number, h: number, fill: string, rad = 0) => {
