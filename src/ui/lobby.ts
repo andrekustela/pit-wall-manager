@@ -2,6 +2,7 @@ import type { Connection } from "../net/connection";
 import { LAP_OPTIONS, type LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
+import { previewCanvas } from "../render/car3d";
 import { ACTIVE_TRACKS, CIRCUITS, randomTrack } from "../sim/track";
 import { champRounds } from "../sim/championship";
 import { drawTrackThumb, esc, storeSet, teamName } from "./common";
@@ -121,7 +122,8 @@ export class LobbyScreen {
       // mesma imagem da corrida, sem esticar (mantém a proporção)
       const t = TEAMS.find((x) => x.id === cv.dataset.sprite)!;
       const lv = owner(t.id)?.livery;
-      const img = carImage(lv ? { ...t, color: lv.base, accent: lv.accent, livery: lv } : t).canvas;
+      const tm = lv ? { ...t, color: lv.base, accent: lv.accent, livery: lv } : t;
+      const img = previewCanvas(tm, () => carImage(tm).canvas);
       const k = Math.min(cv.width / img.width, cv.height / img.height);
       const w = img.width * k, h = img.height * k;
       cv.getContext("2d")!.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);

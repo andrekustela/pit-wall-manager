@@ -368,6 +368,11 @@ export function partPiece(team: Team, part: "asa_d" | "asa_t" | "roda", which: "
   return { img: { canvas: cv, wM: cv.width * k, hM: cv.height * k }, dx: ((x0 + x1) / 2 - W / 2) * k, dy: (cy - H / 2) * k };
 }
 
+/** imagem do carro pra prévias (editor de pintura, lobby): o 3D se estiver ligado e carregado, senão o 2D */
+export function previewCanvas(team: Team, fallback: () => HTMLCanvasElement): HTMLCanvasElement {
+  return (car3dPref.on && car3dPreview(team)) || fallback();
+}
+
 /** carro inteiro numa imagem (prévias: editor de pintura, lobby) */
 export function car3dPreview(team: Team): HTMLCanvasElement | null {
   if (!car3dReady() || !assets) return null;

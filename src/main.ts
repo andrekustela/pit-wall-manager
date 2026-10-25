@@ -5,6 +5,7 @@ import { showCalendar } from "./ui/calendar";
 import { showLoading } from "./ui/loading";
 import { teamVoice } from "./audio/voice";
 import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
+import { car3dReady } from "./render/car3d";
 
 /** título da tela de carregamento no começo do fim de semana */
 function weekendLabel(l: LobbyState): string {
@@ -583,6 +584,7 @@ class App {
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
+  car3dReady(); // já vai carregando o carro 3D (prévias do editor e do lobby)
   onSaveWarn((msg) => toast(msg)); // gravação do campeonato falhou (sem espaço): avisa
   if (location.search.includes("debug")) (window as unknown as { __app: App }).__app = appInst;
   // tela de abertura (do index.html): completa a logo e some

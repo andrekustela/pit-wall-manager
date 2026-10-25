@@ -1,5 +1,6 @@
 // Editor de pintura do carro e do emblema da equipe, com prévia ao vivo.
 import { carImage } from "../render/carArt";
+import { previewCanvas } from "../render/car3d";
 import { emblemSvg } from "../render/emblem";
 import { TEAMS } from "../sim/data";
 import { EMBLEM_SHAPES, EMBLEM_SYMBOLS, PATTERNS, cleanLivery, defaultLivery, initialsOf, type Livery } from "../sim/livery";
@@ -78,7 +79,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
     g.fillRect(0, 0, W, H);
     g.fillStyle = "rgba(255,255,255,.12)";
     for (let y = 12; y < H; y += 36) g.fillRect(W / 2 - 1, y, 2, 18);
-    const img = carImage(previewTeam(lv)).canvas;
+    const img = previewCanvas(previewTeam(lv), () => carImage(previewTeam(lv)).canvas);
     const scale = Math.min((H * 0.9) / img.width, (W * 0.9) / img.height);
     g.save();
     g.translate(W / 2, H / 2);
@@ -111,7 +112,8 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
         cv.width = 96;
         cv.height = 40;
         const g = cv.getContext("2d")!;
-        const img = carImage(previewTeam({ ...lv, pattern: id })).canvas;
+        const pt = previewTeam({ ...lv, pattern: id });
+        const img = previewCanvas(pt, () => carImage(pt).canvas);
         const k = Math.min(96 / img.width, 40 / img.height);
         g.drawImage(img, (96 - img.width * k) / 2, (40 - img.height * k) / 2, img.width * k, img.height * k);
       });
