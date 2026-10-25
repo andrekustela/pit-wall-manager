@@ -1160,3 +1160,14 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .carstatus .floor { fill: rgba(0,0,0,.25); stroke: #3a4150 !important; stroke-width: .9 !important; }
 .carstatus .halo { stroke: #c9ced8 !important; stroke-width: 1.5 !important; }
 .carstatus .rim { stroke: rgba(0,0,0,.45) !important; stroke-width: 1 !important; }
+/* pedido de autorização do piloto (topo, embaixo da barra de velocidade) */
+.reqbox { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 58; width: min(460px, 92vw); padding: 10px 14px 0; background: #0b0e15f2;
+  border: 1px solid #ffd23f; box-shadow: 0 0 0 1px #ffd23f55, 0 8px 30px #0008; animation: reqin 260ms cubic-bezier(0.23, 1, 0.32, 1); }
+.reqtop b { display: block; font-family: var(--pix); letter-spacing: .1em; color: #ffd23f; font-size: 13px; }
+.reqtop span { display: block; margin: 4px 0 8px; font-size: 15px; }
+.reqbtns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.reqbtns kbd { font: 11px var(--pix); opacity: .7; margin-left: 4px; }
+.reqbar { height: 3px; margin: 10px -14px 0; background: #ffffff14; }
+.reqbar i { display: block; height: 100%; background: #ffd23f; transition: width .2s linear; }
+@keyframes reqin { from { opacity: 0; transform: translate(-50%, -8px); } }
+@media (prefers-reduced-motion: reduce) { .reqbox { animation: none; } }

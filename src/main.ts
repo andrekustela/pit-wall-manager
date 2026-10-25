@@ -6,6 +6,7 @@ import { showLoading } from "./ui/loading";
 import { teamVoice } from "./audio/voice";
 import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
 import { car3dReady } from "./render/car3d";
+import { DriverRequests } from "./ui/requests";
 
 /** título da tela de carregamento no começo do fim de semana */
 function weekendLabel(l: LobbyState): string {
@@ -154,6 +155,8 @@ class App {
   }
 
   /** jogo solo montado no menu (tipo, pista, regras): começa direto, sem a tela de lobby */
+  /** pedidos de autorização do piloto no rádio (na corrida) */
+  private requests: DriverRequests | null = null;
   private autoSetup: SoloSetup | null = null;
   private autoRunning = false;
 
@@ -473,6 +476,8 @@ class App {
     window.addEventListener("keydown", view.onKey);
     // comando de voz: o engenheiro executa pelos mesmos botões do card do piloto
     voiceCmd.onCommand = (a, heard) => this.voiceCommand(view, a, heard);
+    this.requests?.destroy();
+    this.requests = AUTO ? null : new DriverRequests(race, (a, slot) => this.act(view, a, slot), (t) => view.hud.note(t));
 
     let lastT = performance.now();
     let hudT = 0;
@@ -490,6 +495,7 @@ class App {
         if (realDt < 0.5) sound.events(race.events.slice(this.soundEvents), my);
         this.soundEvents = race.events.length;
       }
+      this.requests?.tick(my);
       view.minimap.draw(view.follow);
       view.hud.drawOnboard(realDt, view.renderer.interp);
       view.renderer.setBottomInset(view.hud.coverHeight() * 0.85);
@@ -510,60 +516,60 @@ class App {
     if (AUTO && params.get("speed")) setSpeed(Number(params.get("speed")));
   }
 
-  /** comando de voz reconhecido -> clica no botão certo do card e o engenheiro confirma no rádio */
+  /** executa uma ordem num piloto (clica no botão certo do card); devolve o que foi feito e a resposta no rádio */
+  act(view: RaceView, a: Exclude<VoiceAction, { kind: "yes" } | { kind: "no" }>, slot: number): { what: string; ack: string } | null {
+    const id = teamVoice.drivers()[slot]?.id;
+    const car = view.race.cars.find((c) => c.id === id);
+    const card = id ? document.querySelector<HTMLElement>(`.driver.panel[data-id="${id}"]`) : null;
+    if (!car || !card) return null;
+    const click = (sel: string) => card.querySelector<HTMLButtonElement>(sel)?.click();
+    switch (a.kind) {
+      case "box":
+        if (!car.boxRequest) click(".boxbtn");
+        return { what: "box nesta volta", ack: "ok_box" };
+      case "cancelBox":
+        if (car.boxRequest) click(".boxbtn");
+        return { what: "cancelar o box", ack: "ok_cancela" };
+      case "tyre":
+        click(`[data-next="${a.compound}"]`);
+        if (a.box && !car.boxRequest) click(".boxbtn");
+        return { what: `pneu ${COMPOUNDS[a.compound].label}${a.box ? " e box" : ""}`, ack: a.box ? "ok_box" : "ok_pneu" };
+      case "pace":
+        click(`[data-pace="${a.mode}"]`);
+        return { what: `ritmo ${PACE[a.mode].label}`, ack: a.mode === "push" ? "ok_atacar" : a.mode === "conserve" ? "ok_poupar" : "ok_normal" };
+      case "engine":
+        click(`[data-engine="${a.mode}"]`);
+        return { what: `motor ${ENGINE[a.mode].label}`, ack: a.mode === "rich" ? "ok_rico" : a.mode === "lean" ? "ok_pobre" : "ok_motor_normal" };
+      case "order":
+        click(`[data-order="${a.mode}"]`);
+        // a ordem vira rádio na corrida e o piloto responde por lá
+        return { what: a.mode === "letPass" ? "deixar o companheiro passar" : a.mode === "hold" ? "manter posições" : "liberados", ack: "" };
+    }
+  }
+
+  /** comando de voz reconhecido: responde um pedido do piloto (sim/não) ou executa a ordem */
   private voiceCommand(view: RaceView, a: VoiceAction | null, heard: string) {
     if (this.view !== view) return;
+    if (a?.kind === "yes" || a?.kind === "no") {
+      if (!this.requests?.answer(a.kind === "yes")) view.hud.note(`🎙 Você: "${heard}" (nenhum pedido pra responder)`);
+      return;
+    }
     const cars = teamVoice.drivers();
     const followSlot = cars.findIndex((d) => d.id === view.follow);
     const slot = a?.slot ?? (followSlot >= 0 ? followSlot : 0);
-    const id = cars[slot]?.id;
-    const car = view.race.cars.find((c) => c.id === id);
-    const card = id ? document.querySelector<HTMLElement>(`.driver.panel[data-id="${id}"]`) : null;
-    const click = (sel: string) => card?.querySelector<HTMLButtonElement>(sel)?.click();
-    const who = `P${slot + 1}`;
-    if (!a || !car || !card) {
+    const r = a ? this.act(view, a, slot) : null;
+    if (!r) {
       view.hud.note(heard ? `🎙 Você: "${heard}" (não entendi)` : "🎙 Não ouvi nada");
       teamVoice.sayId("nao_entendi", slot);
       return;
     }
-    let ack = "ok_box", what = "";
-    switch (a.kind) {
-      case "box":
-        if (!car.boxRequest) click(".boxbtn");
-        what = "box nesta volta";
-        break;
-      case "cancelBox":
-        if (car.boxRequest) click(".boxbtn");
-        ack = "ok_cancela";
-        what = "cancelar o box";
-        break;
-      case "tyre":
-        click(`[data-next="${a.compound}"]`);
-        if (a.box && !car.boxRequest) click(".boxbtn");
-        ack = a.box ? "ok_box" : "ok_pneu";
-        what = `pneu ${COMPOUNDS[a.compound].label}${a.box ? " e box" : ""}`;
-        break;
-      case "pace":
-        click(`[data-pace="${a.mode}"]`);
-        ack = a.mode === "push" ? "ok_atacar" : a.mode === "conserve" ? "ok_poupar" : "ok_normal";
-        what = `ritmo ${PACE[a.mode].label}`;
-        break;
-      case "engine":
-        click(`[data-engine="${a.mode}"]`);
-        ack = a.mode === "rich" ? "ok_rico" : a.mode === "lean" ? "ok_pobre" : "ok_motor_normal";
-        what = `motor ${ENGINE[a.mode].label}`;
-        break;
-      case "order":
-        click(`[data-order="${a.mode}"]`);
-        ack = ""; // a ordem vira rádio na corrida e o piloto responde por lá
-        what = a.mode === "letPass" ? "deixar o companheiro passar" : a.mode === "hold" ? "manter posições" : "liberados";
-        break;
-    }
-    view.hud.note(`🎙 Você → ${who}: ${what}`);
-    if (ack) teamVoice.sayId(ack, slot);
+    view.hud.note(`🎙 Você → P${slot + 1}: ${r.what}`);
+    if (r.ack) teamVoice.sayId(r.ack, slot);
   }
 
   private teardown() {
+    this.requests?.destroy();
+    this.requests = null;
     this.screen?.destroy();
     this.screen = null;
     if (this.view) {

@@ -12,9 +12,12 @@ const WORDS = [
   "box", "boxe", "cancela", "cancelar", "ataca", "atacar", "ataque", "força", "forçar", "poupa", "poupar", "economiza",
   "normal", "ritmo", "motor", "rico", "rica", "pobre", "deixa", "passar", "mantenham", "mantém", "posição", "posições",
   "liberados", "livre", "pneu", "macio", "médio", "duro", "chuva", "intermediário",
+  "sim", "pode", "aceito", "aceita", "não", "negativo", "nega",
 ];
 
 export type VoiceAction =
+  | { kind: "yes"; slot: null }
+  | { kind: "no"; slot: null }
   | { kind: "box"; slot: number | null }
   | { kind: "cancelBox"; slot: number | null }
   | { kind: "tyre"; slot: number | null; compound: "S" | "M" | "H" | "I" | "W"; box: boolean }
@@ -26,6 +29,9 @@ export type VoiceAction =
 export function parseCommand(raw: string): VoiceAction | null {
   const t = ` ${raw.toLowerCase().replace(/\[unk\]/g, " ").replace(/\s+/g, " ").trim()} `;
   if (!t.trim()) return null;
+  // resposta a um pedido do piloto
+  if (/ (não|negativo|nega) /.test(t)) return { kind: "no", slot: null };
+  if (/ (sim|aceito|aceita) /.test(t) || t.trim() === "pode") return { kind: "yes", slot: null };
   const slot = / (um|primeiro) /.test(t) ? 0 : / (dois|segundo) /.test(t) ? 1 : null;
   const box = / box(e)? /.test(t);
   if (/ cancela(r)? /.test(t)) return { kind: "cancelBox", slot };

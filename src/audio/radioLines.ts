@@ -123,6 +123,13 @@ export const RADIO_LINES: RadioLine[] = [
   { id: "ok_pobre", who: "driver", react: true, match: /^$/, lines: ["Copiado, motor pobre."] },
   { id: "ok_motor_normal", who: "driver", react: true, match: /^$/, lines: ["Motor no normal, ok."] },
   { id: "ok_pneu", who: "driver", react: true, match: /^$/, lines: ["Entendido, esse pneu na próxima parada.", "Copiado, anotado o pneu."] },
+  // pedidos de autorização (o piloto pede; você aceita ou recusa)
+  { id: "req_atacar", who: "driver", react: true, match: /^$/, lines: ["Tô mais rápido que o da frente. Posso atacar?", "Dá pra passar ele! Me libera pra forçar?"] },
+  { id: "req_motor", who: "driver", react: true, match: /^$/, lines: ["Me dá mais motor, quero passar na reta!", "Posso usar o motor rico umas voltas?"] },
+  { id: "req_box", who: "driver", react: true, match: /^$/, lines: ["Os pneus já foram. Posso parar?", "Não tenho mais pneu, me chama pro box?"] },
+  { id: "req_trocar", who: "driver", react: true, match: /^$/, lines: ["Sou mais rápido que o meu companheiro. Pede pra ele abrir?", "Tô preso atrás do meu companheiro, deixa eu passar?"] },
+  { id: "req_poupar", who: "driver", react: true, match: /^$/, lines: ["O combustível não vai chegar. Posso poupar?", "Tô gastando demais, posso economizar?"] },
+  { id: "req_nao", who: "driver", react: true, match: /^$/, lines: ["Tá bom, vou segurar.", "Entendido... mas eu tava mais rápido.", "Ok, sigo assim então."] },
   { id: "nao_entendi", who: "driver", react: true, match: /^$/, lines: ["Não entendi, repete?", "Não copiei. Pode repetir?"] },
 ];
 
