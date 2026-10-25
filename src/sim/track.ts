@@ -33,6 +33,8 @@ export interface TrackDef {
   firstGP?: number;
   /** o 1º ponto é a linha de largada real: o grid fica na reta dele (senão, na maior reta) */
   realStart?: boolean;
+  /** nome original (pro traçado ideal e pra história: o Editor pode renomear a pista) */
+  lineKey?: string;
   /** guardada (fora do sorteio, do seletor e do menu); o índice fica pra saves e recordes antigos */
   standby?: boolean;
 }
@@ -40,6 +42,7 @@ export interface TrackDef {
 import { turtle } from "./trackShape";
 import { REAL_CIRCUITS } from "./realCircuits";
 import { REAL_TRACKS } from "./realTracks";
+import { LINE_STEP, RACING_LINES } from "./racingLines";
 
 export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
@@ -167,7 +170,7 @@ const HANDMADE: TrackDef[] = [
 ];
 
 /** todas as pistas, na ordem dos índices (saves e recordes guardam o índice: só acrescentar no fim) */
-export const CIRCUITS: TrackDef[] = [...HANDMADE.map((t) => ({ ...t, standby: true })), ...REAL_TRACKS];
+export const CIRCUITS: TrackDef[] = [...HANDMADE.map((t) => ({ ...t, standby: true })), ...REAL_TRACKS].map((t) => ({ ...t, lineKey: t.name }));
 /** índices das pistas em uso (sorteio, seletor, menu, ranking) */
 export const ACTIVE_TRACKS: number[] = CIRCUITS.flatMap((t, i) => (t.standby ? [] : [i]));
 /** uma pista em uso, sorteada (sem repetir a pista "evitar", se der) */
@@ -295,9 +298,100 @@ export class Track {
     this.pitBoxStart = this.L - runLen * 0.28;
     this.pitBoxEnd = runLen * 0.2;
 
+    // traçado ideal (achado pelo carro de teste): por onde os carros andam e onde são rápidos
+    const line = RACING_LINES[def.lineKey ?? def.name]?.o;
+    if (line) {
+      // o carro de teste deixa umas tremidas nas retas (custam quase nada pra ele): alisa
+      const N = line.length, wgt = [1, 2, 3, 2, 1];
+      this.line = line.map((_, j) => wgt.reduce((a, w, q) => a + w * line[(j + q - 2 + N) % N], 0) / 9);
+      this.lineK = this.lineCurvature();
+    }
     const p = this.profile(DEFAULT_PHYS.latAcc, DEFAULT_PHYS.vmax);
     this.vProfile = p.v;
     this.idealLap = p.lap;
+    this.drsZones = this.findDrsZones();
+  }
+
+  /** zonas de DRS: as 2 retas mais longas (pelo menos 350 m acima de 75 m/s); [início, fim] em s */
+  drsZones: [number, number][] = [];
+
+  private findDrsZones(): [number, number][] {
+    const n = this.L, fast = (i: number) => this.vProfile[((i % n) + n) % n] > 75;
+    let i0 = 0;
+    while (i0 < n && fast(i0)) i0++; // começa num ponto lento pra não partir uma reta no meio
+    const runs: [number, number][] = [];
+    let a = -1;
+    for (let k = i0; k <= i0 + n; k++) {
+      if (fast(k) && a < 0) a = k;
+      else if (!fast(k) && a >= 0) {
+        if (k - a >= 350) runs.push([a % n, k - a]);
+        a = -1;
+      }
+    }
+    return runs
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 2)
+      .map(([st, len]) => [st + 40, st + len - 30] as [number, number]); // abre logo depois da saída da curva
+  }
+
+  /** dentro de uma zona de DRS? (devolve o índice da zona ou -1) */
+  drsZoneAt(s: number): number {
+    s = this.wrap(s);
+    for (let z = 0; z < this.drsZones.length; z++) {
+      const [a, b] = this.drsZones[z];
+      if (this.wrap(s - a) < b - a) return z;
+    }
+    return -1;
+  }
+
+  /** traçado ideal: distância até o meio (m, + = direita) a cada LINE_STEP m; null = pista sem traçado */
+  private line: number[] | null = null;
+  /** curvatura ao longo do traçado ideal (no lugar da do meio da pista, pro perfil de velocidade) */
+  private lineK: number[] | null = null;
+
+  /** tem traçado ideal calculado? (as pistas guardadas não têm) */
+  get hasLine(): boolean {
+    return !!this.line;
+  }
+
+  /** distância do traçado ideal até o meio da pista em s (m); 0 sem traçado */
+  lineAt(s: number): number {
+    const o = this.line;
+    if (!o) return 0;
+    const N = o.length;
+    const u = this.wrap(s) / LINE_STEP, f = u - Math.floor(u), j = Math.floor(u) % N;
+    const p0 = o[(j - 1 + N) % N], p1 = o[j], p2 = o[(j + 1) % N], p3 = o[(j + 2) % N];
+    return 0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (-p0 + 3 * p1 - 3 * p2 + p3) * f * f * f);
+  }
+
+  /** curvatura do caminho do traçado ideal, a cada metro do meio da pista */
+  private lineCurvature(): number[] {
+    const n = this.L, px = new Float64Array(n), py = new Float64Array(n), h = new Float64Array(n), ds = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = this.pose(i, this.lineAt(i));
+      px[i] = p.x;
+      py[i] = p.y;
+    }
+    for (let i = 0; i < n; i++) {
+      const a = (i - 2 + n) % n, b = (i + 2) % n, c = (i + 1) % n;
+      h[i] = Math.atan2(py[b] - py[a], px[b] - px[a]);
+      ds[i] = Math.hypot(px[c] - px[i], py[c] - py[i]);
+    }
+    const W = 12, k: number[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      let len = 0;
+      for (let j = -W; j < W; j++) len += ds[(i + j + n) % n];
+      k[i] = angDiff(h[(i - W + n) % n], h[(i + W) % n]) / Math.max(1, len);
+    }
+    // média móvel de ±15 m: some com o resto das tremidas
+    const out: number[] = new Array(n), M = 15;
+    let acc = 0;
+    for (let j = -M; j <= M; j++) acc += k[(j + n) % n];
+    for (let i = 0; i < n; i++) {
+      out[i] = acc / (2 * M + 1);
+      acc += k[(i + M + 1) % n] - k[(i - M + n) % n];
+    }
+    return out;
   }
 
   private computeGeometry(pts: Vec[]) {
@@ -352,24 +446,42 @@ export class Track {
     const hit = this.profiles.get(key);
     if (hit) return hit;
     const n = this.L;
-    const v = new Float32Array(n);
-    for (let i = 0; i < n; i++) v[i] = Math.min(vmax, Math.sqrt(latAcc / Math.max(Math.abs(this.curvature[i]), 1e-6)));
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = n - 1; i >= 0; i--) {
-        const nx = v[(i + 1) % n];
-        v[i] = Math.min(v[i], Math.sqrt(nx * nx + 2 * BRAKE));
+    const speeds = (curv: number[], grip: number) => {
+      const v = new Float32Array(n);
+      for (let i = 0; i < n; i++) v[i] = Math.min(vmax, Math.sqrt(grip / Math.max(Math.abs(curv[i]), 1e-6)));
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = n - 1; i >= 0; i--) {
+          const nx = v[(i + 1) % n];
+          v[i] = Math.min(v[i], Math.sqrt(nx * nx + 2 * BRAKE));
+        }
+        for (let i = 0; i < n; i++) {
+          const pv = v[(i - 1 + n) % n];
+          const acc = Math.max(2, 14 * (1 - pv / (vmax + 6)));
+          v[i] = Math.min(v[i], Math.sqrt(pv * pv + 2 * acc));
+        }
       }
-      for (let i = 0; i < n; i++) {
-        const pv = v[(i - 1 + n) % n];
-        const acc = Math.max(2, 14 * (1 - pv / (vmax + 6)));
-        v[i] = Math.min(v[i], Math.sqrt(pv * pv + 2 * acc));
+      let lap = 0;
+      for (let i = 0; i < n; i++) lap += 1 / v[i];
+      return { v, lap };
+    };
+    // o tempo de volta continua o do meio da pista (já perto da F1 real); com traçado ideal,
+    // a velocidade em cada ponto segue o formato dele (freia e contorna onde o traçado manda).
+    // o traçado é mais rápido: tira aderência de curva até a volta bater (freada e aceleração
+    // continuam as de sempre, senão o carro não conseguiria seguir o perfil)
+    const center = speeds(this.curvature, latAcc);
+    let v = center.v;
+    const lap = center.lap;
+    if (this.lineK) {
+      let lo = latAcc * 0.3, hi = latAcc;
+      for (let it = 0; it < 14; it++) {
+        const mid = (lo + hi) / 2;
+        if (speeds(this.lineK, mid).lap < lap) hi = mid;
+        else lo = mid;
       }
+      v = speeds(this.lineK, (lo + hi) / 2).v;
     }
-    let lap = 0, top = 0;
-    for (let i = 0; i < n; i++) {
-      lap += 1 / v[i];
-      if (v[i] > top) top = v[i];
-    }
+    let top = 0;
+    for (let i = 0; i < n; i++) if (v[i] > top) top = v[i];
     const p = { v, lap, top };
     this.profiles.set(key, p);
     return p;

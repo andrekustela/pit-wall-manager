@@ -5,8 +5,7 @@
 // pronto, mostra uma versão de baixa resolução do mapa inteiro (sem buracos).
 import { TEAMS } from "../sim/data";
 import { Rng } from "../sim/rng";
-import { CIRCUITS, PIT_LATERAL, TRACK_WIDTH, Track } from "../sim/track";
-import { hasRacingLine, racingLineAt } from "../sim/racingLine";
+import { PIT_LATERAL, TRACK_WIDTH, Track } from "../sim/track";
 
 interface Box {
   x0: number;
@@ -241,9 +240,8 @@ export class VectorWorld {
     });
     // borracha: por onde os carros passam no traçado ideal (o carro de teste achou); pista sem
     // traçado calculado (as guardadas) fica sem borracha
-    const ti = CIRCUITS.indexOf(t.def);
-    if (hasRacingLine(ti)) {
-      const lat = (s: number) => Math.max(-W / 2 + 1.5, Math.min(W / 2 - 1.5, racingLineAt(ti, s)));
+    if (t.hasLine) {
+      const lat = (s: number) => Math.max(-W / 2 + 1.5, Math.min(W / 2 - 1.5, t.lineAt(s)));
       const rubber = this.chunks(this.line(0, L - 1, lat, 2), true);
       // duas passadas: uma larga e clarinha (as rodas espalham) e o miolo mais escuro
       // (cor sólida: com transparência, as emendas entre trechos viravam bolinhas escuras)

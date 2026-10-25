@@ -100,6 +100,8 @@ const LANE_STEP = 3.4;
 const LANE_EDGE = TRACK_WIDTH / 2 - 1.6;
 /** quanto o lado de dentro da curva encurta o caminho (0 = nada, 1 = geometria pura) */
 const INSIDE_LINE = 0.45;
+/** mais briga que na F1 de verdade: multiplica a chance de tentar uma ultrapassagem */
+const ATTACK_BOOST = 1.35;
 
 /** consumo por volta em modo normal */
 export function fuelPerLap(laps: number): number {
@@ -108,7 +110,7 @@ export function fuelPerLap(laps: number): number {
 
 /** campos do carro que mudam durante a corrida (vão no snapshot da rede) */
 const SNAP_KEYS = [
-  "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
+  "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
   "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
@@ -504,9 +506,9 @@ export class Race {
       else c.v = Math.max(target, c.v - (c.spin > 0 ? 70 : 45) * dt);
 
       const prevS = c.s;
-      // por dentro da curva o caminho é mais curto: quem mergulha por dentro ganha terreno
+      // por dentro da curva (em relação ao traçado ideal) o caminho é mais curto: quem mergulha por dentro ganha terreno
       const k = c.pit === "none" ? this.track.curvature[Math.floor(this.track.wrap(c.s)) % this.track.L] : 0;
-      const ds = c.v * dt * (1 + Math.max(-0.04, Math.min(0.04, INSIDE_LINE * k * c.lateral)));
+      const ds = c.v * dt * (1 + Math.max(-0.04, Math.min(0.04, INSIDE_LINE * k * (c.lateral - this.track.lineAt(c.s)))));
       c.s += ds;
 
       if (!c.finished) {
@@ -781,6 +783,10 @@ export class Race {
     if (c.offTrack > 0) return c.offFate === "stuck" ? 0 : 14;
     let v = c.finished ? base * 0.62 : base * (c.profileLap / c.targetLap);
     if (c.dirtyAir && base < 72) v *= 0.985; // ar sujo: menos pressão aerodinâmica na curva
+    // fora do traçado a pista é suja (poeira, pedaços de borracha): menos aderência na curva.
+    // na reta não pesa nada, e quem está no meio de uma ultrapassagem também não (queremos mais
+    // briga que na F1 de verdade): pesa pra quem erra o traçado sozinho
+    if (base < 72 && c.pit === "none") v *= 1 - Math.min(0.025, (c.overtaking ? 0 : 0.004) * Math.abs(c.lateral - this.track.lineAt(c.s)));
     if (this.sc.active && !c.finished) v = Math.min(v, base * 0.7);
     if (c.pit === "entering" || c.pit === "leaving") {
       const box = this.boxS(c);
@@ -813,18 +819,57 @@ export class Race {
     return d;
   }
 
-  /** faixa livre ao lado do carro da frente (ou null) */
+  /** quanto o vácuo e o DRS empurram o carro agora (multiplica a velocidade alvo) */
+  private slipstream(c: CarState): number {
+    // carro mais perto na frente (qualquer faixa perto o bastante pra pegar o vácuo)
+    let ahead: CarState | null = null, gap = Infinity;
+    for (const o of this.cars) {
+      if (o === c || o.retired || o.pit !== "none" || this.zone(o) !== "track") continue;
+      const d = this.rel(c, o);
+      if (d > 0 && d < gap) {
+        gap = d;
+        ahead = o;
+      }
+    }
+    // DRS: decide na entrada da zona (a menos de 1 s do da frente), vale até o fim dela
+    const z = this.track.drsZoneAt(c.s);
+    if (z !== c.drsZ) {
+      c.drsZ = z;
+      c.drs = z >= 0 && c.lap >= 1 && this.wet < 0.25 && !!ahead && gap < Math.max(30, c.v * 1.0);
+    }
+    let k = 1;
+    if (c.drs) k *= 1.04;
+    if (ahead && gap < 80 && Math.abs(this.relLat(ahead) - this.relLat(c)) < 4 && this.track.isStraight(c.s)) k *= 1 + 0.05 * (1 - gap / 80);
+    return k;
+  }
+
+  /** posição lateral em relação ao traçado ideal (0 = em cima dele) */
+  private relLat(o: CarState): number {
+    return o.lateral - this.track.lineAt(o.s);
+  }
+
+  /** posição lateral (absoluta) a off metros do traçado ideal, um pouco à frente de s, dentro da pista */
+  private onLine(s: number, off: number): number {
+    return Math.max(-LANE_EDGE, Math.min(LANE_EDGE, this.track.lineAt(s + 12) + off));
+  }
+
+  /** faixa livre ao lado do carro da frente, em relação ao traçado ideal (ou null) */
   private freeSide(c: CarState, blocker: CarState): number | null {
-    const cands = [blocker.lateral - LANE_STEP, blocker.lateral + LANE_STEP]
-      .filter((x) => Math.abs(x) <= LANE_EDGE)
+    // tudo medido em relação ao traçado ideal (ele cruza a pista: quem está 30 m na frente na
+    // mesma fila fica em outra posição lateral). Perto da zebra o lado de fora encolhe: ainda
+    // serve se couber o carro
+    const ln = this.track.lineAt(c.s), rb = this.relLat(blocker);
+    const cands = [rb - LANE_STEP, rb + LANE_STEP]
+      .map((x) => Math.max(-LANE_EDGE, Math.min(LANE_EDGE, ln + x)) - ln)
+      .filter((x) => Math.abs(x - rb) >= CAR_W + 0.5)
       .sort((x, y) => Math.abs(x) - Math.abs(y));
-    for (const lat of cands) {
+    for (const off of cands) {
       const busy = this.cars.some((o) => {
         if (o === c || o === blocker || o.pit === "parked" || this.zone(o) !== "track") return false;
         const d = this.rel(c, o);
-        return d > -10 && d < 18 && Math.abs(o.lateral - lat) < CAR_W + 0.6;
+        return d > -10 && d < 18 && Math.abs(this.relLat(o) - off) < CAR_W + 0.6;
       });
-      if (!busy) return lat;
+      if (!busy) return off;
     }
     return null;
   }
@@ -840,10 +885,10 @@ export class Race {
       if (c.pit === "none") {
         // largada: cada um segura a sua fila até a primeira curva (chegam lado a lado)
         const opening = c.lap < 0 || (c.lap === 0 && this.dist(c) < 550);
-        let want = c.finished ? 4 : opening ? Math.round(c.lateral / LANE_STEP) * LANE_STEP : 0;
+        let want = c.finished ? 4 : opening ? Math.round(c.lateral / LANE_STEP) * LANE_STEP : this.track.lineAt(c.s + 12);
         // vai pro lado do pit antes da entrada
         if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
-        if (c.defendTill > this.time) want = c.defendLat;
+        if (c.defendTill > this.time) want = this.onLine(c.s, c.defendLat);
         // ordem de equipe: abre espaço pro companheiro que está chegando
         if (c.order === "letPass") {
           const m = this.mate(c);
@@ -856,7 +901,7 @@ export class Race {
             // até ~3 s atrás: tira o pé pra ele chegar; colado: abre a faixa e deixa passar
             if (d > 0 && d < 220) {
               myT *= d < 40 ? 0.9 : 0.95;
-              if (d < 70) want = Math.abs(c.lateral) > 1 ? Math.sign(c.lateral) * LANE_STEP : LANE_STEP;
+              if (d < 70) want = this.onLine(c.s, this.track.lineAt(c.s) > 0 ? -LANE_STEP : LANE_STEP); // sai do traçado
             }
           }
         }
@@ -865,7 +910,9 @@ export class Race {
           if (o === c || o.finished || o.retired || o.pit !== "none") continue;
           const d = this.rel(c, o);
           if (d < 0 && d > -35 && this.dist(o) > this.dist(c) + this.track.L / 2) {
-            want = o.lateral >= 0 ? -LANE_STEP : LANE_STEP;
+            // bandeira azul: sai do traçado pra quem vem colocar volta
+            const ln = this.track.lineAt(c.s);
+            want = Math.max(-LANE_EDGE, Math.min(LANE_EDGE, ln + (ln > 0 ? -LANE_STEP : LANE_STEP)));
             myT *= 0.97;
           }
         }
@@ -876,7 +923,7 @@ export class Race {
         for (const o of this.cars) {
           if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
           const d = this.rel(c, o);
-          if (d > 0 && d < 45 && d < gap && Math.abs(o.lateral - c.lateral) < CAR_W + 0.4) {
+          if (d > 0 && d < 45 && d < gap && Math.abs(this.relLat(o) - this.relLat(c)) < CAR_W + 0.4) {
             gap = d;
             blocker = o;
           }
@@ -902,7 +949,7 @@ export class Race {
             // ultrapassador x muralha
             const craft = ((c.driver.profile?.overtaking ?? 60) - (o.driver.profile?.defending ?? 60)) * 0.002;
             const ov = this.track.def.overtake ?? 1;
-            const p = o.order === "letPass" && o.team.id === c.team.id ? 1 : Math.max(0.12 * ov, Math.min(0.9, (0.5 + delta * 0.5 + inside + craft - this.wet * 0.05) * Math.min(1, ov * 1.6)));
+            const p = o.order === "letPass" && o.team.id === c.team.id ? 1 : Math.max(0.12 * ov, Math.min(0.9, (0.7 + delta * 0.5 + inside + craft - this.wet * 0.05) * Math.min(1, ov * 1.6)));
             if (this.rng.chance(p)) {
               o.yieldTill = this.time + 1.6; // segurou a freada e passou
             } else {
@@ -911,14 +958,14 @@ export class Race {
               this.stats.aborts++;
               if (this.rng.chance(0.05 * (1 + this.wet))) this.maybeContact(c, o, c, 1); // mergulhou demais
             }
-            want = c.overtaking ? c.lateralTarget : want;
+            want = c.overtaking ? this.onLine(c.s, c.otOff ?? 0) : want;
           } else {
-            want = c.lateralTarget;
-            if (d > 0 && d < 25) myT *= this.track.isStraight(c.s) ? 1.028 : 1.01; // vácuo + "DRS" na reta
+            want = this.onLine(c.s, c.otOff ?? 0);
+            if (d > 0 && d < 25) myT *= this.track.isStraight(c.s) ? 1.01 : 1.005; // embalado pra completar a manobra
           }
         }
-        // "DRS": colado no da frente na reta (a partir da 2ª volta) o carro chega mais rápido
-        if (!sc.active && blocker && gap < 30 && c.lap >= 1 && this.track.isStraight(c.s)) myT *= 1.015;
+        // vácuo e DRS (mais fortes que na F1 de verdade, pra ter mais ultrapassagem)
+        if (!sc.active && !c.finished) myT *= this.slipstream(c);
         // na arrancada ninguém troca de fila (senão todo mundo ia pro meio e virava fila indiana);
         // as brigas começam a partir da primeira curva
         if (!sc.active && !c.overtaking && blocker && !c.finished && gap < 20 && !opening) {
@@ -936,9 +983,9 @@ export class Race {
             // na chuva o spray atrapalha: tenta menos
             // piloto agressivo tenta muito mais
             const aggr = ((c.driver.profile?.aggression ?? 55) - 50) * 0.003;
-            const p = Math.max(0.08, Math.min(0.95, 0.32 + delta * 0.7 + aggr + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.08 : 0) - this.wet * 0.06));
-            c.nextAttemptS = this.dist(c) + (firstLap ? 220 : 300);
-            go = this.rng.chance(p * (this.track.def.overtake ?? 1));
+            const p = Math.max(0.08, Math.min(0.95, 0.42 + delta * 0.7 + aggr + (gap < 12 ? 0.1 : 0) + (firstLap ? 0.08 : 0) - this.wet * 0.06));
+            c.nextAttemptS = this.dist(c) + (firstLap ? 180 : 220);
+            go = this.rng.chance(Math.min(0.97, p * ATTACK_BOOST * (this.track.def.overtake ?? 1)));
           }
           if (go) {
             const side = this.freeSide(c, blocker);
@@ -946,12 +993,13 @@ export class Race {
             if (side !== null) {
               this.stats.attempts++;
               c.overtaking = blocker.id;
-              want = side;
+              c.otOff = side;
+              want = this.onLine(c.s, side);
               // quem está na frente às vezes fecha a porta (se ainda não emparelharam)
               const q = this.quality(blocker.team.id);
               if (!slow && !lapping && !blocker.isHuman && gap > CAR_L + 1 && this.rng.chance((0.06 + 0.12 * q) * (0.5 + (blocker.driver.profile?.defending ?? 60) / 100))) {
                 blocker.defendTill = this.time + 2.5;
-                blocker.defendLat = Math.max(-LANE_EDGE, Math.min(LANE_EDGE, side));
+                blocker.defendLat = side;
               }
             }
           }
@@ -964,7 +1012,8 @@ export class Race {
       for (const o of this.cars) {
         if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
         const d = this.rel(c, o);
-        if (d <= 0 || d > 40 || Math.abs(o.lateral - c.lateral) >= CAR_W + 0.3) continue;
+        // (em relação ao traçado ideal: ele cruza a pista, e 30 m na frente a mesma fila fica em outra lateral)
+        if (d <= 0 || d > 40 || Math.abs(d < 8 ? o.lateral - c.lateral : this.relLat(o) - this.relLat(c)) >= CAR_W + 0.3) continue;
         const net = d - CAR_L;
         const desired = net < 0.5 ? o.v * 0.85 : o.v + 0.9 * (net - 2.5);
         myT = Math.min(myT, Math.max(0, desired));
@@ -990,7 +1039,10 @@ export class Race {
       c.lateral += Math.max(-5 * dt, Math.min(5 * dt, out - c.lateral));
       return;
     }
-    const step = Math.max(-2.6 * dt, Math.min(2.6 * dt, c.lateralTarget - c.lateral));
+    // acompanha o traçado ideal mesmo quando ele cruza a pista rápido (na reta, a 80 m/s)
+    const lineRate = c.pit === "none" ? (Math.abs(this.track.lineAt(c.s + 5) - this.track.lineAt(c.s)) / 5) * c.v : 0;
+    const rate = 2.6 + Math.min(4, lineRate);
+    const step = Math.max(-rate * dt, Math.min(rate * dt, c.lateralTarget - c.lateral));
     if (step === 0) return;
     const next = c.lateral + step;
     for (const o of this.cars) {

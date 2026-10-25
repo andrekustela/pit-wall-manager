@@ -43,6 +43,8 @@ interface CardState {
   planOpen: boolean;
   planSig: string;
   dueApplied: boolean;
+  /** "Detalhes" aberto (pneu, combustível, plano, ordens, peças) */
+  detOpen: boolean;
 }
 
 export class Hud {
@@ -360,7 +362,7 @@ export class Hud {
   private buildCards() {
     const wrap = this.el.querySelector(".team")!;
     for (const c of this.mine()) {
-      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false });
+      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, detOpen: false });
       const card = document.createElement("div");
       card.className = "driver panel";
       card.dataset.id = c.id;
@@ -370,10 +372,20 @@ export class Hud {
         <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}${partsListHtml()}</div>
         <div class="top">
           <div class="p"></div>
-          <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)}</small></div>
-          <span class="tyreslot"></span>
+          <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
+          <div class="gapsbox" title="Distância pro carro da frente e pro de trás"><div><span>FRENTE</span><b class="gf"></b></div><div><span>ATRÁS</span><b class="gb"></b></div></div>
         </div>
-        <div class="mini-line"></div>
+        <div class="mini-line chips"></div>
+        <div class="calert" hidden></div>
+        <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
+          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${"QWE"[i]} (no piloto seguido)">${PACE[m].label}<kbd>${"QWE"[i]}</kbd></button>`).join("")}
+        </div></div>
+        <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
+          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
+        </div></div>
+        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre os detalhes"></button></div>
+        <button class="moretog"><span>DETALHES: PNEU, COMBUSTÍVEL, PLANO, ORDENS</span><i>▾</i></button>
+        <div class="det">
         <div class="stats">
           <div>Última<b class="last"></b></div>
           <div>Melhor<b class="best"></b></div>
@@ -383,12 +395,6 @@ export class Hud {
         <div class="wear"><i></i></div>
         <div class="flabel" style="font-size:12px;color:var(--muted);margin:-4px 0 6px"></div>
         <div class="faultlabel"></div>
-        <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
-          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${"QWE"[i]} (no piloto seguido)">${PACE[m].label}<kbd>${"QWE"[i]}</kbd></button>`).join("")}
-        </div></div>
-        <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
-          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
-        </div></div>
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
         </div></div>
@@ -399,11 +405,11 @@ export class Hud {
           <span class="stepper"><button data-fuel="-1">−</button><b class="fval"></b><button data-fuel="1">+</button></span>
           <button class="btn small" data-fuelauto>até o fim</button>
         </div>
-        <button class="boxbtn"></button>
         <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
           <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
         </div>
-        <div class="planedit" style="display:none"></div>`;
+        <div class="planedit" style="display:none"></div>
+        </div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
       card.querySelector("[data-onboard]")!.addEventListener("click", (e) => {
@@ -453,6 +459,26 @@ export class Hud {
         else this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
         this.update();
       });
+      const toggleDet = (open = !cs.detOpen) => {
+        cs.detOpen = open;
+        card.classList.toggle("detopen", open);
+      };
+      card.querySelector(".moretog")!.addEventListener("click", () => toggleDet());
+      card.querySelector(".stopcfg")!.addEventListener("click", () => toggleDet(true));
+      // botão do alerta: a ação certa pro problema mais urgente
+      card.querySelector(".calert")!.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
+        if (!b) return;
+        const a = b.dataset.act;
+        if (a === "box" && c.pit === "none" && !c.boxRequest) this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
+        if (a === "save") {
+          this.hooks.send({ type: "engine", carId: c.id, mode: "lean" });
+          this.hooks.send({ type: "pace", carId: c.id, mode: "conserve" });
+        }
+        if (a === "cool") this.hooks.send({ type: "pace", carId: c.id, mode: "conserve" });
+        if (a === "push") this.hooks.send({ type: "pace", carId: c.id, mode: "push" });
+        this.update();
+      });
       card.querySelector("[data-plantoggle]")!.addEventListener("click", () => {
         cs.planOpen = !cs.planOpen;
         cs.planSig = "";
@@ -492,6 +518,89 @@ export class Hud {
     if (cs.fuelLaps !== null) return this.kg(cs.fuelLaps);
     const need = this.race.consumption(c) * this.race.lapsLeft(c) * 1.04 + 1.5 - c.fuel;
     return Math.max(0, Math.min(FUEL_MAX - c.fuel + this.race.consumption(c), Math.ceil(need)));
+  }
+
+  /** topo do card: distâncias, chips (pneu, combustível, danos), um alerta por vez e o resumo da parada */
+  private renderTop(c: CarState, card: HTMLElement, cs: CardState, idx: number, order: CarState[], gaps: { laps: number; seconds: number }[]) {
+    const race = this.race;
+    const set = (sel: string, html: string) => {
+      const el = card.querySelector<HTMLElement>(sel)!;
+      if (el.innerHTML !== html) el.innerHTML = html;
+    };
+    const num = (x: number) => x.toFixed(1).replace(".", ",");
+    set(".lapn", c.finished ? "🏁" : `volta ${Math.min(race.laps, Math.max(1, c.lap + 1))}/${race.laps}`);
+    // diferença pro da frente e pro de trás (verde/amarelo = a menos de 1 s, zona de DRS)
+    const gapTo = (i: number, j: number) => {
+      const a = gaps[i], b = gaps[j];
+      return b.laps > a.laps ? `${b.laps - a.laps} V` : `${num(Math.max(0, b.seconds - a.seconds))} s`;
+    };
+    const live = !c.retired && race.phase !== "lights" && idx >= 0;
+    const ahead = live && idx > 0 ? order[idx - 1] : null;
+    const behind = live && idx < order.length - 1 && !order[idx + 1].retired ? order[idx + 1] : null;
+    const close = (i: number, j: number) => gaps[i].laps === gaps[j].laps && gaps[j].seconds - gaps[i].seconds < 1;
+    set(".gf", ahead ? `<em class="${close(idx - 1, idx) ? "up" : ""}">−${gapTo(idx - 1, idx)}</em> ${esc(ahead.driver.short)}` : "--");
+    set(".gb", behind ? `<em class="${close(idx, idx + 1) ? "dn" : ""}">+${gapTo(idx, idx + 1)}</em> ${esc(behind.driver.short)}` : "--");
+
+    // chips: pneu, combustível e danos
+    const wear = Math.min(1, c.wear), rubber = Math.round((1 - wear) * 100);
+    const tCol = wear > 0.8 ? "var(--soft)" : wear > 0.6 ? "var(--warn)" : "var(--ok)";
+    const fuelLaps = c.fuel / race.consumption(c), left = race.lapsLeft(c);
+    // com parada planejada (reabastece nela), basta chegar até lá
+    const next = upcomingStop(c);
+    const need = next && !c.boxRequest ? Math.min(left, Math.max(0.5, left - (race.laps - next.lap))) : left;
+    const fuelOk = fuelLaps >= need || c.finished;
+    const fCol = fuelOk ? "var(--ok)" : fuelLaps < 3 ? "var(--soft)" : "var(--warn)";
+    const fault = c.fault && !c.retired ? FAULTS[c.fault] : null;
+    const dmgChip = fault
+      ? `<span class="chip bad" title="${esc(fault.fix)}">⚠ ${esc(fault.label.toUpperCase())}</span>`
+      : c.damage > 0.05
+        ? `<span class="chip bad">DANO +${num(c.damage)} s/V</span>`
+        : `<span class="chip good">SEM DANOS</span>`;
+    set(
+      ".chips",
+      `<span class="chip" title="${esc(COMPOUNDS[c.compound].label)} · ${c.tyreLaps} voltas · ${rubber}% de borracha">${tyreIcon(c.compound)}${esc(COMPOUNDS[c.compound].label.toUpperCase())} · ${c.tyreLaps} V <span class="cbar"><i style="width:${rubber}%;background:${tCol}"></i></span>${rubber}%</span>` +
+        `<span class="chip" title="Combustível pra ${num(fuelLaps)} voltas · ${next && need < left ? `próxima parada em ${num(need)}` : `faltam ${num(left)}`}">⛽ ${num(fuelLaps)} V <span class="cbar"><i style="width:${Math.min(100, (fuelLaps / Math.max(1, need)) * 100)}%;background:${fCol}"></i></span></span>` +
+        dmgChip,
+    );
+
+    // um alerta por vez: o mais urgente, já com o botão certo
+    const canBox = c.pit === "none" && !c.boxRequest && !c.finished && !c.retired;
+    const dryKinds = new Set(c.usedCompounds.filter((x) => x === "S" || x === "M" || x === "H")).size;
+    const ruleOk = dryKinds >= 2 || c.usedCompounds.some((x) => x === "I" || x === "W");
+    const tt = tyreTempLabel(c.tyreTemp ?? 0.6);
+    type Alert = { lvl: string; t: string; sub?: string; act?: string; btn?: string };
+    let al: Alert | null = null;
+    if (c.retired || c.finished || race.phase === "lights") al = null;
+    else if (fault && fault.pen > 5 && canBox) al = { lvl: "bad", t: `⚠ ${fault.label}: +${c.faultPen.toFixed(0)} s por volta`, sub: fault.fix, act: "box", btn: "BOX AGORA" };
+    else if (c.damage > 0.6 && canBox) al = { lvl: "bad", t: `⚠ Carro danificado: +${num(c.damage)} s por volta`, sub: "No box dá pra trocar a peça quebrada", act: "box", btn: "BOX AGORA" };
+    else if (!fuelOk && fuelLaps < need - 0.3) {
+      const saving = c.engine === "lean";
+      al = {
+        lvl: fuelLaps < 3 ? "bad" : "warn",
+        t: `⛽ Combustível não chega: faltam ${num(need - fuelLaps)} voltas${need < left ? " até a parada" : ""}`,
+        sub: saving ? "Já está poupando: talvez precise parar" : "Mistura pobre e ritmo de poupar economizam",
+        act: saving ? (canBox ? "box" : undefined) : "save",
+        btn: saving ? "BOX AGORA" : "POUPAR",
+      };
+    } else if (c.planDue && canBox) al = { lvl: "warn", t: "📋 Plano: parar nesta volta", sub: `${COMPOUNDS[cs.next].label}, combustível pra ${this.laps(this.fuelFor(c))} voltas`, act: "box", btn: "BOX AGORA" };
+    else if (race.sc.active && race.sc.onTrack && canBox && left > 3) al = { lvl: "info", t: "🚨 Safety car: parada barata!", sub: "Todo mundo está devagar: perde bem menos tempo no box", act: "box", btn: "BOX AGORA" };
+    else if (wear > 0.75 && canBox) al = { lvl: wear > 0.88 ? "bad" : "warn", t: `🛞 Pneu no fim: ${rubber}% de borracha`, sub: next ? `O plano era parar na volta ${next.lap}` : "Sem parada planejada", act: "box", btn: "BOX AGORA" };
+    else if (!ruleOk && left < 8 && canBox) al = { lvl: "warn", t: "🛞 Falta usar o 2º tipo de pneu", sub: "É obrigatório usar dois tipos de pneu seco", act: "box", btn: "BOX AGORA" };
+    else if (tt === "quente" && c.pace === "push") al = { lvl: "info", t: "🔥 Pneu quente: desgastando mais", sub: "Tirar um pouco o pé esfria", act: "cool", btn: "POUPAR" };
+    else if (tt === "frio" && c.pace !== "push" && !race.sc.active) al = { lvl: "info", t: "🥶 Pneu frio: pouca aderência", sub: "Atacar uma volta esquenta", act: "push", btn: "ATACAR" };
+    const box = card.querySelector<HTMLElement>(".calert")!;
+    box.hidden = !al;
+    if (al) {
+      const cls = `calert ${al.lvl}`;
+      if (box.className !== cls) box.className = cls;
+      set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
+    }
+
+    // resumo do que fazer na parada (o botão abre os detalhes)
+    const nx = c.boxRequest ?? cs.next;
+    const fuelTxt = c.boxRequest ? `P/ ${this.laps(c.boxFuel)} V` : cs.fuelLaps === null ? "ATÉ O FIM" : `P/ ${cs.fuelLaps} V`;
+    set(".stopcfg", `${tyreIcon(nx)}${esc(COMPOUNDS[nx].label.toUpperCase())} · ${fuelTxt} ▾`);
+    card.classList.toggle("detopen", cs.detOpen);
   }
 
   private renderPlan(c: CarState, card: HTMLElement, cs: CardState) {
@@ -688,11 +797,8 @@ export class Hud {
         }
         cs.dueApplied = true;
       } else if (!c.planDue) cs.dueApplied = false;
-      card.querySelector(".mini-line")!.innerHTML =
-        `${tyreIcon(c.compound)} ${Math.round((1 - Math.min(1, c.wear)) * 100)}% · comb. ${(c.fuel / race.consumption(c)).toFixed(1)} v` +
-        (c.planDue ? ` · <b style="color:var(--warn)">PLANO: BOX</b>` : "");
+      this.renderTop(c, card, cs, idx, order, gaps);
       card.querySelector(".p")!.textContent = c.retired ? "OUT" : `P${c.position}`;
-      card.querySelector(".tyreslot")!.innerHTML = tyreIcon(c.compound);
       card.querySelector(".last")!.textContent = c.lastLap ? fmtLap(c.lastLap) : "--";
       card.querySelector(".best")!.textContent = c.bestLap ? fmtLap(c.bestLap) : "--";
       card.querySelector(".int")!.textContent =
@@ -771,6 +877,11 @@ export class Hud {
       }
     }
   }
+}
+
+/** próxima parada planejada (ou null) */
+function upcomingStop(c: CarState): PlannedStop | null {
+  return c.plan[c.planIdx] ?? null;
 }
 
 function surname(n: string): string {

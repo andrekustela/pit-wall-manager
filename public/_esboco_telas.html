@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Esboço: treino e estratégia</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Titillium+Web:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0e15;--panel:#141925;--line:#262d3d;--muted:#8a93a6;--ink:#e9edf5;--red:#e8202a;--ok:#3bd16f;--warn:#ffb02e;--bad:#ff3b3b;--S:#ff3b3b;--M:#ffd23b;--H:#f2f2f2}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 60% 20%,#1a2233,#0b0e15 70%);color:var(--ink);font:14px "Titillium Web",sans-serif;padding:24px}
+h1{font:600 26px Oswald;letter-spacing:.04em;margin:0 0 4px}h2{font:600 15px Oswald;letter-spacing:.12em;color:var(--muted);margin:28px 0 8px}
+p.lead{color:var(--muted);margin:0 0 8px;max-width:980px;line-height:1.5}p.lead b{color:var(--ink)}
+.screen{border:1px solid var(--line);background:#0d111a;padding:20px;max-width:1200px}
+.title{font:700 34px Oswald;letter-spacing:.02em;margin:0}.title span{color:var(--red)}.sub{color:var(--muted);margin:2px 0 14px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.chip{padding:4px 10px;background:#0c1018;border:1px solid var(--line);font:600 12px Oswald;letter-spacing:.05em}.chip b{color:var(--ok)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-top:3px solid #2bb24c;padding:12px}
+.ch{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}.ch b{font:600 16px Oswald;letter-spacing:.03em}.ch small{color:var(--muted)}.ch .r{margin-left:auto;color:var(--muted);font-size:12px}
+.lbl{color:var(--muted);font:600 11px Oswald;letter-spacing:.12em;margin:10px 0 6px}
+.seg{display:flex}.seg button{flex:1;padding:9px 0;background:#0c1018;border:1px solid var(--line);margin-left:-1px;color:var(--ink);font:600 13px Oswald;letter-spacing:.05em;cursor:pointer}
+.seg button small{display:block;font:400 11px "Titillium Web";color:var(--muted);letter-spacing:0}.seg button.on{background:#e9edf5;color:#111}.seg button.on small{color:#444}
+.big{width:100%;padding:11px;background:var(--red);border:0;color:#fff;font:700 15px Oswald;letter-spacing:.08em;margin-top:10px;cursor:pointer}
+.radio{margin-top:10px;padding:8px 10px;background:#1a1f2c;border-left:3px solid var(--warn);font-size:13px}.radio small{display:block;color:var(--muted)}
+.laps{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}.laps td{padding:4px 6px;border-bottom:1px solid #1c2230}.laps td.t{font:600 14px Oswald}.laps .best td{color:var(--ok)}
+.fine{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;color:var(--muted);font:600 12px Oswald;letter-spacing:.1em;cursor:pointer;display:flex;justify-content:space-between}
+.sliders{display:none;padding-top:6px}.sliders.open{display:block}.sl{display:grid;grid-template-columns:130px 1fr 30px;gap:8px;align-items:center;font-size:13px;margin:5px 0}
+.sl input{width:100%;accent-color:var(--red)}
+.bottom{display:flex;gap:10px;margin-top:16px}.go{padding:12px 26px;background:var(--red);border:0;color:#fff;font:700 18px Oswald;letter-spacing:.06em}.back{padding:12px 18px;background:#141925;border:1px solid var(--line);color:var(--ink);font:600 15px Oswald}
+.map{height:90px;display:flex;align-items:center;justify-content:center;background:#0b0e15;border:1px solid var(--line);color:var(--muted);font-size:12px;margin-bottom:14px}
+/* estratégia */
+.plans{display:grid;gap:8px}.plan{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:10px;background:#0c1018;border:1px solid var(--line);cursor:pointer}
+.plan.on{border-color:#e9edf5;box-shadow:0 0 0 1px #e9edf5 inset}.plan b{font:600 14px Oswald;letter-spacing:.04em}.plan .est{text-align:right;font:600 13px Oswald;color:var(--muted)}.plan .est.best{color:var(--ok)}
+.bar{grid-column:1/-1;display:flex;height:16px;gap:2px}.bar i{display:flex;align-items:center;justify-content:center;font:700 10px Oswald;color:#111}
+.bar .S{background:var(--S);color:#fff}.bar .M{background:var(--M)}.bar .H{background:var(--H)}
+.plan small{grid-column:1/-1;color:var(--muted);font-size:12px}
+.ok{color:var(--ok)}.warn{color:var(--warn)}
+.note{color:var(--muted);font-size:13px;max-width:980px;margin:10px 0 0;line-height:1.55}.note b{color:var(--ink)}
+</style></head><body>
+<h1>Esboço: treino e estratégia mais leves</h1>
+<p class="lead">Ideia geral: <b>decidir com 1 clique</b> e deixar o ajuste fino escondido pra quem quer. Os controles de hoje continuam existindo (em "Ajuste fino" e "Personalizar"), só saem da frente. É só esboço: os botões mexem um pouco pra dar a ideia, nada muda no jogo.</p>
+
+<h2>TREINO LIVRE (PROPOSTA)</h2>
+<div class="screen">
+  <p class="title">TREINO <span>LIVRE</span></p>
+  <div class="sub">Miami · 5 voltas de teste por piloto · ninguém mais vê seus tempos</div>
+  <div class="chips"><span class="chip">☀ TREINO: SECO</span><span class="chip">☀ CLASSIFICAÇÃO: SECO</span><span class="chip">☀ CORRIDA: 0% DE CHUVA</span><span class="chip">PISTA: <b>RETAS LONGAS</b> · pede pouca asa</span></div>
+  <div class="map">(mapa da pista aparece uma vez só, aqui em cima, com a volta de teste andando)</div>
+  <div class="grid">
+    <div class="card">
+      <div class="ch"><b>JUAN MANUEL FANGIO</b><small>Metódico</small><span class="r">4 voltas restantes</span></div>
+      <div class="lbl">ACERTO RÁPIDO</div>
+      <div class="seg" data-g="a"><button>MAIS RETA<small>pouca asa</small></button><button class="on">EQUILIBRADO<small>meio a meio</small></button><button>MAIS CURVA<small>muita asa</small></button></div>
+      <div class="radio">📻 "Na reta tô bem, mas escorrega na curva 11."<small>Engenheiro: tente um pouco mais de asa traseira</small></div>
+      <button class="big">DAR VOLTA DE TESTE</button>
+      <table class="laps"><tr class="best"><td>1</td><td class="t">1:29,412</td><td>reta 318 km/h</td><td>equilibrado</td><td>✓ usando</td></tr></table>
+      <div class="fine" onclick="this.nextElementSibling.classList.toggle('open')"><span>AJUSTE FINO (5 PEÇAS)</span><span>▾</span></div>
+      <div class="sliders">
+        <div class="sl">Asa dianteira<input type="range" value="50"><span>50</span></div>
+        <div class="sl">Asa traseira<input type="range" value="50"><span>50</span></div>
+        <div class="sl">Altura do carro<input type="range" value="50"><span>50</span></div>
+        <div class="sl">Susp. dianteira<input type="range" value="50"><span>50</span></div>
+        <div class="sl">Susp. traseira<input type="range" value="50"><span>50</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><b>HEINZ-HARALD FRENTZEN</b><small>Cuida dos pneus</small><span class="r">5 voltas restantes</span></div>
+      <div class="lbl">ACERTO RÁPIDO</div>
+      <div class="seg" data-g="b"><button class="on">MAIS RETA<small>pouca asa</small></button><button>EQUILIBRADO<small>meio a meio</small></button><button>MAIS CURVA<small>muita asa</small></button></div>
+      <div class="radio">📻 "Pronto pra sair, é só mandar."</div>
+      <button class="big">DAR VOLTA DE TESTE</button>
+      <div class="fine" onclick="this.nextElementSibling.classList.toggle('open')"><span>AJUSTE FINO (5 PEÇAS)</span><span>▾</span></div>
+      <div class="sliders"><div class="sl">Asa dianteira<input type="range" value="35"><span>35</span></div><div class="sl">Asa traseira<input type="range" value="30"><span>30</span></div></div>
+    </div>
+  </div>
+  <div class="bottom"><button class="go">PRONTO PARA A CLASSIFICAÇÃO ▶</button><button class="back">← LOBBY</button></div>
+</div>
+<p class="note"><b>O que muda:</b> 3 botões de acerto rápido no lugar dos 5 controles (que ficam em "Ajuste fino"); a dica do engenheiro aparece junto com a fala do piloto, dizendo o que mexer; o mapa aparece uma vez só (hoje aparece 2x, um por piloto); o clima dos 3 dias vira uma linha de etiquetas, com uma dica da pista ("retas longas: pouca asa").</p>
+
+<h2>ESTRATÉGIA (PROPOSTA)</h2>
+<div class="screen">
+  <p class="title">ESTRA<span>TÉGIA</span></p>
+  <div class="sub">Suzuka · 20 voltas · tanque cabe pra 20 voltas</div>
+  <div class="chips"><span class="chip">☀ LARGADA SECA</span><span class="chip">SEM CHUVA PREVISTA</span><span class="chip">PNEU: MACIO ~11 V · MÉDIO ~19 V · DURO ~28 V</span></div>
+  <div class="grid">
+    <div class="card">
+      <div class="ch"><b>RALF SCHUMACHER</b><small>larga em P6</small></div>
+      <div class="plans" data-g="c">
+        <div class="plan on"><b>1 PARADA · MÉDIO → DURO</b><span class="est best">mais rápido</span>
+          <div class="bar"><i class="M" style="flex:8">M · 8</i><i class="H" style="flex:12">H · 12</i></div><small>Para na volta 8. Pneus aguentam com folga.</small></div>
+        <div class="plan"><b>1 PARADA · DURO → MÉDIO</b><span class="est">+1,8 s</span>
+          <div class="bar"><i class="H" style="flex:12">H · 12</i><i class="M" style="flex:8">M · 8</i></div><small>Começa devagar, ataca no fim.</small></div>
+        <div class="plan"><b>2 PARADAS · MACIO → MÉDIO → MÉDIO</b><span class="est">+4,5 s</span>
+          <div class="bar"><i class="S" style="flex:6">S · 6</i><i class="M" style="flex:7">M · 7</i><i class="M" style="flex:7">M · 7</i></div><small>Bom se tiver safety car (parada barata).</small></div>
+      </div>
+      <div class="fine"><span>PERSONALIZAR (VOLTAS, PNEUS, COMBUSTÍVEL)</span><span>▾</span></div>
+      <div style="margin-top:6px;font-size:13px" class="ok">⛽ Combustível chega até o fim · ✓ usa 2 tipos de pneu</div>
+    </div>
+    <div class="card">
+      <div class="ch"><b>JAMES HUNT</b><small>larga em P8</small></div>
+      <div class="plans" data-g="d">
+        <div class="plan"><b>1 PARADA · MÉDIO → DURO</b><span class="est best">mais rápido</span>
+          <div class="bar"><i class="M" style="flex:8">M · 8</i><i class="H" style="flex:12">H · 12</i></div><small>Para na volta 8. Pneus aguentam com folga.</small></div>
+        <div class="plan on"><b>1 PARADA · DURO → MÉDIO</b><span class="est">+1,8 s</span>
+          <div class="bar"><i class="H" style="flex:12">H · 12</i><i class="M" style="flex:8">M · 8</i></div><small>Começa devagar, ataca no fim.</small></div>
+        <div class="plan"><b>2 PARADAS · MACIO → MÉDIO → MÉDIO</b><span class="est">+4,5 s</span>
+          <div class="bar"><i class="S" style="flex:6">S · 6</i><i class="M" style="flex:7">M · 7</i><i class="M" style="flex:7">M · 7</i></div><small>Bom se tiver safety car (parada barata).</small></div>
+      </div>
+      <div class="fine"><span>PERSONALIZAR (VOLTAS, PNEUS, COMBUSTÍVEL)</span><span>▾</span></div>
+      <div style="margin-top:6px;font-size:13px" class="ok">⛽ Combustível chega até o fim · ✓ usa 2 tipos de pneu</div>
+    </div>
+  </div>
+  <div class="bottom"><button class="go">IR PARA O GRID ▶</button><button class="back">← CLASSIFICAÇÃO</button></div>
+</div>
+<p class="note"><b>O que muda:</b> os planos prontos viram cartões com uma barra colorida (cada pedaço = um pneu, do tamanho do trecho), uma estimativa de tempo comparando os planos e uma frase de quando vale a pena; um clique escolhe. O editor de hoje (voltas, pneu e combustível de cada parada) fica em "Personalizar". A previsão vira etiquetas em cima, com quanto cada pneu aguenta nessa pista.</p>
+<script>
+document.querySelectorAll("[data-g]").forEach(g=>g.addEventListener("click",e=>{const b=e.target.closest("button,.plan");if(!b)return;g.querySelectorAll("button,.plan").forEach(x=>x.classList.toggle("on",x===b));}));
+document.querySelectorAll(".sl input").forEach(i=>i.addEventListener("input",()=>i.nextElementSibling.textContent=i.value));
+</script>
+</body></html>

@@ -199,6 +199,10 @@ export interface CarState {
   tyreTemp: number;
   /** colado atrás de outro carro numa curva: perde aderência (ar sujo) */
   dirtyAir: boolean;
+  /** asa aberta (DRS): estava a menos de 1 s do da frente ao entrar na zona */
+  drs?: boolean;
+  /** zona de DRS em que o carro está agora (-1 = fora) */
+  drsZ?: number;
   /** problema mecânico no momento (furo, câmbio...) e quanto custa por volta */
   fault: FaultKind | null;
   faultPen: number;
@@ -223,6 +227,8 @@ export interface CarState {
   /** defendendo a posição: fica nessa lateral até esse instante */
   defendTill: number;
   defendLat: number;
+  /** ultrapassando: de que lado do traçado ideal (m, relativo a ele) */
+  otOff?: number;
   /** segundos restantes de uma rodada */
   spin: number;
   position: number;

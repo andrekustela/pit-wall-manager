@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Teste: IA no rádio</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Titillium+Web:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--line:#262d3d;--muted:#8a93a6;--ink:#e9edf5;--red:#e8202a;--ok:#3bd16f;--warn:#ffb02e}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 60% 20%,#1a2233,#0b0e15 70%);color:var(--ink);font:14px "Titillium Web",sans-serif;padding:24px;min-height:100vh}
+h1{font:600 26px Oswald;letter-spacing:.04em;margin:0 0 4px}p{color:var(--muted);max-width:860px;line-height:1.5}p b{color:var(--ink)}
+.box{max-width:860px;background:#141925;border:1px solid var(--line);padding:14px;margin:12px 0}
+label{display:block;color:var(--muted);font:600 11px Oswald;letter-spacing:.12em;margin:10px 0 4px}
+select,input,textarea{width:100%;background:#0c1018;border:1px solid var(--line);color:var(--ink);font:14px "Titillium Web";padding:7px}
+textarea{height:64px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{padding:9px 14px;background:var(--red);border:0;color:#fff;font:700 13px Oswald;letter-spacing:.08em;cursor:pointer;margin:10px 8px 0 0}button.alt{background:#232a3a}button:disabled{opacity:.4;cursor:default}
+#log{white-space:pre-wrap;font:12px monospace;color:var(--muted);max-height:160px;overflow:auto}
+.line{padding:8px 10px;margin:6px 0;background:#1a1f2c;border-left:3px solid var(--warn);font-size:15px}.line small{display:block;color:var(--muted);font-size:11px}
+.bar{height:6px;background:#000;margin-top:8px}.bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
+</style></head><body>
+<h1>Teste: IA grátis no rádio</h1>
+<p>Página de teste, fora do jogo. A ideia: em vez de só tocar frases prontas, uma IA pequena <b>escreve a fala do piloto na hora</b>, a partir do que está acontecendo (posição, pneu, quem está atrás...). Tudo grátis e <b>sem servidor</b>: o modelo roda no seu PC.</p>
+<p>Dois jeitos: <b>no navegador</b> (WebGPU: baixa o modelo uma vez, ~400 MB a ~1 GB, fica guardado) ou pelo <b>Ollama</b> (programa grátis instalado no PC, se você tiver). Nada é baixado até você clicar.</p>
+
+<div class="box">
+  <div class="row">
+    <div><label>MOTOR</label><select id="eng"><option value="web">No navegador (WebGPU)</option><option value="ollama">Ollama (localhost:11434)</option></select></div>
+    <div><label>MODELO</label><select id="model">
+      <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0,5B (leve, ~400 MB)</option>
+      <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" selected>Qwen 2.5 1,5B (melhor português, ~1 GB)</option>
+      <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (~900 MB)</option>
+    </select></div>
+  </div>
+  <div id="ollamaRow" style="display:none"><label>MODELO DO OLLAMA</label><input id="omodel" value="qwen2.5:1.5b"></div>
+  <button id="load">BAIXAR / LIGAR O MODELO</button>
+  <div class="bar"><i id="prog"></i></div>
+  <div id="log"></div>
+</div>
+
+<div class="box">
+  <div class="row">
+    <div><label>PILOTO</label><input id="drv" value="Thierry Boutsen"></div>
+    <div><label>SITUAÇÃO</label><select id="sit">
+      <option value="pneu">Pneu acabando</option><option value="ataque">Colado no da frente, querendo passar</option>
+      <option value="defesa">Sendo atacado por quem vem atrás</option><option value="dano">Bateu e perdeu a asa</option>
+      <option value="ultrap">Acabou de ultrapassar</option><option value="box">Engenheiro mandou pro box</option><option value="raiva">Foi fechado por um rival</option>
+    </select></div>
+  </div>
+  <label>CONTEXTO DA CORRIDA (o jogo preencheria sozinho)</label>
+  <textarea id="ctx">P6, volta 14 de 20, pneu médio com 22% de borracha, 0,8 s atrás de Norris, Verstappen 1,9 s atrás. Pista seca.</textarea>
+  <button id="go" disabled>GERAR FALA DO RÁDIO</button><button id="go3" class="alt" disabled>GERAR 3 SEGUIDAS</button>
+  <div id="out"></div>
+</div>
+<p><b>Se ficar bom:</b> o jogo usaria a fala da IA no lugar da frase pronta (com a mesma voz do Piper, gerada na hora) só pra quem ligar a opção; quem não ligar continua com as frases de sempre. Se o PC não tiver WebGPU ou for fraco, o jogo nem tenta.</p>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const log = (t) => { $("log").textContent += t + "\n"; $("log").scrollTop = 1e9; };
+let engine = null, mode = "web";
+$("eng").onchange = () => { $("ollamaRow").style.display = $("eng").value === "ollama" ? "" : "none"; };
+
+const SIT = {
+  pneu: "os pneus estão acabando e ele está perdendo tempo",
+  ataque: "está colado no carro da frente e quer ultrapassar",
+  defesa: "está sendo atacado pelo carro de trás",
+  dano: "bateu e perdeu um pedaço da asa dianteira",
+  ultrap: "acabou de fazer uma ultrapassagem",
+  box: "o engenheiro acabou de chamar ele pro box",
+  raiva: "foi fechado de forma perigosa por um rival",
+};
+function prompt() {
+  return [
+    { role: "system", content: "Você é um piloto de Fórmula 1 falando no rádio com o seu engenheiro, em português do Brasil. Responda com UMA fala curta (no máximo 14 palavras), natural e com emoção, sem aspas, sem emojis, sem narrar. Não invente números que não estão no contexto." },
+    { role: "user", content: `Piloto: ${$("drv").value}. Contexto: ${$("ctx").value} Agora ele ${SIT[$("sit").value]}. Qual é a fala dele no rádio?` },
+  ];
+}
+function clean(t) { return t.replace(/^["'“”\s-]+|["'“”\s]+$/g, "").split("\n")[0]; }
+
+$("load").onclick = async () => {
+  mode = $("eng").value;
+  $("load").disabled = true;
+  try {
+    if (mode === "ollama") {
+      const r = await fetch("http://localhost:11434/api/tags");
+      const j = await r.json();
+      log("Ollama ligado. Modelos instalados: " + (j.models || []).map((m) => m.name).join(", "));
+      $("prog").style.width = "100%";
+    } else {
+      if (!navigator.gpu) throw new Error("Este navegador não tem WebGPU (tente o Chrome/Edge/Opera atualizados).");
+      log("Carregando a biblioteca WebLLM...");
+      const webllm = await import("https://esm.run/@mlc-ai/web-llm@0.2.78");
+      const t0 = performance.now();
+      engine = await webllm.CreateMLCEngine($("model").value, {
+        initProgressCallback: (p) => { $("prog").style.width = Math.round((p.progress || 0) * 100) + "%"; if (p.text) log(p.text); },
+      });
+      log(`Pronto em ${((performance.now() - t0) / 1000).toFixed(0)} s.`);
+    }
+    $("go").disabled = $("go3").disabled = false;
+  } catch (e) {
+    log("Erro: " + e.message);
+    $("load").disabled = false;
+  }
+};
+
+async function gen() {
+  const t0 = performance.now();
+  let text = "";
+  if (mode === "ollama") {
+    const r = await fetch("http://localhost:11434/api/chat", { method: "POST", body: JSON.stringify({ model: $("omodel").value, messages: prompt(), stream: false, options: { temperature: 0.9, num_predict: 40 } }) });
+    text = (await r.json()).message?.content ?? "";
+  } else {
+    const r = await engine.chat.completions.create({ messages: prompt(), temperature: 0.9, max_tokens: 40 });
+    text = r.choices[0].message.content;
+  }
+  const ms = performance.now() - t0;
+  const d = document.createElement("div");
+  d.className = "line";
+  d.innerHTML = `📻 <span></span><small>${$("sit").selectedOptions[0].text} · ${(ms / 1000).toFixed(1)} s</small>`;
+  d.querySelector("span").textContent = clean(text);
+  $("out").prepend(d);
+}
+$("go").onclick = () => gen().catch((e) => log("Erro: " + e.message));
+$("go3").onclick = async () => { for (let i = 0; i < 3; i++) await gen().catch((e) => log("Erro: " + e.message)); };
+</script>
+</body></html>

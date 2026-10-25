@@ -10,7 +10,9 @@ import { ACTIVE_TRACKS, CIRCUITS, TRACK_WIDTH, getTrack } from "../src/sim/track
 const ITERS = Number(process.argv[2] ?? 25000);
 const ONLY = process.argv[3] !== undefined ? Number(process.argv[3]) : null;
 const STEP = 10; // m entre os pontos do traçado
-const EDGE = TRACK_WIDTH / 2 - 1.6; // até onde o carro chega da borda (metade do carro + folga)
+// até onde o carro chega da borda: faixa útil de ~11 m (a pista do jogo tem 18 m, mais larga que as
+// reais; usando tudo, o traçado ganhava tempo demais)
+const EDGE = 5.6;
 const LAT = 36, VMAX = 90, BRAKE = 40;
 
 interface Geo { x: Float64Array; y: Float64Array; nx: Float64Array; ny: Float64Array; L: number }

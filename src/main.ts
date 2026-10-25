@@ -65,6 +65,8 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 /** modo de teste: ?auto passa sozinho pelas fases (solo) */
 const AUTO = params.has("auto");
+/** teste: ?auto&hold=practice|strategy para nessa tela (pra ver/capturar) */
+const HOLD = params.get("hold");
 
 class App {
   private conn: Connection | null = null;
@@ -342,7 +344,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
           if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
           else openDraft();
         }
-        if (AUTO) conn.send({ t: "ready", ready: true });
+        if (AUTO && HOLD !== "practice") conn.send({ t: "ready", ready: true });
         break;
       case "quali":
         this.screen = new QualiScreen(app, conn, l, this.quali!.results, this.quali!.wet);
@@ -350,7 +352,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         break;
       case "strategy":
         this.screen = new StrategyScreen(app, conn, l, this.quali!.results);
-        if (AUTO) setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
+        if (AUTO && HOLD !== "strategy") setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
       case "podium":
         if (this.lastRace) {
