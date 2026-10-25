@@ -36,7 +36,7 @@ function createWindow() {
     icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: true,
     show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, "preload.cjs") },
   });
   win.removeMenu();
   win.once("ready-to-show", () => {

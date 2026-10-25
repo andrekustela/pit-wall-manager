@@ -3,7 +3,6 @@ import type { ChampSave } from "../net/room";
 import { CIRCUITS } from "../sim/track";
 import { account } from "../net/account";
 import { statsHtml } from "./login";
-import { mountInstallButton } from "./install";
 import { deleteSave, listSaves, renameSave } from "./saves";
 import { confirmDialog } from "./confirm";
 import { fillRanking } from "./ranking";
@@ -85,6 +84,11 @@ const PARENT: Record<string, Panel> = { solo: null, online: null, carreira: null
 let openPanel: Panel = null;
 
 
+/** rodando dentro do programa de PC (.exe)? (a ponte do Electron avisa) */
+const isDesktop = () => !!(window as unknown as { pwmDesktop?: unknown }).pwmDesktop;
+/** download do programa de PC (Releases do GitHub: sempre a versão mais nova) */
+const DOWNLOAD_URL = "https://github.com/andrekustela/pit-wall-manager/releases/latest/download/PitWallManager.exe";
+
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, onLogout?: () => void) {
@@ -128,7 +132,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <canvas class="menubg"></canvas>
       <div class="m2stripe"></div>
       <div class="m2top">
-        <div id="m-install"></div>
+        ${isDesktop() ? "" : `<a class="m2dl" href="${DOWNLOAD_URL}" title="Programa pra Windows (abre o jogo numa janela própria, dá pra pôr na Steam)">⬇ <span>BAIXAR PRO PC</span></a>`}
         <button class="m2friends" id="m-friends" title="Amigos">👥 <span>AMIGOS</span>${account.profile?.friends?.length ? `<em>${account.profile.friends.length}</em>` : ""}</button>
       </div>
       <div class="m2">
@@ -419,7 +423,6 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   };
 
   root.querySelector("#m-friends")!.addEventListener("click", () => showFriends(redraw));
-  mountInstallButton(root.querySelector<HTMLElement>("#m-install")!);
 }
 
 /** editar perfil (engrenagem): nome, equipe, pintura e sair da conta */

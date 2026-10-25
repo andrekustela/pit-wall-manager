@@ -48,6 +48,9 @@ interface CardState {
 export class Hud {
   private el: HTMLElement;
   private board: HTMLElement;
+  /** linhas da classificação (fixas por carro: só mudam de lugar quando a ordem muda, aí deslizam) */
+  private rowEls = new Map<string, HTMLElement & { _h?: string }>();
+  private boardSig = "";
   private boardHead: HTMLElement;
   private info: HTMLElement;
   private feed: HTMLElement;
@@ -527,8 +530,12 @@ export class Hud {
     const fl = race.fastestLap;
     this.el.querySelector(".board .lapc")!.textContent = race.checkered ? "🏁 FINAL" : `VOLTA ${race.currentLap()}/${race.laps}`;
     this.el.querySelector(".board .hl")!.textContent = sc.active && !race.checkered ? "SAFETY CAR" : "POS";
-    this.board.innerHTML = order
-      .map((c, i) => {
+    // ordem mudou? (mede onde cada linha estava pra deslizar até o lugar novo)
+    const sig = order.map((c) => c.id).join(",");
+    const reordered = sig !== this.boardSig;
+    const before = reordered && this.boardSig ? new Map([...this.rowEls].map(([id, el]) => [id, el.getBoundingClientRect().top])) : null;
+    const prevPos = reordered ? new Map(this.boardSig.split(",").map((id, i) => [id, i])) : null;
+    order.forEach((c, i) => {
         let gap: string;
         let cls = "";
         if (c.retired) {
@@ -546,17 +553,52 @@ export class Hud {
         if (race.phase === "lights") gap = "";
         const lt = c.lastLap;
         const ltCls = lt && fl && Math.abs(lt - fl.time) < 1e-6 ? "fl" : lt && c.bestLap && Math.abs(lt - c.bestLap) < 1e-6 ? "pb" : "";
-        return `<div class="row ${c.team.id === my ? "player" : ""} ${c.id === follow ? "follow" : ""}" data-car="${c.id}" title="${esc(c.team.name)}">
-          <span class="pos">${c.position}</span>
+        const html = `          <span class="pos">${c.position}</span>
           <span class="bar" style="background:${c.team.color}"></span>
           <span class="code">${esc(c.driver.short)}</span>
           <span class="name">${surname(c.driver.name)}${this.hooks.online && c.isHuman ? ` <span class="eng">(${esc(race.engineers[c.team.id]?.name ?? "")})</span>` : ""}</span>
           <span class="gap ${cls}">${gap}</span>
           <span class="lt ${ltCls}">${lt ? fmtShort(lt) : ""}</span>
-          ${tyreIcon(c.compound, `${COMPOUNDS[c.compound].label} · ${c.tyreLaps} voltas`)}
-        </div>`;
-      })
-      .join("");
+          ${tyreIcon(c.compound, `${COMPOUNDS[c.compound].label} · ${c.tyreLaps} voltas`)}`;
+      let el = this.rowEls.get(c.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.dataset.car = c.id;
+        this.rowEls.set(c.id, el);
+      }
+      const rowCls = `row ${c.team.id === my ? "player" : ""} ${c.id === follow ? "follow" : ""}`;
+      if (el.className !== rowCls) el.className = rowCls;
+      if (el.title !== c.team.name) el.title = c.team.name;
+      if (el._h !== html) {
+        el.innerHTML = html;
+        el._h = html;
+      }
+    });
+    if (reordered) {
+      for (const c of order) this.board.appendChild(this.rowEls.get(c.id)!);
+      this.boardSig = sig;
+      if (before && prevPos && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        order.forEach((c, i) => {
+          const el = this.rowEls.get(c.id)!;
+          const was = before.get(c.id);
+          const dy = was === undefined ? 0 : was - el.getBoundingClientRect().top;
+          if (Math.abs(dy) < 1) return;
+          // desliza da posição antiga pra nova (ease-out forte)
+          el.animate([{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }], { duration: 420, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+          // ganhou posição = verde, perdeu = vermelho (curto, volta ao normal)
+          const gained = (prevPos.get(c.id) ?? i) > i;
+          const col = gained ? "59,209,111" : "255,59,59";
+          el.animate([{ boxShadow: `inset 0 0 0 999px rgba(${col},.32)` }, { boxShadow: `inset 0 0 0 999px rgba(${col},0)` }], { duration: 900, easing: "ease-out" });
+          // carro da sua equipe ganhou posição: o "P" do painel dele dá um pulinho
+          if (gained && c.team.id === my) {
+            const pEl = this.el.querySelector<HTMLElement>(`.driver[data-id="${c.id}"] .p`);
+            pEl?.animate([{ transform: "scale(1.35)", color: "#3bd16f" }, { transform: "scale(1)" }], { duration: 480, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" });
+          }
+        });
+      }
+    }
+    // carros que saíram da lista (não acontece numa corrida, mas por garantia)
+    if (this.rowEls.size > order.length) for (const [id, el] of this.rowEls) if (!sig.includes(id)) { el.remove(); this.rowEls.delete(id); }
 
     // ---- info ----
     const fc = race.cars.find((c) => c.id === follow);
