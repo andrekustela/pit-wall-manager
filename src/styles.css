@@ -1134,3 +1134,12 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .ldplay:hover i { transform: translateX(3px); }
 .ldplay:active { transform: scale(.97); }
 .ldplay:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.ldofficial { margin: -2px 0 10px; color: var(--muted); font-size: 15px; letter-spacing: .02em; }
+/* carregamento: história da pista na coluna da direita */
+.ldhist { position: absolute; top: 110px; right: clamp(20px, 3vw, 48px); width: min(440px, 30vw); padding: 18px 20px; border-left: 3px solid var(--red, #e8202a);
+  background: linear-gradient(90deg, rgba(255,255,255,.04), transparent); animation: ldhistin 600ms 250ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.ldhist span { font-family: var(--pix); letter-spacing: .18em; font-size: 12px; color: var(--muted); }
+.ldhist p { margin: 10px 0 0; font-size: 16px; line-height: 1.6; color: #d7dce6; }
+@keyframes ldhistin { from { opacity: 0; transform: translateX(16px); } }
+@media (max-width: 1100px) { .ldhist { position: static; width: auto; max-width: 640px; margin-top: 16px; } }
+@media (prefers-reduced-motion: reduce) { .ldhist { animation: none; } }

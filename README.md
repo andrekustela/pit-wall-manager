@@ -39,3 +39,8 @@ npx tsx scripts/sim-test.ts <seed> <voltas> <pista 0-2> [equal]   # corrida sem 
 PORT=8799 npm start   +   npx tsx scripts/net-test.ts 8799           # online ponta a ponta
 npx tsx scripts/shot.ts <url> <pasta> "click:#m-solo;wait:1000;shot:x"  # prints no Edge
 ```
+
+## Créditos
+
+- Traçados reais das pistas: [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits), licença MIT, Copyright (c) 2019-2025 Tomislav Bacinger (texto em `public/licencas/f1-circuits-MIT.txt`). Dados não oficiais, sem ligação com a Formula One.
+- Gerados com `node scripts/gen-real-tracks.mjs <f1-circuits.geojson> <meta.json>`.

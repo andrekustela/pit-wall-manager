@@ -2,7 +2,7 @@
 // dando volta, com rastro. Quando o líder completa a volta, a faixa vermelha sai
 // pela esquerda e outra entra pela direita "varrendo" a tela: atrás dela (à
 // direita) já aparece a pista nova; na frente (à esquerda) ainda é a antiga.
-import { CIRCUITS, getTrack, type Vec } from "../sim/track";
+import { ACTIVE_TRACKS, CIRCUITS, getTrack, randomTrack, type Vec } from "../sim/track";
 
 const RUNNERS = [
   { color: "#ff2a32", speed: 0.06, start: 0 }, // líder: a volta dele troca a pista
@@ -41,8 +41,8 @@ export function releaseStripe(lock: StripeLock) {
 export const backdropMemo: { v: { idx: number; t0: number } | null } = { v: null };
 
 export function trackIndexByName(name: string): number {
-  const i = CIRCUITS.findIndex((c) => c.name.toLowerCase().includes(name.toLowerCase()));
-  return i >= 0 ? i : 0;
+  const i = ACTIVE_TRACKS.find((k) => CIRCUITS[k].name.toLowerCase().includes(name.toLowerCase()));
+  return i ?? ACTIVE_TRACKS[0];
 }
 
 interface TrackGeo {
@@ -191,9 +191,7 @@ export function mountMenuBackdrop(
   let rushing = false;
   let frozenAt = 0;
   const nextIdx = () => {
-    let i = cur.tr.idx;
-    while (CIRCUITS.length > 1 && i === cur.tr.idx) i = Math.floor(Math.random() * CIRCUITS.length);
-    return i;
+    return randomTrack(Math.random, cur.tr.idx);
   };
 
   /** desenha uma pista e os carros dela, recortada por `clip` (ou inteira) e deslocada em x */

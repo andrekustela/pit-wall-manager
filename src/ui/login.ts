@@ -1,7 +1,7 @@
 // Tela de entrada: login por e-mail e senha (Firebase), criar conta, esqueci a
 // senha ou jogar sem conta. Mesmo visual do menu (pista animada ao fundo).
 import { account, accountsEnabled } from "../net/account";
-import { CIRCUITS } from "../sim/track";
+import { CIRCUITS, randomTrack } from "../sim/track";
 import { backdropMemo, mountMenuBackdrop } from "./menuBg";
 import { coverScreen } from "./transition";
 import { startLogoFx } from "./logoFx";
@@ -9,7 +9,7 @@ import { esc } from "./common";
 
 export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
   let mode: "in" | "up" | "reset" = "in";
-  const bgTrack = backdropMemo.v?.idx ?? Math.floor(Math.random() * CIRCUITS.length);
+  const bgTrack = backdropMemo.v?.idx ?? randomTrack();
   if (!backdropMemo.v) backdropMemo.v = { idx: bgTrack, t0: performance.now() };
   root.innerHTML = `
     <div class="screen menu2 loginv2">

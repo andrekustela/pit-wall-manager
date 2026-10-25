@@ -5,6 +5,7 @@ import { CIRCUITS, getTrack } from "../sim/track";
 import { fmtLap } from "../sim/race";
 import { esc, trackTagsHtml } from "./common";
 import { loadRecords } from "./records";
+import { TRACK_HISTORY } from "../sim/trackHistory";
 
 export const ENGINEER_TIPS = [
   "Pneu novo sai frio do box: segure o ritmo na primeira volta do stint.",
@@ -59,17 +60,20 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
     ${t ? `<div class="ldtrack">
       <div class="ldlabel">${esc(o.label ?? "PRÓXIMA PISTA")}</div>
       <h1 class="ldname">${esc(t.name.toUpperCase())}</h1>
+      ${t.official && t.official !== t.name ? `<div class="ldofficial">${esc(t.official)}</div>` : ""}
       <div class="ttags ldtags">${trackTagsHtml(o.trackIndex!, 6)}</div>
       <div class="ldmain"><canvas class="ldmap"></canvas>
         <div class="ldfacts">
           <div><span>EXTENSÃO</span><b>${(t.targetLength / 1000).toFixed(2).replace(".", ",")} km</b></div>
           ${o.laps ? `<div><span>VOLTAS</span><b>${o.laps}</b></div>` : ""}
+          ${t.firstGP ? `<div><span>PRIMEIRO GP</span><b>${t.firstGP}</b></div>` : ""}
           <div><span>CHANCE DE CHUVA</span><b>${Math.round(t.rainChance * 100)}%</b></div>
           <div><span>ULTRAPASSAGEM</span><b>${(t.overtake ?? 1) <= 0.8 ? "Difícil" : (t.overtake ?? 1) >= 1.2 ? "Fácil" : "Normal"}</b></div>
           <div class="ldrec"><span>RECORDE</span><b data-rec>—</b></div>
         </div></div>
       <p class="ldblurb">${esc(t.blurb)}</p>
     </div>` : ""}
+    ${t && TRACK_HISTORY[t.name] ? `<aside class="ldhist"><span>📜 HISTÓRIA DA PISTA</span><p>${esc(TRACK_HISTORY[t.name])}</p></aside>` : ""}
     <div class="ldtip"><span>📻 DICA DO ENGENHEIRO</span><p data-tip>${esc(ENGINEER_TIPS[tip0])}</p></div>
     <div class="ldlogo"><div class="ldlogobox"><img class="base" src="/brand/logo.png" alt=""><img class="fill" src="/brand/logo.png" alt="Pit Wall Manager"></div>
       <div class="ldpct"><span>CARREGANDO</span><b data-pct>0%</b></div>

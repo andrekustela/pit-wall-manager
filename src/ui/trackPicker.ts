@@ -9,7 +9,7 @@ const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
 /** monta o seletor em `host`; `value` -1 = sorteada. Devolve como ler o valor atual. */
 export function mountTrackPicker(host: HTMLElement, value: number, onChange?: (v: number) => void) {
   const all = [{ i: -1, name: "🎲 Sorteada na hora", key: "sorteada aleatoria" }].concat(
-    CIRCUITS.map((c, i) => ({ i, name: c.name, key: norm(`${c.name} ${trackTags(i).map((x) => x.t).join(" ")}`) })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    CIRCUITS.flatMap((c, i) => (c.standby ? [] : [{ i, name: c.name, key: norm(`${c.name} ${c.official ?? ""} ${trackTags(i).map((x) => x.t).join(" ")}`) }])).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
   );
   let cur = value;
   let open = false;

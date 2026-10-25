@@ -56,6 +56,7 @@ export async function fillRanking(body: HTMLElement, friendsOnly = false) {
       .join("");
     // recorde de cada pista: o melhor entre todos
     const recs = CIRCUITS.map((c, i) => {
+      if (c.standby) return null;
       let best: { time: number; driver: string; who: string; mine: boolean } | null = null;
       for (const r of pool) {
         const l = r.laps[String(i)];

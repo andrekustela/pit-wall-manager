@@ -7,7 +7,7 @@ import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, 
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
-import { CIRCUITS } from "../sim/track";
+import { CIRCUITS, randomTrack } from "../sim/track";
 import { clampTuning, type QualiLap } from "../sim/tuning";
 import { cleanLivery, type Livery } from "../sim/livery";
 import { ALL_COMPOUNDS, DEFAULT_TUNING, FUEL_MAX, type CarSetup, type Tuning } from "../sim/types";
@@ -70,7 +70,7 @@ export class Room {
   hostId = "";
   phase: Phase = "lobby";
   laps = 20;
-  trackIndex = 0;
+  trackIndex = randomTrack();
   equalCars = false;
   champMode = false;
   champPct = 10;

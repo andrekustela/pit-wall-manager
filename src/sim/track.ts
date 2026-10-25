@@ -27,10 +27,19 @@ export interface TrackDef {
   night?: boolean;
   /** facilidade de ultrapassar (1 = normal; Mônaco é bem menos) */
   overtake?: number;
+  /** nome oficial completo do circuito */
+  official?: string;
+  /** ano do primeiro GP de F1 */
+  firstGP?: number;
+  /** o 1º ponto é a linha de largada real: o grid fica na reta dele (senão, na maior reta) */
+  realStart?: boolean;
+  /** guardada (fora do sorteio, do seletor e do menu); o índice fica pra saves e recordes antigos */
+  standby?: boolean;
 }
 
 import { turtle } from "./trackShape";
 import { REAL_CIRCUITS } from "./realCircuits";
+import { REAL_TRACKS } from "./realTracks";
 
 export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
@@ -39,7 +48,8 @@ export const PIT_MERGE = TRACK_WIDTH / 2 - 3;
 /** a vaga da garagem fica ao lado do pit lane, pra quem passa não atravessar quem está parado */
 export const BOX_SHIFT = 3;
 
-export const CIRCUITS: TrackDef[] = [
+// pistas desenhadas à mão (fictícias e reais aproximadas): guardadas por enquanto
+const HANDMADE: TrackDef[] = [
   {
     name: "Autódromo Costa Azul",
     blurb: "Equilibrado: retas boas e curvas de média. Asfalto com algumas ondulações.",
@@ -156,6 +166,16 @@ export const CIRCUITS: TrackDef[] = [
   ...REAL_CIRCUITS,
 ];
 
+/** todas as pistas, na ordem dos índices (saves e recordes guardam o índice: só acrescentar no fim) */
+export const CIRCUITS: TrackDef[] = [...HANDMADE.map((t) => ({ ...t, standby: true })), ...REAL_TRACKS];
+/** índices das pistas em uso (sorteio, seletor, menu, ranking) */
+export const ACTIVE_TRACKS: number[] = CIRCUITS.flatMap((t, i) => (t.standby ? [] : [i]));
+/** uma pista em uso, sorteada (sem repetir a pista "evitar", se der) */
+export function randomTrack(rnd: () => number = Math.random, avoid = -1): number {
+  const pool = ACTIVE_TRACKS.length > 1 ? ACTIVE_TRACKS.filter((i) => i !== avoid) : ACTIVE_TRACKS;
+  return pool[Math.floor(rnd() * pool.length)];
+}
+
 const BRAKE = 40;
 
 /** perfil padrão (acerto médio), usado quando não importa o carro */
@@ -252,8 +272,11 @@ export class Track {
     let pts = resample(sampleSpline(ctrl), 1);
 
     let { heading, curvature } = this.computeGeometry(pts);
-    // largada no meio da maior reta
-    const run = this.longestStraight(curvature);
+    // largada no meio da maior reta (ou da reta da largada real, se ela for uma reta de verdade)
+    // reta da largada levemente curva (Mônaco): usa 400 m em volta da linha real mesmo assim
+    const run = def.realStart
+      ? (this.straightAt(curvature, 0, 200) ?? ([pts.length - 200, pts.length + 200] as [number, number]))
+      : this.longestStraight(curvature);
     const startIdx = Math.floor(run[0] + (run[1] - run[0]) * 0.55) % pts.length;
     pts = pts.slice(startIdx).concat(pts.slice(0, startIdx));
     ({ heading, curvature } = this.computeGeometry(pts));
@@ -290,6 +313,22 @@ export class Track {
       curvature[i] = angDiff(heading[(i - W + n) % n], heading[(i + W) % n]) / (2 * W);
     }
     return { heading, curvature };
+  }
+
+  /** reta (trecho quase sem curva) que passa pelo ponto i, se tiver pelo menos minLen metros */
+  private straightAt(curv: number[], i: number, minLen: number): [number, number] | null {
+    const n = curv.length;
+    const flat = (k: number) => Math.abs(curv[((k % n) + n) % n]) < 0.0015;
+    // o ponto pode cair logo antes/depois da reta (ex.: Mônaco): procura a reta mais perto (até 150 m)
+    let d = 0;
+    while (d <= 150 && !flat(i + d) && !flat(i - d)) d++;
+    if (d > 150) return null;
+    i = flat(i + d) ? i + d : i - d;
+    let a = i, b = i;
+    while (a > i - n && flat(a - 1)) a--;
+    while (b < a + n - 1 && flat(b + 1)) b++;
+    if (b - a < minLen) return null;
+    return a < 0 ? [a + n, b + n] : [a, b];
   }
 
   private longestStraight(curv: number[]): [number, number] {

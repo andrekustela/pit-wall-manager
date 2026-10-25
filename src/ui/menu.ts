@@ -1,6 +1,6 @@
 import { esc, storeGet, storeSet } from "./common";
 import type { ChampSave } from "../net/room";
-import { CIRCUITS } from "../sim/track";
+import { CIRCUITS, randomTrack } from "../sim/track";
 import { account } from "../net/account";
 import { statsHtml } from "./login";
 import { deleteSave, listSaves, renameSave } from "./saves";
@@ -70,7 +70,7 @@ function soloPrefs(): SoloPrefs {
   const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[1] ?? LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30 };
   const x = loadJson<Partial<SoloPrefs>>("pwm.soloCfg") ?? {};
   return {
-    track: typeof x.track === "number" && (x.track === -1 || CIRCUITS[x.track]) ? x.track : d.track,
+    track: typeof x.track === "number" && (x.track === -1 || (CIRCUITS[x.track] && !CIRCUITS[x.track].standby)) ? x.track : d.track,
     laps: LAP_OPTIONS.includes(x.laps as number) ? (x.laps as number) : d.laps,
     realDrivers: x.realDrivers ?? d.realDrivers,
     equalCars: x.equalCars ?? d.equalCars,
@@ -106,7 +106,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
 
   // pista do fundo: sorteada (as próximas também vêm sorteadas, a cada volta)
   // (a memória faz o menu redesenhado — ex.: salvar o perfil — continuar a mesma pista e a mesma volta)
-  const bgTrack = backdropMemo.v?.idx ?? Math.floor(Math.random() * CIRCUITS.length);
+  const bgTrack = backdropMemo.v?.idx ?? randomTrack();
   if (!backdropMemo.v) backdropMemo.v = { idx: bgTrack, t0: performance.now() };
 
   const champRows = (list: typeof saves) => list
@@ -270,7 +270,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       const setup: SoloSetup = {
         kind,
         teamId: storeGet("pwm.myCar") || "fal",
-        trackIndex: prefs.track >= 0 ? prefs.track : Math.floor(Math.random() * CIRCUITS.length),
+        trackIndex: prefs.track >= 0 ? prefs.track : randomTrack(),
         laps: prefs.laps,
         realDrivers: prefs.realDrivers,
         equalCars: prefs.equalCars,

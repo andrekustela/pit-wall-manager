@@ -2,7 +2,7 @@ import type { Connection } from "../net/connection";
 import { LAP_OPTIONS, type LobbyState } from "../net/protocol";
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
-import { CIRCUITS } from "../sim/track";
+import { ACTIVE_TRACKS, CIRCUITS, randomTrack } from "../sim/track";
 import { champRounds } from "../sim/championship";
 import { drawTrackThumb, esc, storeSet, teamName } from "./common";
 import { editMyLivery } from "./liveryEditor";
@@ -40,7 +40,7 @@ export class LobbyScreen {
         <p class="hint" style="margin-top:-4px">Escolha o carro. Os pilotos são sorteados depois, quando o fim de semana começar (de uma base de 100 pilotos, cada um com seu estilo).</p>
         <div class="teams" id="l-teams"></div>
         <h2>PISTA <span id="l-trackhint" style="color:var(--muted)"></span></h2>
-        <div class="trackbar"><input class="txt" id="l-tsearch" placeholder="Buscar pista (${CIRCUITS.length} no total)..."><button class="btn" id="l-trand">🎲 SORTEAR</button></div>
+        <div class="trackbar"><input class="txt" id="l-tsearch" placeholder="Buscar pista (${ACTIVE_TRACKS.length} no total)..."><button class="btn" id="l-trand">🎲 SORTEAR</button></div>
         <div class="trackinfo box" id="l-tinfo"></div>
         <div class="tracks many" id="l-tracks"></div>
         <h2>REGRAS</h2>
@@ -132,8 +132,10 @@ export class LobbyScreen {
 
     const tracks = root.querySelector("#l-tracks")!;
     if (!this.thumbsDrawn) {
-      tracks.innerHTML = CIRCUITS.map(
-        (c, i) => `<button class="trackcard" data-track="${i}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
+      tracks.innerHTML = ACTIVE_TRACKS.map(
+        (i) => [CIRCUITS[i], i] as const,
+      ).map(
+        ([c, i]) => `<button class="trackcard" data-track="${i}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
           <div class="st">${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
       ).join("");
       root.querySelector<HTMLInputElement>("#l-tsearch")!.addEventListener("input", (e) => {
@@ -141,14 +143,14 @@ export class LobbyScreen {
         tracks.querySelectorAll<HTMLElement>("[data-track]").forEach((b) => (b.hidden = !!q && !b.dataset.name!.includes(q)));
       });
       root.querySelector("#l-trand")!.addEventListener("click", () =>
-        this.conn.send({ t: "options", trackIndex: Math.floor(Math.random() * CIRCUITS.length) }),
+        this.conn.send({ t: "options", trackIndex: randomTrack() }),
       );
       // miniaturas desenhadas aos poucos (uma por quadro), pra tela abrir na hora
       const cvs = [...tracks.querySelectorAll<HTMLCanvasElement>("canvas")];
       let k = 0;
       const drawSome = () => {
         const t0 = performance.now();
-        while (k < cvs.length && performance.now() - t0 < 8) drawTrackThumb(cvs[k], k++);
+        while (k < cvs.length && performance.now() - t0 < 8) drawTrackThumb(cvs[k], Number(cvs[k++].closest<HTMLElement>("[data-track]")!.dataset.track));
         if (k < cvs.length) requestAnimationFrame(drawSome);
       };
       tracks.querySelectorAll<HTMLButtonElement>("[data-track]").forEach((b) =>
@@ -177,7 +179,7 @@ export class LobbyScreen {
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
-          <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas entre as ${CIRCUITS.length}, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+          <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas entre as ${ACTIVE_TRACKS.length}, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
         ${lobby.champMode ? `<div style="min-width:240px"><div class="hint" style="margin:0 0 6px">Nome do campeonato</div>
           <input class="txt" id="l-cname" maxlength="40" placeholder="Ex.: Copa dos Amigos 2026" value="${esc(lobby.champName)}" ${isHost ? "" : "disabled"}></div>` : ""}
         ${lobby.champMode ? `<div><div class="hint" style="margin:0 0 6px">Quantas pistas no campeonato</div>
