@@ -3,6 +3,7 @@
 // pela esquerda e outra entra pela direita "varrendo" a tela: atrás dela (à
 // direita) já aparece a pista nova; na frente (à esquerda) ainda é a antiga.
 import { ACTIVE_TRACKS, CIRCUITS, getTrack, randomTrack, type Vec } from "../sim/track";
+import { MENU_HANDOFF } from "./transition";
 
 const RUNNERS = [
   { color: "#ff2a32", speed: 0.06, start: 0 }, // líder: a volta dele troca a pista
@@ -105,6 +106,8 @@ export function mountMenuBackdrop(
   startT0?: number,
   /** avisa a pista atual e quando a volta dela começou (pra continuar depois de redesenhar) */
   onState?: (idx: number, t0: number) => void,
+  /** voltando do jogo: a pista só aparece quando a faixa da transição chega (ela vai e volta desenhando) */
+  intro = false,
 ) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const g = cv.getContext("2d")!;
@@ -184,7 +187,29 @@ export function mountMenuBackdrop(
   window.addEventListener("resize", onResize);
 
   // troca: "exit" (faixa sai pela esquerda) -> "sweep" (nova faixa varre da direita)
-  let phase: "run" | "exit" | "sweep" = "run";
+  let phase: "intro" | "run" | "exit" | "sweep" = "run";
+  /** a pista ainda não apareceu (intro): na ida a faixa não tem o que apagar */
+  let empty = false;
+  /** intro: voltando pro lugar com a pista já toda pintada */
+  let introBack = false;
+  if (intro && !reduce) {
+    phase = "intro";
+    empty = true;
+    lock.owner = "bg";
+    const go = () => {
+      window.removeEventListener(MENU_HANDOFF, go);
+      clearTimeout(fallback);
+      if (phase !== "intro") return;
+      cur = { ...cur, t0: performance.now() };
+      phase = "exit";
+      pk = 0;
+      rushing = false;
+      lock.rush = () => (rushing = true);
+    };
+    window.addEventListener(MENU_HANDOFF, go);
+    // se a transição não avisar (tela revelada sem animação), começa assim mesmo
+    const fallback = setTimeout(go, 1600);
+  }
   /** progresso da fase atual (0..1); com pressa (o menu quer a faixa) as fases terminam rapidinho */
   let pk = 0;
   let last = performance.now();
@@ -255,6 +280,17 @@ export function mountMenuBackdrop(
     p.closePath();
     return p;
   };
+  /** região à esquerda do centro da faixa */
+  const leftOfStripe = (tx: number) => {
+    const xc = (y: number) => W * (STRIPE_LEFT + STRIPE_W / 2) + tx - SKEW * (y - H * STRIPE_CY);
+    const p = new Path2D();
+    p.moveTo(-10, 0);
+    p.lineTo(xc(0) * dpr, 0);
+    p.lineTo(xc(H) * dpr, cv.height);
+    p.lineTo(-10, cv.height);
+    p.closePath();
+    return p;
+  };
   /** até onde a faixa vai pra direita (sai da tela, mesmo inclinada) */
   const farRight = () => W * (1 - STRIPE_LEFT) + W * 0.05 + H * SKEW * 0.6;
   const setStripe = (tx: number) => {
@@ -284,17 +320,24 @@ export function mountMenuBackdrop(
     g.clearRect(0, 0, cv.width, cv.height);
     if (grid) g.drawImage(grid, 0, 0);
 
-    if (phase === "run") {
+    if (phase === "intro") {
+      setStripe(0); // só a grade: a pista aparece quando a faixa passar
+    } else if (phase === "run") {
       drawScene(cur, now, null, 0);
     } else if (phase === "exit") {
       // ida: a faixa vai pra direita apagando a pista antiga (só sobra o que ainda está à direita dela)
       pk = Math.min(1, pk + dt / (rushing ? 110 : EXIT_MS));
       const tx = easeInOut(pk) * farRight();
       setStripe(tx);
-      drawScene(cur, now, rightOfStripe(tx), 0, frozenAt);
+      // intro: a faixa vai pra direita pintando a pista por onde passa (o que ficou à esquerda dela)
+      if (empty) drawScene(cur, now, leftOfStripe(tx), 0);
+      else drawScene(cur, now, rightOfStripe(tx), 0, frozenAt);
       if (pk >= 1) {
-        next = build(nextIdx(), now + (rushing ? 0 : SWEEP_MS * 0.35));
-        onTrack?.(next.tr.idx);
+        // na intro a pista é a mesma (já pintada): a faixa só volta pro lugar; senão sorteia a próxima
+        introBack = empty;
+        next = empty ? cur : build(nextIdx(), now + (rushing ? 0 : SWEEP_MS * 0.35));
+        if (!empty) onTrack?.(next.tr.idx);
+        empty = false;
         phase = "sweep";
         pk = 0;
       }
@@ -304,12 +347,14 @@ export function mountMenuBackdrop(
       const e = easeOut(pk);
       const tx = farRight() * (1 - e);
       setStripe(tx);
-      drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
+      if (introBack) drawScene(next, now, null, 0);
+      else drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
       if (pk >= 1) {
         cur = next;
         next = null;
         onState?.(cur.tr.idx, cur.t0);
         phase = "run";
+        introBack = false;
         setStripe(0);
         releaseStripe(lock);
       }

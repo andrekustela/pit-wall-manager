@@ -10,6 +10,9 @@ const REVEAL_MS = 700;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 
+/** evento: a faixa da transição chegou no lugar dela no menu e passou pra faixa do menu */
+export const MENU_HANDOFF = "pwm:menuhandoff";
+
 interface Cover {
   shade: HTMLDivElement;
   band: HTMLDivElement;
@@ -81,6 +84,15 @@ export function revealScreen(toMenu = false) {
     shadeRight(c, tx);
     if (k < 1) return void requestAnimationFrame(step);
     c.shade.remove();
+    // voltando pro menu: a faixa do menu assume no mesmo lugar com o mesmo vermelho forte e vai
+    // clareando (sem "sumir um vermelho e aparecer outro"); o fundo do menu continua com ela,
+    // desenhando a pista
+    const stripe = toMenu ? document.querySelector<HTMLElement>(".m2stripe:not(.m2fly)") : null;
+    if (stripe) {
+      stripe.classList.add("hot");
+      requestAnimationFrame(() => requestAnimationFrame(() => stripe.classList.remove("hot")));
+      window.dispatchEvent(new Event(MENU_HANDOFF));
+    }
     c.band.remove();
   };
   // tela nova (ainda coberta) tem que estar desenhada antes de começar

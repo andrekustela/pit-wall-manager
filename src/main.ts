@@ -165,8 +165,13 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       this.menu();
     });
     if (isCovered()) revealScreen(true); // a faixa para no lugar dela no menu
-    if (AUTO) this.connect({ mode: "solo", name: "Teste", teamName: "Equipe Teste" });
+    // teste: ?auto&once só entra no jogo da primeira vez (pra dar pra ver a volta pro menu)
+    if (AUTO && !(params.has("once") && this.autoOnce)) {
+      this.autoOnce = true;
+      this.connect({ mode: "solo", name: "Teste", teamName: "Equipe Teste" });
+    }
   }
+  private autoOnce = false;
 
   /** jogo solo montado no menu (tipo, pista, regras): começa direto, sem a tela de lobby */
   /** pedidos de autorização do piloto no rádio (na corrida) */

@@ -16,7 +16,7 @@ import { champRounds } from "../sim/championship";
 import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
-import { coverScreen } from "./transition";
+import { coverScreen, isCovered } from "./transition";
 import { car3dPref } from "../render/car3d";
 import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
@@ -182,7 +182,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         fill: "forwards",
       });
     };
-  }, (idx) => recs(idx).map((r) => r.who), lock, backdropMemo.v.t0, (idx, t0) => (backdropMemo.v = { idx, t0 }));
+  }, (idx) => recs(idx).map((r) => r.who), lock, backdropMemo.v.t0, (idx, t0) => (backdropMemo.v = { idx, t0 }), isCovered());
 
   // ----- vistas da coluna da esquerda: menu inicial ou um dos modos -----
   const homeHtml = () => `

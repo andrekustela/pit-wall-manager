@@ -1279,3 +1279,9 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .driver .calert { height: 46px; min-height: 0; }
 .driver .calert .t, .driver .calert .t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .team.compact .driver .calert { height: 30px; }
+/* volta pro menu: a faixa do menu assume com o vermelho forte da transição e vai clareando
+   (enquanto já vai e volta desenhando a pista do fundo) */
+.m2stripe::after { content: ""; position: absolute; inset: 0 -2px; opacity: 0; transition: opacity 1.1s cubic-bezier(.3, .7, .3, 1); pointer-events: none;
+  background: linear-gradient(180deg, rgba(232,32,42,.35) 0%, rgba(232,32,42,.75) 45%, rgba(232,32,42,.4) 100%);
+  border-left: 2px solid rgba(255,90,96,.8); border-right: 2px solid rgba(255,90,96,.35); }
+.m2stripe.hot::after { opacity: 1; transition: none; }
