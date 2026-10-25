@@ -35,9 +35,9 @@ cam.type = "ORTHO"
 cam.ortho_scale = W + 2 * pad
 co = bpy.data.objects.new("tras", cam)
 sc.collection.objects.link(co)
-# atrás do carro (+Y), um pouco acima, olhando pra frente (-Y) levemente pra baixo
-co.location = ((mn.x + mx.x) / 2, mx.y + 12, (mn.z + mx.z) / 2 + 0.02 + math.tan(math.radians(5)) * (12 + (mx.y - mn.y) / 2))
-co.rotation_euler = (math.radians(85), 0, math.radians(180))
+# atrás do carro (+Y), na altura dele, olhando reto pra frente (-Y): sem ver o "teto" (inclinado parecia empinando)
+co.location = ((mn.x + mx.x) / 2, mx.y + 12, (mn.z + mx.z) / 2 + 0.05)
+co.rotation_euler = (math.radians(90), 0, math.radians(180))
 sc.camera = co
 sc.render.resolution_x = round((W + 2 * pad) * PXM)
 sc.render.resolution_y = round((Hh + 2 * pad + 0.5) * PXM)
