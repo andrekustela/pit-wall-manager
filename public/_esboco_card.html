@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Esboço: card do piloto</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Titillium+Web:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0e15;--panel:#141925;--line:#262d3d;--muted:#8a93a6;--ink:#e9edf5;--red:#e8202a;--ok:#3bd16f;--warn:#ffb02e;--bad:#ff3b3b}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 60% 30%,#1a2233,#0b0e15 70%);color:var(--ink);font:14px "Titillium Web",sans-serif;padding:24px}
+h1{font:600 26px Oswald;letter-spacing:.04em;margin:0 0 4px}p.lead{color:var(--muted);margin:0 0 20px;max-width:900px}
+.cols{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}.col h2{font:600 15px Oswald;letter-spacing:.12em;color:var(--muted);margin:0 0 8px}
+.note{color:var(--muted);font-size:13px;max-width:420px;margin:10px 0 0;line-height:1.5}.note b{color:var(--ink)}
+/* card proposto */
+.card{width:420px;background:var(--panel);border:1px solid var(--line);border-top:3px solid #2bb24c}
+.top{display:flex;align-items:center;gap:10px;padding:10px 12px 8px}.pos{font:700 30px Oswald;line-height:1}.nm b{display:block;font:600 15px Oswald;letter-spacing:.03em}.nm small{color:var(--muted)}
+.gaps{margin-left:auto;text-align:right;font:600 13px Oswald;line-height:1.35}.gaps span{color:var(--muted);font-weight:500;margin-right:6px}.gaps .up{color:var(--ok)}.gaps .dn{color:var(--warn)}
+.chips{display:flex;gap:6px;padding:0 12px 8px;flex-wrap:wrap}.chip{display:flex;align-items:center;gap:6px;padding:3px 8px;background:#0c1018;border:1px solid var(--line);font:600 12px Oswald;letter-spacing:.05em}
+.tyre{width:16px;height:16px;border-radius:50%;border:3px solid #ffd23b;background:#111}.bar{width:46px;height:5px;background:#000}.bar i{display:block;height:100%}
+.alert{margin:0 12px 10px;padding:8px 10px;display:flex;align-items:center;gap:10px;background:#2a1410;border:1px solid var(--warn)}
+.alert .t{flex:1;font-weight:600}.alert .t small{display:block;color:var(--muted);font-weight:400}.alert button{white-space:nowrap}
+.ctrl{display:grid;grid-template-columns:60px 1fr;gap:6px 8px;align-items:center;padding:0 12px 10px}.lbl{color:var(--muted);font-size:12px}
+.seg{display:flex}.seg button{flex:1;padding:6px 0;background:#0c1018;border:1px solid var(--line);color:var(--ink);font:600 12px Oswald;letter-spacing:.06em;cursor:pointer}
+.seg button.on{background:#e9edf5;color:#111}.seg kbd{font:10px Oswald;opacity:.5;margin-left:4px}
+.box{margin:0 12px 10px;display:flex;gap:6px}.box .big{flex:1;padding:10px;background:var(--red);border:0;color:#fff;font:700 15px Oswald;letter-spacing:.1em;cursor:pointer}
+.box .small{padding:0 10px;background:#0c1018;border:1px solid var(--line);color:var(--ink);font:600 12px Oswald}
+.more{border-top:1px solid var(--line);padding:8px 12px;color:var(--muted);font:600 12px Oswald;letter-spacing:.1em;cursor:pointer;display:flex;justify-content:space-between}
+.det{padding:0 12px 12px;display:none;gap:10px}.det.open{display:grid;grid-template-columns:90px 1fr}
+.parts div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #1c2230;font-size:13px}.parts em{font-style:normal;font:600 11px Oswald;padding:1px 6px;background:var(--ok);color:#06210f}.parts em.w{background:var(--warn);color:#111}
+button.b{padding:6px 10px;background:#e9edf5;color:#111;border:0;font:700 12px Oswald;letter-spacing:.08em;cursor:pointer}
+/* card atual (foto) */
+.old{width:460px;border:1px solid var(--line)}
+</style></head><body>
+<h1>Esboço: card do piloto mais intuitivo</h1>
+<p class="lead">Ideia: em cima fica só o que decide a corrida (posição, distâncias, pneu, combustível e <b>um alerta por vez</b>, já com o botão da ação). O resto (peças, plano, ordens, escolha do pneu) fica em "Detalhes", que abre quando você quer. É só um esboço pra você olhar; nada mudou no jogo ainda.</p>
+<div class="cols">
+  <div class="col"><h2>PROPOSTA (clique em DETALHES)</h2>
+    <div class="card">
+      <div class="top"><div class="pos">P7</div><div class="nm"><b>JACKIE STEWART</b><small>Falcão F1 · volta 14/20</small></div>
+        <div class="gaps"><div><span>FRENTE</span><b class="up">−0,8 s</b> NOR</div><div><span>ATRÁS</span><b class="dn">+1,9 s</b> VER</div></div></div>
+      <div class="chips">
+        <div class="chip"><span class="tyre"></span>MÉDIO · 12 V <span class="bar"><i style="width:34%;background:var(--warn)"></i></span> 34%</div>
+        <div class="chip">⛽ 7,2 V <span class="bar"><i style="width:80%;background:var(--ok)"></i></span></div>
+        <div class="chip" style="color:var(--ok)">SEM DANOS</div>
+      </div>
+      <div class="alert"><div class="t">⚠ Pneu caindo: perdendo 0,4 s por volta<small>O plano era parar na volta 15 (duro, até o fim)</small></div><button class="b">BOX AGORA</button></div>
+      <div class="ctrl"><span class="lbl">Ritmo</span><div class="seg"><button>ATACAR<kbd>Q</kbd></button><button class="on">NORMAL<kbd>W</kbd></button><button>POUPAR<kbd>E</kbd></button></div>
+        <span class="lbl">Motor</span><div class="seg"><button>RICO<kbd>Z</kbd></button><button class="on">NORMAL<kbd>X</kbd></button><button>POBRE<kbd>C</kbd></button></div></div>
+      <div class="box"><button class="big">CHAMAR PRO BOX <kbd style="opacity:.6">B</kbd></button><button class="small">DURO · ATÉ O FIM ▾</button></div>
+      <div class="more" onclick="document.querySelector('.det').classList.toggle('open')"><span>DETALHES: PEÇAS, PLANO, ORDENS</span><span>▾</span></div>
+      <div class="det"><svg viewBox="0 0 64 132" width="86"><rect x="4" y="24" width="12" height="19" rx="3.5" fill="#ffd23b"/><rect x="48" y="24" width="12" height="19" rx="3.5" fill="#ffd23b"/><rect x="2" y="96" width="14" height="22" rx="3.5" fill="#3bd16f"/><rect x="48" y="96" width="14" height="22" rx="3.5" fill="#3bd16f"/><path d="M30 8 Q32 4.5 34 8 L36.5 40 L27.5 40 Z M27.5 40 L36.5 40 L38 49 Q49 50 50.5 60 L50 74 Q47 88 40.5 98 L23.5 98 Q17 88 14 74 L13.5 60 Q15 50 26 49 Z" fill="none" stroke="#8a93a6"/><path d="M5 13 Q18 8 32 9.5 Q46 8 59 13 L59 17.5 Q46 13.5 32 14.5 Q18 13.5 5 17.5 Z M14 118.5 Q32 115.5 50 118.5 L50 125 Q32 122 14 125 Z" fill="none" stroke="#8a93a6"/></svg>
+        <div class="parts"><div>Asa dianteira <em>OK</em></div><div>Suspensão diant. <em>OK</em></div><div>Asa traseira <em>OK</em></div><div>Suspensão tras. <em>OK</em></div><div>Motor <em class="w">72%</em></div>
+          <div style="border:0;margin-top:6px">Equipe: <span class="seg" style="display:inline-flex;width:210px"><button>DEIXAR PASSAR</button><button class="on">LIVRE</button></span></div></div></div>
+    </div>
+    <p class="note"><b>O que muda:</b> o alerta mais urgente vai pro topo com o botão certo (box, poupar, trocar pneu); pneu e combustível viram duas barrinhas; a diferença pros carros da frente e de trás fica sempre à vista; o desenho do carro e a lista de peças só aparecem em Detalhes (ou sozinhos, piscando, quando uma peça quebra).</p>
+  </div>
+  <div class="col"><h2>HOJE</h2><img class="old" src="/car3d/_card_atual.png" alt="card atual" onerror="this.replaceWith(Object.assign(document.createElement('p'),{className:'note',textContent:'(o card atual é o que aparece na corrida, embaixo da tela)'}))">
+    <p class="note">Hoje tudo aparece junto: desenho do carro, 5 peças, ritmo, motor, ordens, pneu, combustível, plano e box. Funciona, mas é muita coisa pra ler durante a corrida.</p></div>
+</div>
+</body></html>
