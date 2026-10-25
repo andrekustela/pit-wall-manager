@@ -39,6 +39,8 @@ export interface LoadingOpts {
   minMs?: number;
   /** o que de fato precisa estar pronto pra sair (ex.: a pista desenhada) */
   ready?: () => boolean;
+  /** depois dos 100%, espera o jogador apertar "Vamos começar!" */
+  play?: boolean;
   /** onde colocar (padrão: body) */
   host?: HTMLElement;
 }
@@ -70,7 +72,8 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
     </div>` : ""}
     <div class="ldtip"><span>📻 DICA DO ENGENHEIRO</span><p data-tip>${esc(ENGINEER_TIPS[tip0])}</p></div>
     <div class="ldlogo"><div class="ldlogobox"><img class="base" src="/brand/logo.png" alt=""><img class="fill" src="/brand/logo.png" alt="Pit Wall Manager"></div>
-      <div class="ldpct"><span>CARREGANDO</span><b data-pct>0%</b></div></div>`;
+      <div class="ldpct"><span>CARREGANDO</span><b data-pct>0%</b></div>
+      ${o.play ? `<button class="ldplay" hidden>VAMOS COMEÇAR! <i>▶</i></button>` : ""}</div>`;
   (o.host ?? document.body).appendChild(el);
 
   const fill = el.querySelector<HTMLElement>(".fill")!;
@@ -154,6 +157,7 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
     let shown = 0;
     const step = (now: number) => {
       if (!el.isConnected) {
+        window.removeEventListener("keydown", onKey, true);
         clearInterval(tipTimer);
         return done();
       }
@@ -169,6 +173,25 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
       pctEl.textContent = `${pct}%`;
       drawMap(Math.max(0.02, shown));
       if (shown < 1) return void requestAnimationFrame(step);
+      if (o.play) return void waitPlay();
+      leave();
+    };
+    // 100%: troca o "CARREGANDO" pelo botão (clique, Enter ou espaço); a dica continua trocando
+    const waitPlay = () => {
+      const btn = el.querySelector<HTMLButtonElement>(".ldplay")!;
+      const pct = el.querySelector<HTMLElement>(".ldpct")!;
+      pct.hidden = true;
+      btn.hidden = false;
+      el.classList.add("loaded");
+      if (!reduce()) btn.animate([{ opacity: 0, transform: "translateY(8px) scale(.96)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+      btn.focus({ preventScroll: true });
+      btn.addEventListener("click", leave);
+    };
+    let left = false;
+    const leave = () => {
+      if (left) return;
+      left = true;
+      window.removeEventListener("keydown", onKey, true);
       clearInterval(tipTimer);
       const outA = el.animate([{ opacity: 1 }, { opacity: 0, filter: "blur(4px)" }], { duration: reduce() ? 1 : 360, easing: "ease-out", fill: "forwards" });
       outA.onfinish = () => {
@@ -176,6 +199,16 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
         done();
       };
     };
+    // com o botão, as teclas ficam aqui (o espaço não pode soltar a corrida pausada por baixo)
+    const onKey = (e: KeyboardEvent) => {
+      if (!o.play) return;
+      e.stopImmediatePropagation();
+      if ((e.code === "Space" || e.key === "Enter") && el.classList.contains("loaded")) {
+        e.preventDefault();
+        leave();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
     requestAnimationFrame(step);
   });
 }

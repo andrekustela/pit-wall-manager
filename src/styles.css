@@ -1124,3 +1124,13 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .m2logowrap { overflow: visible; }
 .logostreak { position: absolute; top: 18%; left: 0; width: 38%; height: 64%; pointer-events: none; mix-blend-mode: screen;
   background: linear-gradient(90deg, transparent, rgba(232,32,42,.0) 10%, rgba(255,70,80,.85) 70%, rgba(255,255,255,.9) 92%, transparent); filter: blur(2px); }
+/* carregamento: botão "Vamos começar!" no lugar do CARREGANDO */
+.ldpct[hidden], .ldplay[hidden] { display: none; }
+.ldplay { display: flex; align-items: center; gap: 12px; margin: 12px 0 0 auto; padding: 12px 22px; border: 0; cursor: pointer;
+  background: linear-gradient(180deg, #ef2a33, #c3141d); color: #fff; font-family: var(--pix); font-size: 20px; letter-spacing: .12em;
+  box-shadow: 0 6px 24px rgba(232,32,42,.35); transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms ease-out; }
+.ldplay i { font-style: normal; font-size: 15px; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ldplay:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(232,32,42,.5); }
+.ldplay:hover i { transform: translateX(3px); }
+.ldplay:active { transform: scale(.97); }
+.ldplay:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }

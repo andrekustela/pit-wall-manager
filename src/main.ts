@@ -145,6 +145,7 @@ class App {
     const conn: Connection = local ? new LocalConnection(c.name, c.teamName, c.save) : new WsConnection();
     this.conn = conn;
     conn.onMessage = (m) => {
+      if (this.conn !== conn) return; // conexão já encerrada (ex.: fim do jogo voltando pro menu): ignora o que ainda chegar
       if (m.t === "lobby" && !m.lobby.solo && m.lobby.token) {
         retry = 0;
         storeSet("pwm.session", JSON.stringify({ code: m.lobby.code, token: m.lobby.token }));
@@ -304,12 +305,8 @@ class App {
           const draft = !l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1);
           const openDraft = () => draft && !AUTO && showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
           // começo de temporada do campeonato: primeiro o calendário (pistas sorteadas), depois o sorteio dos pilotos
-          const afterLoad = () => {
-            if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
-            else openDraft();
-          };
-          if (AUTO) afterLoad();
-          else void showLoading({ trackIndex: l.weekend.trackIndex, laps: l.weekend.laps, label: weekendLabel(l) }).then(afterLoad);
+          if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
+          else openDraft();
         }
         if (AUTO) conn.send({ t: "ready", ready: true });
         break;
@@ -319,10 +316,6 @@ class App {
         break;
       case "strategy":
         this.screen = new StrategyScreen(app, conn, l, this.quali!.results);
-        if (l.weekend && this.draftSeen !== l.weekend.seed) {
-          this.draftSeen = l.weekend.seed;
-          if (!AUTO) void showLoading({ trackIndex: l.weekend.trackIndex, laps: l.weekend.laps, label: "CORRIDA ÚNICA" });
-        }
         if (AUTO) setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
       case "podium":
@@ -397,8 +390,6 @@ class App {
       view.hud.update();
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
-    // largada: tela de carregamento sempre (fica até a pista estar desenhável)
-    if (!AUTO) void showLoading({ trackIndex: opts.trackIndex, laps: opts.laps, label: "LARGADA", ready: () => view.renderer.trackReady });
     view.renderer.showEngineers = !this.lobby?.solo;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
@@ -407,6 +398,21 @@ class App {
       conn.send({ t: "speed", speed: s });
       view.speed = s;
     };
+    // largada: tela de carregamento sempre (fica até a pista estar desenhável). No solo a corrida
+    // espera parada até o "Vamos começar!"; online ela não segura os outros e some sozinha
+    if (!AUTO) {
+      const solo = !!this.lobby?.solo;
+      if (solo && isHost) setSpeed(0);
+      void showLoading({
+        trackIndex: opts.trackIndex,
+        laps: opts.laps,
+        label: this.lobby?.champ ? `LARGADA · ${weekendLabel(this.lobby)}` : "LARGADA",
+        ready: () => view.renderer.trackReady,
+        play: solo,
+      }).then(() => {
+        if (solo && isHost && this.view === view) setSpeed(speed || 1);
+      });
+    }
     view.hud = new Hud(app, race, {
       myTeamId: my,
       online: !this.lobby?.solo,
@@ -497,6 +503,7 @@ class App {
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
+  if (location.search.includes("debug")) (window as unknown as { __app: App }).__app = appInst;
   // tela de abertura (do index.html): completa a logo e some
   const boot = document.getElementById("boot");
   if (boot) {
