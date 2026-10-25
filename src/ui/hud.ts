@@ -524,7 +524,8 @@ export class Hud {
     const fuelLaps = c.fuel / race.consumption(c), left = race.lapsLeft(c);
     // com parada planejada (reabastece nela), basta chegar até lá
     const next = upcomingStop(c);
-    const need = next && !c.boxRequest ? Math.min(left, Math.max(0.5, left - (race.laps - next.lap))) : left;
+    // box chamado (ou no pit): reabastece agora, só precisa chegar no box
+    const need = c.boxRequest || c.pit !== "none" ? Math.min(left, 0.5) : next ? Math.min(left, Math.max(0.5, left - (race.laps - next.lap))) : left;
     const fuelOk = fuelLaps >= need || c.finished;
     const fCol = fuelOk ? "var(--ok)" : fuelLaps < 3 ? "var(--soft)" : "var(--warn)";
     const fault = c.fault && !c.retired ? FAULTS[c.fault] : null;
@@ -554,7 +555,7 @@ export class Hud {
       const saving = c.engine === "lean";
       al = {
         lvl: fuelLaps < 3 ? "bad" : "warn",
-        t: `⛽ Combustível não chega: faltam ${num(need - fuelLaps)} voltas${need < left ? " até a parada" : ""}`,
+        t: `⛽ Falta combustível pra ${num(need - fuelLaps)} voltas${need < left ? " (até a parada)" : ""}`,
         sub: saving ? "Já está poupando: talvez precise parar" : "Mistura pobre e ritmo de poupar economizam",
         act: saving ? (canBox ? "box" : undefined) : "save",
         btn: saving ? "BOX AGORA" : "POUPAR",
@@ -573,7 +574,7 @@ export class Hud {
         : c.finished
           ? `🏁 Terminou em P${c.position}`
           : race.phase === "lights"
-            ? "Na largada: esperando as luzes"
+            ? `🚦 No grid: a largada já vai sair${upcomingStop(c) ? ` · plano: box na volta ${upcomingStop(c)!.lap}` : ""}`
             : c.boxRequest
               ? `📻 Box chamado: entra nesta volta (${COMPOUNDS[c.boxRequest].label})`
               : c.pit !== "none"
@@ -588,6 +589,8 @@ export class Hud {
     {
       const cls = `calert ${al.lvl}`;
       if (box.className !== cls) box.className = cls;
+      const tip = al.sub ? `${al.t}: ${al.sub}` : al.t;
+      if (box.title !== tip) box.title = tip;
       set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
     }
 
@@ -869,7 +872,7 @@ export class Hud {
         box.textContent = "NO PIT LANE";
         box.classList.add("inpit");
       } else if (c.boxRequest) {
-        box.textContent = `BOX, BOX! (${COMPOUNDS[c.boxRequest].label}, comb. p/ ${this.laps(c.boxFuel)} v) · cancelar`;
+        box.textContent = `BOX, BOX! ${COMPOUNDS[c.boxRequest].label} · comb. p/ ${this.laps(c.boxFuel)} v · cancelar`;
         box.classList.add("armed");
       } else if (c.planDue) {
         box.textContent = `PLANO: PARAR NESTA VOLTA? (${COMPOUNDS[cs.next].label}, comb. p/ ${this.laps(this.fuelFor(c))} v)`;

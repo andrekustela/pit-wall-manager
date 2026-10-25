@@ -1269,3 +1269,17 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .team:not(.compact) .driver.tabbox .statuscol .carstatus { display: none; }
 .driver.tabbox .statuscol .partslist { margin-top: 6px; gap: 5px; }
 .driver.tabbox .statuscol .prow { font-size: 11px; }
+/* texto longo encolhe (com …) e não empurra o botão nem as distâncias pra fora do card */
+.driver .calert .t { min-width: 0; }
+.driver .calert button { flex-shrink: 0; }
+.driver .top .nm { min-width: 0; }
+.driver .top .nm, .driver .top .nm small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.driver .gapsbox { flex-shrink: 0; }
+/* a coluna da direita do card não cresce com texto comprido (senão empurrava tudo pra fora) */
+.driver.panel { grid-template-columns: 132px minmax(0, 1fr); }
+.team.compact .driver.panel { grid-template-columns: 34px minmax(0, 1fr); }
+.driver .chips { min-width: 0; }
+/* altura fixa: título e explicação numa linha cada (texto inteiro no title) */
+.driver .calert { height: 46px; min-height: 0; }
+.driver .calert .t, .driver .calert .t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team.compact .driver .calert { height: 30px; }
