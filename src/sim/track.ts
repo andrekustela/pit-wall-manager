@@ -232,7 +232,7 @@ function resample(pts: Vec[], step: number): Vec[] {
   return out;
 }
 
-function angDiff(a: number, b: number): number {
+export function angDiff(a: number, b: number): number {
   let d = b - a;
   while (d > Math.PI) d -= 2 * Math.PI;
   while (d < -Math.PI) d += 2 * Math.PI;

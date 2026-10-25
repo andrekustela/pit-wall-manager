@@ -3,7 +3,7 @@ import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
 import { CarFx } from "./carFx";
 import { WorldTiles } from "./worldTiles";
-import { TRACK_WIDTH } from "../sim/track";
+import { TRACK_WIDTH, angDiff } from "../sim/track";
 
 /**
  * Desenha a corrida num canvas de alta resolução: a pista em vetor (em tiles,
@@ -181,6 +181,8 @@ export class Renderer {
   }
 
   private pos = new Map<string, { x: number; y: number; h: number }>();
+  /** quanto o bico está virado em relação ao rumo da pista (suavizado), por carro */
+  private yawOff = new Map<string, number>();
   /** estado das peças visto no último quadro (pra soltar o pedaço quando algo quebra) */
   private lookSeen = new Map<string, CarLook>();
   /** rodada, batida, fumaça, poeira, faíscas, marcas de pneu, tremor */
@@ -213,14 +215,24 @@ export class Renderer {
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
       const lat = smp ? smp.lat : c.lateral;
       const q = this.px(s, lat);
-      // o bico aponta pra onde o carro está indo: seguindo o traçado ele atravessa a pista, e com o
-      // ângulo só da linha do meio parecia andar de lado (drift). Desvio = quanto muda de lateral
-      // por metro andado, medido num trechinho pra trás
-      const prev = smp && this.sample(this.hist.get(c.id), rt - 0.12);
-      if (smp && prev && c.spin <= 0) {
-        const dd = smp.d - prev.d;
-        if (dd > 0.6) q.h += Math.atan(Math.max(-0.6, Math.min(0.6, (smp.lat - prev.lat) / dd)));
+      // o bico aponta pra onde o carro está indo (seguindo o traçado ele atravessa a pista: com o ângulo
+      // da linha do meio parecia drift). Direção = corda entre a posição de um instante atrás e a de
+      // agora, mais metade do quanto a pista girou nesse trecho (a corda de um arco aponta pro meio
+      // dele). Funciona igual em grampo, por dentro ou por fora
+      const prev = smp && this.sample(this.hist.get(c.id), rt - 0.1);
+      let off = 0;
+      if (smp && prev && c.spin <= 0 && smp.d - prev.d > 0.8) {
+        const p0 = this.px(((prev.d % L) + L) % L, prev.lat);
+        const chord = Math.atan2(q.y - p0.y, q.x - p0.x);
+        // não deixa passar de 35° do rumo da pista (amostra ruim, pit, batida)
+        off = Math.max(-0.6, Math.min(0.6, angDiff(q.h, chord + angDiff(p0.h, q.h) / 2)));
       }
+      // carro de verdade não gira de uma vez: quando ele muda de lado de repente (começa a ultrapassar,
+      // desvia), o bico acompanha em ~0,1 s em vez de pular
+      const was = this.yawOff.get(c.id) ?? off;
+      const sm = was + (off - was) * (1 - Math.exp(-Math.max(0, realDt) * speed / 0.1));
+      this.yawOff.set(c.id, sm);
+      q.h += sm;
       pos.set(c.id, q);
       this.interp.set(c.id, { s, lat });
     }

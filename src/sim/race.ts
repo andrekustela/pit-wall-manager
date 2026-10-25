@@ -819,6 +819,21 @@ export class Race {
     return d;
   }
 
+  /** carro mais perto na frente (até 80 m, quase na mesma fila) pra se alinhar atrás e pegar vácuo */
+  private towTarget(c: CarState): CarState | null {
+    let best: CarState | null = null, gap = 80;
+    const mine = this.relLat(c);
+    for (const o of this.cars) {
+      if (o === c || o.retired || o.pit !== "none" || o.spin > 0 || this.zone(o) !== "track") continue;
+      const d = this.rel(c, o);
+      if (d > CAR_L && d < gap && Math.abs(this.relLat(o) - mine) < 6) {
+        gap = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
   /** quanto o vácuo e o DRS empurram o carro agora (multiplica a velocidade alvo) */
   private slipstream(c: CarState): number {
     // carro mais perto na frente (qualquer faixa perto o bastante pra pegar o vácuo)
@@ -839,7 +854,12 @@ export class Race {
     }
     let k = 1;
     if (c.drs) k *= 1.04;
-    if (ahead && gap < 80 && Math.abs(this.relLat(ahead) - this.relLat(c)) < 4 && this.track.isStraight(c.s)) k *= 1 + 0.05 * (1 - gap / 80);
+    // esteira: cheia até 1,5 m de diferença de lado, some até 3,5 m (emparelhado não pega vácuo)
+    if (ahead && gap < 80 && this.track.isStraight(c.s)) {
+      const dl = Math.abs(this.relLat(ahead) - this.relLat(c));
+      const wake = dl < 1.5 ? 1 : Math.max(0, (3.5 - dl) / 2);
+      k *= 1 + 0.07 * (1 - gap / 80) * wake;
+    }
     return k;
   }
 
@@ -886,6 +906,11 @@ export class Race {
         // largada: cada um segura a sua fila até a primeira curva (chegam lado a lado)
         const opening = c.lap < 0 || (c.lap === 0 && this.dist(c) < 550);
         let want = c.finished ? 4 : opening ? Math.round(c.lateral / LANE_STEP) * LANE_STEP : this.track.lineAt(c.s + 12);
+        // reta com alguém até 80 m na frente: entra na esteira dele (perto da freada volta pro traçado)
+        if (!c.finished && !opening && !sc.active && this.track.isStraight(c.s) && this.track.isStraight(c.s + 60)) {
+          const a = this.towTarget(c);
+          if (a) want = this.onLine(c.s, this.relLat(a));
+        }
         // vai pro lado do pit antes da entrada
         if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
         if (c.defendTill > this.time) want = this.onLine(c.s, c.defendLat);
@@ -960,7 +985,8 @@ export class Race {
             }
             want = c.overtaking ? this.onLine(c.s, c.otOff ?? 0) : want;
           } else {
-            want = this.onLine(c.s, c.otOff ?? 0);
+            // estilingue: fica na esteira embalando e só sai pro lado no fim (perto dele ou da freada)
+            want = d > 16 && this.track.isStraight(c.s + 60) ? this.onLine(c.s, this.relLat(o)) : this.onLine(c.s, c.otOff ?? 0);
             if (d > 0 && d < 25) myT *= this.track.isStraight(c.s) ? 1.01 : 1.005; // embalado pra completar a manobra
           }
         }

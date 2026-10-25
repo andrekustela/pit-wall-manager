@@ -43,8 +43,8 @@ interface CardState {
   planOpen: boolean;
   planSig: string;
   dueApplied: boolean;
-  /** aba aberta ao lado do card: pit stop (pneu, combustível, peças) ou estratégia (plano, ordens) */
-  fly: "pit" | "strat" | null;
+  /** aba do card: pilotagem (ritmo, motor, ordens) ou box (pneu, combustível, peças, plano) */
+  tab: "race" | "box";
 }
 
 export class Hud {
@@ -340,50 +340,38 @@ export class Hud {
   private buildCards() {
     const wrap = this.el.querySelector(".team")!;
     for (const c of this.mine()) {
-      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, fly: null });
+      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, tab: "race" });
       const card = document.createElement("div");
       card.className = "driver panel";
       card.dataset.id = c.id;
       card.style.borderTopColor = c.team.color;
-      card.title = "Clique no card pra seguir esse piloto";
       card.innerHTML = `
-        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}</div>
+        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}${partsListHtml()}</div>
         <div class="top">
           <div class="p"></div>
-          <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
+          <div class="nm" title="Clique no card pra seguir esse piloto">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
           <div class="gapsbox" title="Distância pro carro da frente e pro de trás"><div><span>FRENTE</span><b class="gf"></b></div><div><span>ATRÁS</span><b class="gb"></b></div></div>
         </div>
         <div class="mini-line chips"></div>
         <div class="calert" hidden></div>
+        <div class="ctabs"><button data-tab="race" title="Ritmo, motor e ordens de equipe: atacar, defender, poupar">⚔ PILOTAGEM</button><button data-tab="box" title="Pneu, combustível, peças e plano de paradas">🔧 BOX</button></div>
+        <div class="pane" data-pane="race">
         <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
           ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${"QWE"[i]} (no piloto seguido)">${PACE[m].label}<kbd>${"QWE"[i]}</kbd></button>`).join("")}
         </div></div>
         <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
           ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
         </div></div>
-        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre a aba do pit stop"></button></div>
-        <div class="tabs"><button data-tab="pit" title="Pit stop: pneu, combustível e peças"><i class="ar"></i>PIT STOP</button><button data-tab="strat" title="Estratégia: plano de paradas e ordens de equipe"><i class="ar"></i>ESTRATÉGIA</button></div>
-        <div class="flyout" data-fly="strat">
-        <div class="flyhead"><b>ESTRATÉGIA</b><span>${esc(c.driver.short)}</span><button data-flyclose title="Fechar">✕</button></div>
+        <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
+          <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
+        </div></div>
         <div class="stats">
           <div>Última<b class="last"></b></div>
           <div>Melhor<b class="best"></b></div>
           <div>À frente<b class="int"></b></div>
         </div>
-        <div class="wlabel" style="font-size:12px;color:var(--muted)"></div>
-        <div class="wear"><i></i></div>
-        <div class="flabel" style="font-size:12px;color:var(--muted);margin:-4px 0 6px"></div>
-        <div class="faultlabel"></div>
-        <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
-          <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
-        </div></div>
-        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
-          <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
         </div>
-        <div class="planedit" style="display:none"></div>
-        </div>
-        <div class="flyout" data-fly="pit">
-        <div class="flyhead"><b>PIT STOP</b><span>${esc(c.driver.short)}</span><button data-flyclose title="Fechar">✕</button></div>
+        <div class="pane" data-pane="box">
         <div class="row2"><span class="lbl">Pneu</span><div class="seg next">
           ${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${t}</button>`).join("")}
         </div></div>
@@ -391,9 +379,13 @@ export class Hud {
           <span class="stepper"><button data-fuel="-1">−</button><b class="fval"></b><button data-fuel="1">+</button></span>
           <button class="btn small" data-fuelauto>até o fim</button>
         </div>
-        <div class="flysub">Trocar peças na parada</div>
-        ${partsListHtml()}
-        </div>`;
+        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
+          <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
+        </div>
+        <div class="planedit" style="display:none"></div>
+        </div>
+        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre a aba do box"></button></div>
+        <div hidden><div class="wlabel"></div><div class="wear"><i></i></div><div class="flabel"></div><div class="faultlabel"></div></div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
       card.querySelector("[data-onboard]")!.addEventListener("click", (e) => {
@@ -443,15 +435,13 @@ export class Hud {
         else this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
         this.update();
       });
-      const setFly = (f: CardState["fly"]) => {
-        cs.fly = f;
-        this.applyFly(card, cs);
+      const setTab = (t: CardState["tab"]) => {
+        cs.tab = t;
+        this.applyTab(card, cs);
       };
-      card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) =>
-        b.addEventListener("click", () => setFly(cs.fly === b.dataset.tab ? null : (b.dataset.tab as CardState["fly"]))),
-      );
-      card.querySelectorAll("[data-flyclose]").forEach((b) => b.addEventListener("click", () => setFly(null)));
-      card.querySelector(".stopcfg")!.addEventListener("click", () => setFly(cs.fly === "pit" ? null : "pit"));
+      card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab as CardState["tab"])));
+      card.querySelector(".stopcfg")!.addEventListener("click", () => setTab("box"));
+      this.applyTab(card, cs);
       // botão do alerta: a ação certa pro problema mais urgente
       card.querySelector(".calert")!.addEventListener("click", (e) => {
         const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
@@ -607,11 +597,12 @@ export class Hud {
     set(".stopcfg", `${tyreIcon(nx)}${esc(COMPOUNDS[nx].label.toUpperCase())} · ${fuelTxt} ▾`);
   }
 
-  /** abre/fecha a aba ao lado do card */
-  private applyFly(card: HTMLElement, cs: CardState) {
-    card.querySelectorAll<HTMLElement>(".flyout").forEach((f) => f.classList.toggle("open", f.dataset.fly === cs.fly));
-    card.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === cs.fly));
-    card.querySelector(".stopcfg")?.classList.toggle("on", cs.fly === "pit");
+  /** troca a aba de dentro do card (o card não muda de tamanho) */
+  private applyTab(card: HTMLElement, cs: CardState) {
+    card.querySelectorAll<HTMLElement>(".pane").forEach((f) => (f.hidden = f.dataset.pane !== cs.tab));
+    card.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === cs.tab));
+    card.classList.toggle("tabbox", cs.tab === "box");
+    card.querySelector(".stopcfg")?.classList.toggle("on", cs.tab === "box");
   }
 
   private renderPlan(c: CarState, card: HTMLElement, cs: CardState) {
