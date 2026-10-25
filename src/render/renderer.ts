@@ -354,11 +354,25 @@ export class Renderer {
   private tunnelPaths: ReturnType<typeof tunnelPaths> | null = null;
 
   /** ângulo das rodas da frente: a curvatura um pouco à frente (exagerado pra ler de cima); rodando, contra-esterço */
+  private steerSmooth = new Map<string, { v: number; t: number }>();
   private steerOf(c: Race["cars"][number]): number {
     const tr = this.race.track;
-    if (c.spin > 0) return Math.sin(performance.now() / 90) * 0.45;
-    const k = tr.curvature[Math.floor(tr.wrap(c.s + 6)) % tr.L] ?? 0;
-    return Math.max(-0.45, Math.min(0.45, Math.atan(k * 3) * 2.2));
+    let target: number;
+    if (c.spin > 0) target = Math.sin(performance.now() / 90) * 0.45; // contra-esterço rodando
+    else {
+      // média da curvatura logo à frente (o piloto já vira na entrada) e ângulo proporcional à curva:
+      // raio 300 m ≈ 5°, 100 m ≈ 14°, grampo = batente (exagerado de propósito pra ler de cima)
+      let k = 0;
+      for (const d of [2, 5, 8, 11]) k += tr.curvature[Math.floor(tr.wrap(c.s + d)) % tr.L] ?? 0;
+      target = Math.max(-0.5, Math.min(0.5, (k / 4) * 25));
+    }
+    // suave: o volante não pula de uma posição pra outra
+    const now = performance.now();
+    const st = this.steerSmooth.get(c.id) ?? { v: target, t: now };
+    st.v += (target - st.v) * Math.min(1, ((now - st.t) / 1000) * 7);
+    st.t = now;
+    this.steerSmooth.set(c.id, st);
+    return st.v;
   }
 
   /** alguma peça saiu neste quadro: solta o pedaço (voa pra frente, girando, e fica na pista) */
