@@ -116,7 +116,26 @@ export class Hud {
   toggleBoard() {
     this.boardMini = !this.boardMini;
     storeSet("pwm.boardmini", this.boardMini ? "1" : "0");
+    const board = this.el.querySelector<HTMLElement>(".board")!;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const w0 = board.getBoundingClientRect().width;
     this.applyBoard();
+    if (reduce) return;
+    // a largura vai do tamanho antigo pro novo (em vez de pular) e as linhas entram em cascata,
+    // com um desfoque curto que esconde a troca das colunas
+    const w1 = board.getBoundingClientRect().width;
+    board.animate([{ width: `${w0}px` }, { width: `${w1}px` }], { duration: 380, easing: "cubic-bezier(0.77, 0, 0.175, 1)" });
+    const head = board.querySelector<HTMLElement>(".head");
+    head?.animate([{ opacity: 0.4, filter: "blur(2px)" }, { opacity: 1, filter: "blur(0)" }], { duration: 300, easing: "ease-out" });
+    const dir = this.boardMini ? 10 : -10;
+    board.querySelectorAll<HTMLElement>(".colhead, .rows .row").forEach((r, i) =>
+      r.animate([{ opacity: 0, transform: `translateX(${dir}px)`, filter: "blur(2px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }], {
+        duration: 320,
+        delay: 60 + Math.min(i, 20) * 14,
+        easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+        fill: "backwards",
+      }),
+    );
   }
 
   private applyBoard() {

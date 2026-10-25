@@ -11,6 +11,10 @@ import { TRACK_WIDTH } from "../sim/track";
 export class Renderer {
   private octx: CanvasRenderingContext2D;
   private world: WorldTiles;
+  /** a pista já está desenhável? (pra tirar a tela de "preparando a pista") */
+  get trackReady(): boolean {
+    return this.world.ready;
+  }
   private cam = { x: 0, y: 0, ready: false };
   private drops: { x: number; y: number; l: number }[] = [];
   private screenPos = new Map<string, { x: number; y: number }>();

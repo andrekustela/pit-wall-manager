@@ -12,11 +12,8 @@ const LOCAL_URL = "app://jogo/index.html";
 // pasta do jogo: dentro do programa empacotado ou o dist/ do projeto (em teste)
 const DIST = app.isPackaged ? path.join(process.resourcesPath, "dist") : path.join(__dirname, "..", "dist");
 
-// ajuda o overlay da Steam (Shift+Tab) a aparecer quando o jogo é adicionado como "não Steam"
-app.commandLine.appendSwitch("in-process-gpu");
-app.commandLine.appendSwitch("disable-direct-composition");
-// sem limite de FPS da janela (monitor de 144 Hz)
-app.commandLine.appendSwitch("disable-frame-rate-limit");
+// (sem opções de GPU/FPS: "disable-frame-rate-limit" fazia o jogo rodar milhares de quadros por
+// segundo e a janela travava em ~5 FPS; o padrão já acompanha o monitor, 144 Hz incluso)
 
 protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 

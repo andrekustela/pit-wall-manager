@@ -22,6 +22,12 @@ export class WorldTiles {
   private overviewPpm = 1;
   private worker: Worker | null = null;
   private local: VectorWorld | null = null;
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
+
+  /** o mapa da pista inteira já chegou (dá pra desenhar sem buraco) */
+  get ready(): boolean {
+    return !!this.overview;
+  }
 
   constructor(trackIndex: number) {
     const track = getTrack(trackIndex);
@@ -60,6 +66,10 @@ export class WorldTiles {
         this.worker.postMessage({ type: "init", trackIndex });
         this.worker.postMessage({ type: "overview", ppm: 1 });
         this.worker.postMessage({ type: "overview", ppm: fullPpm });
+        // plano B: se o Worker não mandar nada a tempo, monta a pista aqui mesmo
+        this.watchdog = setTimeout(() => {
+          if (!this.overview && this.worker) this.fallback(trackIndex);
+        }, 3500);
       } catch {
         this.fallback(trackIndex);
       }
@@ -77,6 +87,7 @@ export class WorldTiles {
   }
 
   destroy() {
+    if (this.watchdog) clearTimeout(this.watchdog);
     this.worker?.terminate();
     for (const t of this.tiles.values()) if ("close" in t) t.close();
     this.tiles.clear();
@@ -139,6 +150,10 @@ export class WorldTiles {
           g.imageSmoothingEnabled = true;
           g.drawImage(this.overview, sx, sy, sizeM * o, sizeM * o, dx, dy, ds, ds);
           g.imageSmoothingEnabled = !exact;
+        } else {
+          // nada pronto ainda: pinta o fundo (senão fica a imagem do quadro anterior e os carros "replicam")
+          g.fillStyle = "#151a14";
+          g.fillRect(dx, dy, Math.ceil(sizeM * pxPerM) + 1, Math.ceil(sizeM * pxPerM) + 1);
         }
       }
     }

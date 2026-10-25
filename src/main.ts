@@ -11,7 +11,7 @@ import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
 import type { QualiResult } from "./sim/weekend";
-import { storeSet, toast, updateWaitBar } from "./ui/common";
+import { esc, storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
 import { LobbyScreen } from "./ui/lobby";
 import { type SoloSetup, showMenu, type MenuChoice } from "./ui/menu";
@@ -381,6 +381,21 @@ class App {
       view.hud.update();
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
+    // pista ainda montando: tela de carregamento por cima até ela estar desenhável
+    if (!view.renderer.trackReady) {
+      const ld = document.createElement("div");
+      ld.className = "trackload";
+      ld.innerHTML = `<div class="tlbox"><span class="tlhint">PREPARANDO A PISTA</span><b>${esc(race.track.name.toUpperCase())}</b><i class="tlbar"><em></em></i></div>`;
+      app.appendChild(ld);
+      const t0 = performance.now();
+      const poll = setInterval(() => {
+        if (!ld.isConnected) return clearInterval(poll);
+        if (!view.renderer.trackReady && performance.now() - t0 < 8000) return;
+        clearInterval(poll);
+        const out = ld.animate([{ opacity: 1 }, { opacity: 0, filter: "blur(3px)" }], { duration: 320, easing: "ease-out", fill: "forwards" });
+        out.onfinish = () => ld.remove();
+      }, 80);
+    }
     view.renderer.showEngineers = !this.lobby?.solo;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
