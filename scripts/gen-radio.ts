@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RADIO_LINES, type RadioWho } from "../src/audio/radioLines";
+import { readWav, toRadioWav } from "./radio-wav.mjs";
 
 const TOOLS = join(process.env.LOCALAPPDATA ?? ".", "pwm-piper");
 const PIPER_ZIP = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip";
@@ -125,6 +126,9 @@ for (const who of Object.keys(VOICES) as VoiceKey[]) {
   await synth(exe, who, jobs);
   for (const j of jobs) {
     post(j.file, j.dst);
+    // formato leve (8 kHz / 8 bits): o filtro de rádio corta o resto
+    const w = readWav(readFileSync(j.dst));
+    writeFileSync(j.dst, toRadioWav(w.s, w.rate));
     count++;
   }
 }

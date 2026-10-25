@@ -1,2 +1,5 @@
 node_modules
 dist
+
+# saídas do electron-builder
+desktop/release*/
