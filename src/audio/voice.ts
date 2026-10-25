@@ -2,6 +2,7 @@
 // navegador/Windows, em português). Piloto e engenheiro com vozes diferentes; fila curta pra
 // não acumular quando a corrida está acelerada.
 import { storeGet, storeSet } from "../ui/common";
+import { RADIO_LINES, radioLineFor } from "./radioLines";
 
 type Who = "driver" | "engineer";
 interface Line {
@@ -44,15 +45,26 @@ class TeamVoice {
   volume = () => 0.7;
   beepIn = () => {};
   beepOut = () => {};
+  /** toca a fala gravada (com filtro de rádio); null = não tem o arquivo */
+  playClip: (url: string) => Promise<number | null> = async () => null;
+  private lastVariant = new Map<string, number>();
 
+  /** falas gravadas funcionam em qualquer navegador */
   get supported() {
-    return typeof window !== "undefined" && "speechSynthesis" in window;
+    return typeof window !== "undefined";
+  }
+
+  /** voz do navegador (plano B quando falta a fala gravada; o Opera, por exemplo, não tem) */
+  private get tts() {
+    return "speechSynthesis" in window && speechSynthesis.getVoices().some((v) => /^pt/i.test(v.lang));
   }
 
   toggle() {
     this.enabled = !this.enabled;
     storeSet("pwm.voice", this.enabled ? "1" : "0");
     if (!this.enabled) this.stop();
+    // ligou: fala na hora, pra conferir se o som chega
+    else this.say("Rádio ligado. Tá me ouvindo bem?", "engineer");
     this.listeners.forEach((f) => f());
   }
 
@@ -62,14 +74,14 @@ class TeamVoice {
 
   stop() {
     this.queue = [];
-    if (this.supported) speechSynthesis.cancel();
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
     this.busy = false;
   }
 
   say(text: string, who: Who) {
     if (!this.enabled || !this.supported || this.volume() <= 0) return;
     // no máximo 2 esperando: com a corrida acelerada, o que ficou velho é descartado
-    this.queue.push({ text: speakable(text), who, at: performance.now() });
+    this.queue.push({ text, who, at: performance.now() });
     while (this.queue.length > 2) this.queue.shift();
     this.next();
   }
@@ -103,31 +115,81 @@ class TeamVoice {
     if (!line) return;
     this.busy = true;
     const id = ++this.lineId;
-    const u = new SpeechSynthesisUtterance(line.text);
-    const v = this.voiceFor(line.who);
-    if (v.voice) u.voice = v.voice;
-    u.lang = v.voice?.lang ?? "pt-BR";
-    u.pitch = v.pitch;
-    u.rate = v.rate;
-    u.volume = Math.min(1, this.volume() * 1.2);
     const done = () => {
       if (!this.busy || id !== this.lineId) return;
       this.beepOut();
       this.busy = false;
       setTimeout(() => this.next(), 250);
     };
+    const rec = radioLineFor(line.text);
+    if (rec) {
+      // fala gravada: sorteia uma versão (sem repetir a última)
+      const last = this.lastVariant.get(rec.id) ?? -1;
+      let n = Math.floor(Math.random() * rec.lines.length);
+      if (rec.lines.length > 1 && n === last) n = (n + 1) % rec.lines.length;
+      this.lastVariant.set(rec.id, n);
+      this.beepIn();
+      void this.playClip(`/radio/${rec.id}_${n}.wav`).then((dur) => {
+        if (id !== this.lineId) return;
+        if (dur !== null) setTimeout(done, dur * 1000 + 60);
+        else this.speak(line, done, false);
+      });
+      return;
+    }
+    this.speak(line, done, true);
+  }
+
+  /** demonstração (?radio no endereço): toca todas as falas gravadas, uma atrás da outra */
+  async demo(log: (t: string) => void) {
+    this.stop();
+    for (const l of RADIO_LINES)
+      for (let n = 0; n < l.lines.length; n++) {
+        log(`${l.who === "driver" ? "🏎 Piloto" : "🎧 Engenheiro"}: ${l.lines[n]}`);
+        this.beepIn();
+        const dur = await this.playClip(`/radio/${l.id}_${n}.wav`);
+        if (dur === null) {
+          log("(arquivo não encontrado: rode npx tsx scripts/gen-radio.ts)");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, dur * 1000 + 80));
+        this.beepOut();
+        await new Promise((r) => setTimeout(r, 700));
+      }
+    log("fim da demonstração");
+  }
+
+  /** voz do navegador */
+  private speak(line: Line, done: () => void, beep: boolean) {
+    if (!this.tts) {
+      // sem voz nenhuma: fica só o bipe
+      if (beep) this.beepIn();
+      setTimeout(done, 300);
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(speakable(line.text));
+    const v = this.voiceFor(line.who);
+    if (v.voice) u.voice = v.voice;
+    u.lang = v.voice?.lang ?? "pt-BR";
+    u.pitch = v.pitch;
+    u.rate = v.rate;
+    u.volume = Math.min(1, this.volume() * 1.2);
     u.onend = done;
     u.onerror = done;
     // trava de segurança: alguns navegadores não disparam onend
     setTimeout(done, 1500 + line.text.length * 110);
-    this.beepIn();
-    setTimeout(() => speechSynthesis.speak(u), 180);
+    if (beep) this.beepIn();
+    setTimeout(() => {
+      // o Chrome às vezes fica "falando" travado ou pausado e não toca mais nada
+      if (speechSynthesis.paused) speechSynthesis.resume();
+      if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    }, 180);
   }
 }
 
 export const teamVoice = new TeamVoice();
 // a lista de vozes chega depois no Chrome/Edge: pedir cedo pra estar pronta na corrida
-if (teamVoice.supported) {
+if ("speechSynthesis" in window) {
   speechSynthesis.getVoices();
   speechSynthesis.addEventListener?.("voiceschanged", () => speechSynthesis.getVoices());
 }

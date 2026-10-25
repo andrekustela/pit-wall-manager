@@ -1,0 +1,2 @@
+Falas geradas com o Piper (https://github.com/rhasspy/piper, licença MIT).
+Vozes pt_BR faber e cadu (rhasspy/piper-voices), dados OHF-Voice/voice-datasets, licença CC0.

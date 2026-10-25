@@ -320,6 +320,60 @@ class Sound {
     gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   }
 
+  private clips = new Map<string, Promise<AudioBuffer | null>>();
+
+  /** fala gravada do rádio, com filtro de rádio (banda estreita + saturação) e chiado por baixo.
+   * Resolve com a duração (s), ou null se o arquivo não existir / o áudio estiver travado. */
+  async playRadio(url: string): Promise<number | null> {
+    if (!this.ctx || !this.noiseBuf) return null;
+    // áudio pausado (aba voltou, etc.): tenta retomar antes de desistir
+    if (this.ctx.state !== "running") await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 400))]);
+    if (this.ctx.state !== "running") return null;
+    const c = this.ctx;
+    let p = this.clips.get(url);
+    if (!p) {
+      p = fetch(url)
+        .then((r) => (r.ok && /audio|wav|octet/.test(r.headers.get("content-type") ?? "") ? r.arrayBuffer() : null))
+        .then((b) => (b ? c.decodeAudioData(b) : null))
+        .catch(() => null);
+      this.clips.set(url, p);
+    }
+    const buf = await p;
+    if (!buf || this.ctx !== c) return null;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const hp = c.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 380;
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 3300;
+    const mid = c.createBiquadFilter();
+    mid.type = "peaking";
+    mid.frequency.value = 1800;
+    mid.gain.value = 5;
+    const sat = c.createWaveShaper();
+    sat.curve = driveCurve(6) as Float32Array<ArrayBuffer>;
+    const g = c.createGain();
+    g.gain.value = 0.55;
+    src.connect(hp).connect(lp).connect(mid).connect(sat).connect(g).connect(this.master);
+    const t = c.currentTime + 0.12;
+    src.start(t);
+    // chiado do rádio durante a fala
+    const n = c.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.loop = true;
+    const nf = c.createBiquadFilter();
+    nf.type = "bandpass";
+    nf.frequency.value = 2600;
+    const ng = c.createGain();
+    ng.gain.value = 0.018;
+    n.connect(nf).connect(ng).connect(this.master);
+    n.start(t);
+    n.stop(t + buf.duration + 0.05);
+    return buf.duration + 0.12;
+  }
+
   beep(freq: number, dur: number, vol = 0.1, type: OscillatorType = "square", delay = 0) {
     if (!this.ctx) return;
     const c = this.ctx;
@@ -406,7 +460,7 @@ class Sound {
         case "fault": {
           if (!mine) break;
           // rádio falado (com bipe/chiado na voz); desligado, só o bipe
-          const r = teamVoice.enabled && teamVoice.supported ? parseRadio(e.text, e.kind) : null;
+          const r = teamVoice.enabled ? parseRadio(e.text, e.kind) : null;
           if (r) teamVoice.say(r.text, r.who);
           else this.radio();
           break;
@@ -429,3 +483,4 @@ export const sound = new Sound();
 teamVoice.volume = () => (sound.muted ? 0 : sound.volume);
 teamVoice.beepIn = () => sound.radio();
 teamVoice.beepOut = () => sound.radioOut();
+teamVoice.playClip = (url) => sound.playRadio(url);

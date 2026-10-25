@@ -3,6 +3,7 @@ import "./styles.css";
 import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
 import { showCalendar } from "./ui/calendar";
 import { showLoading } from "./ui/loading";
+import { teamVoice } from "./audio/voice";
 
 /** título da tela de carregamento no começo do fim de semana */
 function weekendLabel(l: LobbyState): string {
@@ -528,4 +529,15 @@ class App {
     if ((e.target as HTMLElement).closest("button")) sound.click();
   }, true);
   appInst.menu();
+  // ?radio: demonstração das falas gravadas do rádio (um clique libera o som e começa)
+  if (location.search.includes("radio")) {
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;left:16px;top:16px;z-index:200;max-width:520px;padding:12px 16px;background:#0b0e15ee;border:1px solid #333;color:#e9edf5;font:15px/1.5 sans-serif";
+    box.textContent = "📻 Clique em qualquer lugar pra ouvir as falas do rádio";
+    document.body.appendChild(box);
+    document.addEventListener("click", () => {
+      sound.unlock();
+      setTimeout(() => void teamVoice.demo((t) => (box.textContent = "📻 " + t)), 300);
+    }, { once: true, capture: true });
+  }
 })();

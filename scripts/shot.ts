@@ -12,7 +12,7 @@ const port = 9300 + Math.floor(Math.random() * 500);
 mkdirSync(outDir, { recursive: true });
 
 const proc = spawn(EDGE, [
-  "--headless=new", "--disable-gpu", "--hide-scrollbars", `--remote-debugging-port=${port}`,
+  "--headless=new", "--disable-gpu", "--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", `--remote-debugging-port=${port}`,
   `--user-data-dir=${join(outDir, ".profile")}`, "--window-size=1600,1000", "about:blank",
 ]);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
