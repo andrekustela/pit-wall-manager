@@ -15,7 +15,6 @@ import {
   type TeamOrder,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
-import { confirmDialog } from "./confirm";
 import { OnboardCam } from "../render/onboard";
 import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
@@ -33,7 +32,6 @@ export interface HudHooks {
   setSpeed(s: number): void;
   send(cmd: Command): void;
   skip(): void;
-  exit(): void;
 }
 
 interface CardState {
@@ -54,6 +52,20 @@ export class Hud {
   private boardHead: HTMLElement;
   private info: HTMLElement;
   private feed: HTMLElement;
+
+  /** mensagem sua no feed (some em 8 s) */
+  note(text: string) {
+    this.notes.push({ text, at: performance.now() });
+    while (this.notes.length > 2) this.notes.shift();
+    this.feedCount = -1;
+  }
+
+  /** linha fixa no topo do feed (null tira) */
+  pin(text: string | null) {
+    if (this.pinned === text) return;
+    this.pinned = text;
+    this.feedCount = -1;
+  }
   private top: HTMLElement;
   private spd: HTMLElement;
   private banner: HTMLElement;
@@ -61,6 +73,10 @@ export class Hud {
   private cards = new Map<string, HTMLElement>();
   private cardState = new Map<string, CardState>();
   private feedCount = -1;
+  /** linhas só desta tela no feed (ex.: o que o comando de voz entendeu), somem sozinhas */
+  private notes: { text: string; at: number }[] = [];
+  /** linha fixa no topo do feed (ex.: "🎙 OUVINDO...") */
+  private pinned: string | null = null;
   private checkeredSeen: number | null = null;
   private cons: number;
   readonly minimapCanvas: HTMLCanvasElement;
@@ -310,19 +326,12 @@ export class Hud {
     const host = this.hooks.isHost;
     this.top.innerHTML =
       [0, ...SPEEDS].map((s) => `<button data-speed="${s}" ${host ? "" : "disabled"}>${s === 0 ? "❚❚" : `${s}x`}</button>`).join("") +
-      `<button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button><button data-exit title="${host ? "Encerrar a corrida e voltar pro lobby" : "Sair da sala"}">✕ SAIR</button>`;
+      // sair da corrida: botão ⌂ do canto
+      `<button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button>`;
     this.top.querySelectorAll<HTMLButtonElement>("[data-speed]").forEach((b) =>
       b.addEventListener("click", () => this.hooks.setSpeed(Number(b.dataset.speed))),
     );
     this.top.querySelector("[data-skip]")!.addEventListener("click", () => this.hooks.skip());
-    this.top.querySelector("[data-exit]")!.addEventListener("click", async () => {
-      const ok = await confirmDialog(
-        host
-          ? { title: "SAIR DA CORRIDA", icon: "✕", text: "Encerrar a corrida e voltar pro lobby?\nO resultado não vale (e o campeonato é cancelado).", ok: "ENCERRAR", danger: true }
-          : { title: "SAIR DA SALA", icon: "✕", text: "Sair da sala?\nA IA assume a sua equipe até o fim da corrida.", ok: "SAIR", danger: true },
-      );
-      if (ok) this.hooks.exit();
-    });
     if (!host) this.top.title = "Só o host controla a velocidade";
   }
 
@@ -635,14 +644,23 @@ export class Hud {
       : `${Math.round(race.sc.v * 3.6)} <small>KM/H SAFETY CAR</small>`;
 
     // ---- feed (só eventos gerais ou da minha equipe) ----
+    const now = performance.now();
+    if (this.notes.length && now - this.notes[0].at > 8000) {
+      this.notes = this.notes.filter((n) => now - n.at <= 8000);
+      this.feedCount = -1;
+    }
     if (race.events.length !== this.feedCount) {
       this.feedCount = race.events.length;
-      this.feed.innerHTML = race.events
-        .filter((e) => !e.teamId || e.teamId === my)
-        .slice(-6)
-        .reverse()
-        .map((e) => `<div class="${e.important ? "imp" : ""}">${esc(e.text)}</div>`)
-        .join("");
+      const mine = [...this.notes].reverse().map((n) => `<div class="me">${esc(n.text)}</div>`);
+      this.feed.innerHTML =
+        (this.pinned ? `<div class="me pin">${esc(this.pinned)}</div>` : "") +
+        mine.join("") +
+        race.events
+          .filter((e) => !e.teamId || e.teamId === my)
+          .slice(-(6 - mine.length))
+          .reverse()
+          .map((e) => `<div class="${e.important ? "imp" : ""}">${esc(e.text)}</div>`)
+          .join("");
     }
 
     // ---- cards do jogador ----

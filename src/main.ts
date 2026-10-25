@@ -81,6 +81,16 @@ class App {
   private guest = false;
   private recorded = -1;
 
+  /** mensagem do comando de voz no feed da corrida */
+  voiceNote(text: string) {
+    this.view?.hud.note(text);
+  }
+
+  /** linha fixa do comando de voz no feed da corrida */
+  voicePin(text: string | null) {
+    this.view?.hud.pin(text);
+  }
+
   /** está numa corrida (com a pista na tela)? */
   inRace(): boolean {
     return !!this.view;
@@ -439,7 +449,6 @@ class App {
       setSpeed,
       send: (cmd) => conn.send({ t: "cmd", cmd }),
       skip: () => conn.send({ t: "skip" }),
-      exit: () => (isHost ? conn.send({ t: "abort" }) : this.leave()),
     });
     view.minimap = new Minimap(view.hud.minimapCanvas, race, setFollow);
     view.onKey = (e: KeyboardEvent) => {
@@ -512,7 +521,7 @@ class App {
     const click = (sel: string) => card?.querySelector<HTMLButtonElement>(sel)?.click();
     const who = `P${slot + 1}`;
     if (!a || !car || !card) {
-      toast(heard ? `🎙 "${heard}": não entendi` : "🎙 Não ouvi nada");
+      view.hud.note(heard ? `🎙 Você: "${heard}" (não entendi)` : "🎙 Não ouvi nada");
       teamVoice.sayId("nao_entendi", slot);
       return;
     }
@@ -549,7 +558,7 @@ class App {
         what = a.mode === "letPass" ? "deixar o companheiro passar" : a.mode === "hold" ? "manter posições" : "liberados";
         break;
     }
-    toast(`🎙 ${who}: ${what}`);
+    view.hud.note(`🎙 Você → ${who}: ${what}`);
     if (ack) teamVoice.sayId(ack, slot);
   }
 
@@ -599,23 +608,17 @@ class App {
     if ((e.target as HTMLElement).closest("button")) sound.click();
   }, true);
   appInst.menu();
-  // comando de voz: segura V e fala (só na corrida, com o 🎙 ligado)
-  const vcInd = document.createElement("div");
-  vcInd.className = "vcind";
-  vcInd.hidden = true;
-  document.body.appendChild(vcInd);
+  // comando de voz: segura V e fala (só na corrida, com o 🎙 ligado). O aviso fica no feed da corrida
   const renderInd = () => {
     const st = voiceCmd.state;
-    vcInd.hidden = !(st === "listening" || st === "loading");
-    vcInd.classList.toggle("on", st === "listening");
-    vcInd.textContent = st === "loading" ? "🎙 Preparando o comando de voz (só na 1ª vez demora)..." : "🎙 OUVINDO... (solte o V)";
+    appInst.voicePin(st === "listening" ? "🎙 OUVINDO... (solte o V)" : st === "loading" ? "🎙 Preparando o comando de voz..." : null);
     if (st === "error") toast(`🎙 ${voiceCmd.error}`);
   };
   voiceCmd.onChange(renderInd);
   const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement)?.closest?.("input, textarea");
   window.addEventListener("keydown", (e) => {
     if (e.code !== "KeyV" || e.repeat || typing(e) || !appInst.inRace()) return;
-    if (voiceCmd.state === "off") return toast("🎙 Ligue o comando de voz no botão 🎙 (canto da tela) e segure V pra falar");
+    if (voiceCmd.state === "off") return appInst.voiceNote("🎙 Ligue o comando de voz no botão 🎙 (canto da tela) e segure V pra falar");
     e.preventDefault();
     voiceCmd.startListening();
   });
