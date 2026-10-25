@@ -1156,3 +1156,7 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .hbtn.live { background: #e8202a; border-color: #ff5a62; }
 .feed div.me { border-left-color: #4fc3f7; background: #0f2230ee; }
 .feed div.me.pin { border-left-color: #e8202a; background: #2a0f12ee; animation: talkpulse 900ms ease-in-out infinite; }
+/* card do piloto: desenho do F1 atual */
+.carstatus .floor { fill: rgba(0,0,0,.25); stroke: #3a4150 !important; stroke-width: .9 !important; }
+.carstatus .halo { stroke: #c9ced8 !important; stroke-width: 1.5 !important; }
+.carstatus .rim { stroke: rgba(0,0,0,.45) !important; stroke-width: 1 !important; }

@@ -11,31 +11,40 @@ const LEVEL_COLOR = ["#3bd16f", "#ffd23b", "#ff8a1c", "#ff3b3b"];
 const OK = "#8a93a6";
 
 export function statusSvg(): string {
+  // F1 atual visto de cima (frente pra cima): asa dianteira larga e curva, bico fino, halo,
+  // sidepods largos afinando até a traseira (garrafa de coca), assoalho, barbatana, beam wing
   return `<svg class="carstatus" viewBox="0 0 64 132" aria-label="Estado do carro">
     <g fill="none" stroke-linejoin="round" stroke-linecap="round">
-      <path data-part="fw" d="M6 10 Q32 2 58 10 L58 16 Q32 10 6 16 Z" />
-      <path data-part="fw" class="thin" d="M5 6 L5 18 M59 6 L59 18" />
-      <rect data-part="fl" x="4" y="24" width="11" height="20" rx="3" />
-      <rect data-part="fr" x="49" y="24" width="11" height="20" rx="3" />
-      <path data-part="suspF" class="thin" d="M15 30 L27 28 M15 38 L27 40 M49 30 L37 28 M49 38 L37 40" />
-      <path class="body" d="M28 12 Q32 9 36 12 L37 46 L27 46 Z" />
-      <path class="body" d="M27 46 L37 46 L46 60 Q48 76 46 92 L40 104 L24 104 L18 92 Q16 76 18 60 Z" />
-      <ellipse class="cockpit" cx="32" cy="60" rx="5" ry="8" />
-      <circle class="helmet" cx="32" cy="60" r="3.2" />
-      <path class="thin" d="M26 54 Q32 48 38 54 M32 48 L32 51" />
-      <rect data-part="engine" x="25" y="70" width="14" height="30" rx="3" />
-      <rect data-part="rl" x="2" y="94" width="13" height="23" rx="3" />
-      <rect data-part="rr" x="49" y="94" width="13" height="23" rx="3" />
-      <path data-part="suspR" class="thin" d="M15 100 L24 98 M15 110 L24 106 M49 100 L40 98 M49 110 L40 106" />
-      <path data-part="rw" d="M16 118 L48 118 L48 126 L16 126 Z" />
-      <path data-part="rw" class="thin" d="M16 116 L16 128 M48 116 L48 128" />
+      <path data-part="fw" d="M5 13 Q18 8 32 9.5 Q46 8 59 13 L59 17.5 Q46 13.5 32 14.5 Q18 13.5 5 17.5 Z" />
+      <path data-part="fw" class="thin" d="M4 8 L4 20 M60 8 L60 20 M8 19.5 Q32 15.5 56 19.5" />
+      <path class="body" d="M30 8 Q32 4.5 34 8 L36.5 40 L27.5 40 Z" />
+      <rect data-part="fl" x="4" y="24" width="12" height="19" rx="3.5" />
+      <rect data-part="fr" x="48" y="24" width="12" height="19" rx="3.5" />
+      <path class="thin rim" d="M7 33.5 L13 33.5 M51 33.5 L57 33.5" />
+      <path data-part="suspF" class="thin" d="M16 29.5 L28.5 26.5 M16 37 L28.5 39 M16 33 L28 33 M48 29.5 L35.5 26.5 M48 37 L35.5 39 M48 33 L36 33" />
+      <path class="floor" d="M12 58 L12 96 Q12 100 16 101 L48 101 Q52 100 52 96 L52 58 Z" />
+      <path class="body" d="M27.5 40 L36.5 40 L38 49 Q49 50 50.5 60 L50 74 Q47 88 40.5 98 L23.5 98 Q17 88 14 74 L13.5 60 Q15 50 26 49 Z" />
+      <path class="thin" d="M14.5 57 L21 54 M49.5 57 L43 54 M17 66 L22 68 M47 66 L42 68" />
+      <ellipse class="cockpit" cx="32" cy="53" rx="4.5" ry="7.5" />
+      <circle class="helmet" cx="32" cy="53.5" r="3" />
+      <path class="thin halo" d="M26.8 54 Q26.8 44.5 32 44.5 Q37.2 44.5 37.2 54 M32 44.5 L32 41" />
+      <rect data-part="engine" x="26" y="64" width="12" height="34" rx="3" />
+      <path class="thin" d="M32 62 L32 106" />
+      <path class="body" d="M28.5 98 L35.5 98 L34.5 112 L29.5 112 Z" />
+      <rect data-part="rl" x="2" y="96" width="14" height="22" rx="3.5" />
+      <rect data-part="rr" x="48" y="96" width="14" height="22" rx="3.5" />
+      <path class="thin rim" d="M5 107 L13 107 M51 107 L59 107" />
+      <path data-part="suspR" class="thin" d="M16 101 L27 99 M16 111 L28 107 M48 101 L37 99 M48 111 L36 107" />
+      <path data-part="rw" class="thin" d="M20 114.5 L44 114.5" />
+      <path data-part="rw" d="M14 118.5 Q32 115.5 50 118.5 L50 125 Q32 122 14 125 Z" />
+      <path data-part="rw" class="thin" d="M13 115 L13 128 M51 115 L51 128" />
     </g>
-    <rect x="29" y="74" width="6" height="22" rx="1.5" class="fuelbg" />
-    <rect x="29" y="74" width="6" height="22" rx="1.5" class="fuel" data-fuel />
+    <rect x="29" y="72" width="6" height="22" rx="1.5" class="fuelbg" />
+    <rect x="29" y="72" width="6" height="22" rx="1.5" class="fuel" data-fuel />
     <text data-t="fl" x="9.5" y="52" class="tlabel"></text>
     <text data-t="fr" x="54.5" y="52" class="tlabel"></text>
-    <text data-t="rl" x="8.5" y="92" class="tlabel"></text>
-    <text data-t="rr" x="55.5" y="92" class="tlabel"></text>
+    <text data-t="rl" x="9" y="93.5" class="tlabel"></text>
+    <text data-t="rr" x="55" y="93.5" class="tlabel"></text>
   </svg>`;
 }
 
@@ -91,8 +100,17 @@ export function updateStatus(root: Element, c: CarState, race: Race) {
   if (!svg) return;
   // pneus
   const cold = (c.tyreTemp ?? 0.6) < 0.5; // pneu frio fica azul
+  const flat = c.fault === "puncture" ? (["fl", "fr", "rl", "rr"][c.flatWheel ?? -1] ?? "") : "";
   for (const [k, load] of Object.entries(TYRE_LOAD)) {
     const w = Math.min(1.1, c.wear * load);
+    if (k === flat) {
+      // pneu furado: pisca em vermelho
+      const on = Math.floor(performance.now() / 300) % 2 === 0;
+      setPart(svg, k, on ? "#ff3b3b" : "transparent", "#ff3b3b", "Pneu FURADO: troca no box (qualquer pneu)");
+      const t = svg.querySelector(`[data-t="${k}"]`);
+      if (t) t.textContent = "FURO";
+      continue;
+    }
     const col = cold ? "#4aa3ff" : wearColor(w);
     setPart(svg, k, col, col, `Pneu ${Math.round((1 - Math.min(1, w)) * 100)}%${cold ? " (frio)" : ""}`);
     const t = svg.querySelector(`[data-t="${k}"]`);
@@ -151,7 +169,7 @@ export function updateStatus(root: Element, c: CarState, race: Race) {
   if (fuelBar) {
     const frac = Math.max(0, Math.min(1, c.fuel / 110));
     const hh = 22 * frac;
-    fuelBar.setAttribute("y", String(74 + 22 - hh));
+    fuelBar.setAttribute("y", String(72 + 22 - hh));
     fuelBar.setAttribute("height", String(hh));
     const laps = c.fuel / race.consumption(c);
     const short = !c.finished && laps < race.lapsLeft(c);
