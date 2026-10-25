@@ -26,8 +26,8 @@ const NEW = {
 /** o 1º ponto de cada traçado costuma ser a linha de largada (no sentido da corrida);
  * onde não é, a coordenada [lon, lat] da largada real vai aqui */
 const START = { "mc-1929": [7.4206, 43.7347] };
-/** escala do comprimento real (o ritmo do jogo foi afinado com pistas ~20% menores) */
-const SCALE = 0.8;
+/** escala do comprimento real (1 = tamanho oficial) */
+const SCALE = 1;
 
 /** reamostra o traçado fechado a cada "step" metros */
 function resample(pts, step) {
