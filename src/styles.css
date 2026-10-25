@@ -1234,9 +1234,6 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 @keyframes calertin { from { opacity: 0; transform: translateY(-3px); } }
 .driver .boxrow { display: flex; gap: 5px; margin-top: 4px; }
 .driver .boxrow .boxbtn { flex: 1; margin-top: 0; }
-.driver .stopcfg { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; background: #0c1018; border: 2px solid var(--line); font: 600 11px var(--num, monospace); white-space: nowrap; cursor: pointer; }
-.driver .stopcfg .tyre { transform: scale(.8); }
-.team.compact .driver .stopcfg, .team.compact .driver .gapsbox span { display: none; }
 .team .driver.panel { align-self: flex-end; }
 .team.compact .driver .calert { padding: 4px 6px; margin-bottom: 4px; }
 .team.compact .driver .calert small { display: none; }
@@ -1248,7 +1245,6 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .driver .calert.calm .t { font-weight: 400; }
 .team.compact .driver .calert { min-height: 30px; }
 .team.compact .driver .calert .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.driver .stopcfg.on { border-color: #e9edf5; }
 @media (max-width: 900px) { .driver .flyout { position: static; width: auto; } }
 @media (prefers-reduced-motion: reduce) { .driver .flyout.open { animation: none; } }
 

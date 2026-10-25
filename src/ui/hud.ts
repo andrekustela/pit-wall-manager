@@ -384,7 +384,7 @@ export class Hud {
         </div>
         <div class="planedit" style="display:none"></div>
         </div>
-        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre a aba do box"></button></div>
+        <div class="boxrow"><button class="boxbtn"></button></div>
         <div hidden><div class="wlabel"></div><div class="wear"><i></i></div><div class="flabel"></div><div class="faultlabel"></div></div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
@@ -440,7 +440,6 @@ export class Hud {
         this.applyTab(card, cs);
       };
       card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab as CardState["tab"])));
-      card.querySelector(".stopcfg")!.addEventListener("click", () => setTab("box"));
       this.applyTab(card, cs);
       // botão do alerta: a ação certa pro problema mais urgente
       card.querySelector(".calert")!.addEventListener("click", (e) => {
@@ -593,11 +592,6 @@ export class Hud {
       if (box.title !== tip) box.title = tip;
       set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
     }
-
-    // resumo do que fazer na parada (o botão abre os detalhes)
-    const nx = c.boxRequest ?? cs.next;
-    const fuelTxt = c.boxRequest ? `P/ ${this.laps(c.boxFuel)} V` : cs.fuelLaps === null ? "ATÉ O FIM" : `P/ ${cs.fuelLaps} V`;
-    set(".stopcfg", `${tyreIcon(nx)}${esc(COMPOUNDS[nx].label.toUpperCase())} · ${fuelTxt} ▾`);
   }
 
   /** troca a aba de dentro do card (o card não muda de tamanho) */
@@ -605,7 +599,6 @@ export class Hud {
     card.querySelectorAll<HTMLElement>(".pane").forEach((f) => (f.hidden = f.dataset.pane !== cs.tab));
     card.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === cs.tab));
     card.classList.toggle("tabbox", cs.tab === "box");
-    card.querySelector(".stopcfg")?.classList.toggle("on", cs.tab === "box");
   }
 
   private renderPlan(c: CarState, card: HTMLElement, cs: CardState) {
