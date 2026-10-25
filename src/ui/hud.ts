@@ -549,7 +549,17 @@ export class Hud {
     let al: Alert | null = null;
     if (c.retired || c.finished || race.phase === "lights") al = null;
     else if (fault && fault.pen > 5 && canBox) al = { lvl: "bad", t: `⚠ ${fault.label}: +${c.faultPen.toFixed(0)} s por volta`, sub: fault.fix, act: "box", btn: "BOX AGORA" };
-    else if (c.damage > 0.6 && canBox) al = { lvl: "bad", t: `⚠ Carro danificado: ~${num(race.damageLoss(c))} s por volta`, sub: "Estimado: atacando perde menos, mas escapa mais. No box troca a peça", act: "box", btn: "BOX AGORA" };
+    else if (c.damage > 0.6 && canBox) {
+      // conselho pelo jeito do piloto: quem segura bem o carro quebrado pode atacar
+      const adv = race.dmgAdvice(c), who = c.driver.short;
+      const sub =
+        adv === "push"
+          ? `${who} segura bem o carro quebrado: atacar perde menos tempo`
+          : adv === "conserve"
+            ? `${who} sofre com o carro quebrado${race.wet > 0.5 ? " na chuva" : ""}: poupe ou pare no box`
+            : `Estimado, varia por volta. Atacar perde menos, mas escapa mais`;
+      al = { lvl: "bad", t: `⚠ Carro danificado: ~${num(race.damageLoss(c))} s por volta`, sub, act: "box", btn: "BOX AGORA" };
+    }
     else if (!fuelOk && fuelLaps < need - 0.3) {
       const saving = c.engine === "lean";
       al = {

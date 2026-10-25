@@ -402,7 +402,40 @@ export class Race {
   /** estimativa de quanto o carro perde por volta com os danos de agora (nesta pista, com essa água,
    * nesse ritmo); cada volta varia em volta disso */
   damageLoss(c: CarState): number {
-    return DMG_PACE[c.pace] * PARTS.reduce((a, p) => a + (c.dmg[p.id] > 0 ? this.partLossSec(p.id, c.dmg[p.id]) : 0), 0);
+    const raw = PARTS.reduce((a, p) => a + (c.dmg[p.id] > 0 ? this.partLossSec(p.id, c.dmg[p.id]) * (this.dmgDriver(c, p.id) / dmgWetMult(p.id, this.wet)) : 0), 0);
+    return DMG_PACE[c.pace] * raw;
+  }
+
+  /**
+   * quanto o piloto sente o dano nessa peça (1 = médio), já com a chuva:
+   * - rápido (pace) compensa melhor o carro quebrado
+   * - bom de chuva sofre menos com o carro quebrado no molhado
+   * - gosta de traseira solta: se vira sem asa traseira, mas odeia o carro saindo de frente sem a dianteira
+   */
+  dmgDriver(c: CarState, part: PartId): number {
+    const pr = c.driver.profile;
+    // os pilotos reais ficam entre ~65 e ~95 de velocidade: 75 = médio, cada ponto ~1,5%
+    let k = Math.max(0.7, Math.min(1.3, 1 - ((pr?.pace ?? 75) - 75) * 0.015));
+    const bp = Math.max(-15, Math.min(15, pr?.balancePref ?? 0));
+    if (part === "rw") k *= 1 - bp * 0.006;
+    if (part === "fw") k *= 1 + bp * 0.006;
+    const wetMult = 1 + (dmgWetMult(part, this.wet) - 1) * wetSkillFactor(c.driver);
+    return k * wetMult;
+  }
+
+  /** quanto o dano aumenta o erro desse piloto (constante erra menos, agressivo mais) */
+  dmgRiskDriver(c: CarState): number {
+    const pr = c.driver.profile;
+    const cons = Math.max(0.5, Math.min(1.6, 1 - ((pr?.consistency ?? 72) - 72) * 0.025));
+    return cons * (0.8 + ((pr?.aggression ?? 55) / 100) * 0.4);
+  }
+
+  /** o que fazer com o carro danificado, pelo jeito desse piloto: "atacar" se ele segura bem */
+  dmgAdvice(c: CarState): "push" | "normal" | "conserve" {
+    const risk = this.dmgRiskDriver(c), feel = this.dmgDriver(c, "fw") / dmgWetMult("fw", this.wet);
+    if (risk < 0.85 && feel < 0.95 && this.wet < 0.3) return "push";
+    if (risk > 1.15 || feel > 1.12 || this.wet > 0.5) return "conserve";
+    return "normal";
   }
 
   /** consumo estimado por volta no modo atual do carro */
@@ -628,7 +661,7 @@ export class Race {
     // forçar no molhado é pedir pra rodar
     if (c.pace === "push") rate *= 1.8 * (1 + 2.5 * w);
     // asa traseira e suspensão traseira quebradas: traseira solta (pior ainda na chuva)
-    rate *= 1 + (0.6 * c.dmg.rw + 0.4 * c.dmg.suspR) * (1 + 2 * w) * DMG_RISK[c.pace];
+    rate *= 1 + (0.6 * c.dmg.rw + 0.4 * c.dmg.suspR) * (1 + 2 * w) * DMG_RISK[c.pace] * this.dmgRiskDriver(c);
     if (c.wear > 0.9) rate *= 3;
     if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 6;
     if (c.tuning.h < this.track.def.minHeight) rate *= 1.5;
@@ -667,7 +700,7 @@ export class Race {
     rate *= 1 + 4 * this.wet * (isWetTyre(c.compound) ? 0.4 : 1.5);
     if (c.wear > 0.8) rate *= 2;
     // asa dianteira e suspensão dianteira quebradas: sai de frente, passa reto
-    rate *= 1 + (0.5 * c.dmg.fw + 0.4 * c.dmg.suspF) * DMG_RISK[c.pace];
+    rate *= 1 + (0.5 * c.dmg.fw + 0.4 * c.dmg.suspF) * DMG_RISK[c.pace] * this.dmgRiskDriver(c);
     if (c.fault === "brakes") rate *= 3;
     if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 8; // pneu frio escorrega
     if (c.lap <= 0) rate *= 2;
@@ -817,7 +850,7 @@ export class Race {
       let loss = 0;
       for (const part of PARTS) {
         const d = c.dmg[part.id];
-        if (d > 0) loss += ((d * dmgWetMult(part.id, this.wet)) / (DMG_REF[part.id] * c.profileLap)) * this.dmgMap.w[part.id][i];
+        if (d > 0) loss += ((d * this.dmgDriver(c, part.id)) / (DMG_REF[part.id] * c.profileLap)) * this.dmgMap.w[part.id][i];
       }
       // atacando o piloto compensa parte (e arrisca mais); poupando perde mais (e fica seguro)
       v *= 1 - Math.min(0.35, loss * DMG_PACE[c.pace] * (c.dmgVar ?? 1));
