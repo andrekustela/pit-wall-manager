@@ -268,7 +268,7 @@ label.fld span { display: block; margin-bottom: 4px; }
 .teamtoggle { box-shadow: 0 0 0 2px #000; }
 .mini-line { display: none; font-size: 13px; align-items: center; gap: 6px; }
 .team.compact .driver { width: 300px; padding: 6px 8px; }
-.team.compact .driver > *:not(.top):not(.mini-line):not(.boxrow):not(.calert):not(.statuscol):not(.reqbox) { display: none !important; }
+.team.compact .driver > *:not(.top):not(.mini-line):not(.boxrow):not(.calert):not(.statuscol):not(.reqbox):not(.tabs):not(.flyout) { display: none !important; }
 .team.compact .driver .top { margin-bottom: 4px; }
 .team.compact .mini-line { display: flex; margin-bottom: 4px; }
 .team.compact .boxbtn { margin-top: 2px; padding: 4px; font-size: 11px; }
@@ -1237,16 +1237,58 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .driver .stopcfg { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; background: #0c1018; border: 2px solid var(--line); font: 600 11px var(--num, monospace); white-space: nowrap; cursor: pointer; }
 .driver .stopcfg .tyre { transform: scale(.8); }
 .team.compact .driver .stopcfg, .team.compact .driver .gapsbox span { display: none; }
-.driver .moretog { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 6px; padding: 5px 0 0; background: none; border: 0; border-top: 1px solid var(--line); color: var(--muted); font: 600 10px var(--pix, monospace); letter-spacing: .1em; cursor: pointer; }
-.driver .moretog:hover { color: var(--text); }
-.driver .moretog i { font-style: normal; transition: transform .2s; }
-.driver.detopen .moretog i { transform: rotate(180deg); }
-.driver .det { display: none; padding-top: 6px; }
-.driver.detopen .det { display: block; animation: calertin 200ms ease-out; }
-.team:not(.compact) .driver:not(.detopen) .partslist { display: none; }
-.onpanel .driver .partslist { display: block; }
-@media (prefers-reduced-motion: reduce) { .driver .calert, .driver.detopen .det { animation: none; } }
 .team .driver.panel { align-self: flex-end; }
 .team.compact .driver .calert { padding: 4px 6px; margin-bottom: 4px; }
 .team.compact .driver .calert small { display: none; }
 .team.compact .driver .calert button { padding: 3px 6px; font-size: 10px; }
+
+/* faixa de status: sempre presente (alerta ou resumo calmo), altura fixa pros cards alinharem */
+.driver .calert { min-height: 44px; }
+.driver .calert.calm { background: #10151f; border-left-color: #2f3a4f; color: var(--muted); }
+.driver .calert.calm .t { font-weight: 400; }
+.team.compact .driver .calert { min-height: 30px; }
+.team.compact .driver .calert .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* abas pit stop / estratégia: abrem do lado de fora do card, sem mudar a altura dele */
+.driver .stopcfg.on { border-color: #e9edf5; }
+.driver .flyout { display: none; position: absolute; bottom: 0; width: 320px; max-height: 70vh; overflow: auto; padding: 8px 10px; z-index: 25;
+  background: rgba(16, 20, 29, .97); border: 1px solid var(--line); border-top: 3px solid var(--accent, #e8202a); box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: default; }
+.driver .flyout.open { display: block; animation: flyin 200ms cubic-bezier(.23, 1, .32, 1); }
+@keyframes flyin { from { opacity: 0; transform: translateX(var(--fx, -8px)); } }
+.driver .flyhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.driver .flyhead b { font: 600 13px var(--pix, monospace); letter-spacing: .1em; }
+.driver .flyhead span { color: var(--muted); font-size: 12px; }
+.driver .flyhead button { margin-left: auto; background: none; border: 0; color: var(--muted); font-size: 14px; cursor: pointer; }
+.driver .flysub { margin: 8px 0 4px; color: var(--muted); font: 600 10px var(--pix, monospace); letter-spacing: .1em; }
+.driver .flyout .partslist { display: flex !important; gap: 4px; }
+.onpanel .driver .flyout { position: static; width: auto; box-shadow: none; margin-top: 6px; }
+@media (max-width: 900px) { .driver .flyout { position: static; width: auto; } }
+@media (prefers-reduced-motion: reduce) { .driver .flyout.open { animation: none; } }
+/* posicionada pelo card inteiro, não pela coluna da direita do grid */
+.driver.panel > .flyout { grid-column: auto; grid-row: auto; }
+.driver .flyout .partslist .prow { grid-template-columns: 1fr auto 20px; gap: 8px; font-size: 12px; }
+
+/* abas com seta presas na borda de fora do card (como aba de pasta); o painel abre colado nelas */
+.driver.panel > .tabs { position: absolute; top: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 26; grid-column: auto; margin: 0; }
+.driver.panel:first-child > .tabs { right: 100%; }
+.driver.panel:not(:first-child) > .tabs { left: 100%; }
+.driver .tabs button { writing-mode: vertical-rl; display: flex; align-items: center; gap: 6px; padding: 10px 4px; width: 25px; background: #141925; border: 1px solid var(--line); color: var(--muted);
+  font: 600 10px var(--pix, monospace); letter-spacing: .12em; cursor: pointer; transition: background .15s, color .15s; }
+.driver.panel:first-child .tabs button { transform: rotate(180deg); border-left: 0; border-radius: 0 4px 4px 0; }
+.driver.panel:not(:first-child) .tabs button { border-left: 0; border-radius: 0 4px 4px 0; }
+.driver .tabs button:hover { color: var(--text); background: #1b2131; }
+.driver .tabs button.on { background: rgba(16, 20, 29, .97); color: var(--text); border-color: var(--accent, #e8202a); }
+.driver .tabs .ar { font-style: normal; writing-mode: horizontal-tb; font-size: 11px; line-height: 1; }
+/* seta pra fora (abrir); aberta, aponta de volta pro card (fechar). A aba da esquerda está girada 180° */
+.driver.panel:first-child .tabs .ar::before { content: "▸"; }
+.driver.panel:first-child .tabs button.on .ar::before { content: "◂"; }
+.driver.panel:not(:first-child) .tabs .ar::before { content: "▸"; }
+.driver.panel:not(:first-child) .tabs button.on .ar::before { content: "◂"; }
+.driver.panel:first-child .flyout { right: calc(100% + 25px); border-top-color: var(--accent, #e8202a); }
+.driver.panel:not(:first-child) .flyout { left: calc(100% + 25px); --fx: 8px; }
+.team.compact .driver.panel:first-child .onbox { right: calc(100% + 34px); }
+.team.compact .driver.panel:nth-child(2) .onbox { left: calc(100% + 34px); }
+.team.compact .driver.panel > .tabs { top: 4px; gap: 3px; }
+.team.compact .driver .tabs button { padding: 5px 2px; font-size: 8.5px; letter-spacing: .05em; gap: 4px; }
+.onpanel .driver.panel > .tabs { position: static; flex-direction: row; margin-top: 6px; }
+.onpanel .driver .tabs button { writing-mode: horizontal-tb; transform: none; width: auto; flex: 1; border-left: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) { .driver .calert { animation: none; } }

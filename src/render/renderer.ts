@@ -212,7 +212,16 @@ export class Renderer {
       const smp = this.sample(this.hist.get(c.id), rt);
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
       const lat = smp ? smp.lat : c.lateral;
-      pos.set(c.id, this.px(s, lat));
+      const q = this.px(s, lat);
+      // o bico aponta pra onde o carro está indo: seguindo o traçado ele atravessa a pista, e com o
+      // ângulo só da linha do meio parecia andar de lado (drift). Desvio = quanto muda de lateral
+      // por metro andado, medido num trechinho pra trás
+      const prev = smp && this.sample(this.hist.get(c.id), rt - 0.12);
+      if (smp && prev && c.spin <= 0) {
+        const dd = smp.d - prev.d;
+        if (dd > 0.6) q.h += Math.atan(Math.max(-0.6, Math.min(0.6, (smp.lat - prev.lat) / dd)));
+      }
+      pos.set(c.id, q);
       this.interp.set(c.id, { s, lat });
     }
     let scPos: { x: number; y: number; h: number } | null = null;

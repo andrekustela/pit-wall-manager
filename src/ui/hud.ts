@@ -43,8 +43,8 @@ interface CardState {
   planOpen: boolean;
   planSig: string;
   dueApplied: boolean;
-  /** "Detalhes" aberto (pneu, combustível, plano, ordens, peças) */
-  detOpen: boolean;
+  /** aba aberta ao lado do card: pit stop (pneu, combustível, peças) ou estratégia (plano, ordens) */
+  fly: "pit" | "strat" | null;
 }
 
 export class Hud {
@@ -175,36 +175,14 @@ export class Hud {
     this.applyCompact(true);
   }
 
-  private animT: ReturnType<typeof setTimeout> | null = null;
-
-  /** minimiza/expande o painel deslizando (a câmera da pista acompanha, ver coverHeight) */
+  /** minimiza/expande o painel. Troca na hora e só anima transparência e posição (mexer na altura a
+   * cada quadro fazia o navegador recalcular a página inteira e a corrida engasgava) */
   private applyCompact(animate = false) {
     const team = this.el.querySelector<HTMLElement>(".team")!;
     this.el.querySelector(".teamtoggle")!.textContent = this.compact ? "▲ EXPANDIR PAINEL (M)" : "▼ MINIMIZAR PAINEL (M)";
-    if (!animate) {
-      team.classList.toggle("compact", this.compact);
-      return;
-    }
-    if (this.animT) clearTimeout(this.animT);
-    const from = team.offsetHeight;
-    // mede a altura final com o conteúdo do outro modo
-    team.style.height = "";
     team.classList.toggle("compact", this.compact);
-    const to = team.offsetHeight;
-    // expandindo: conteúdo grande já aparece e vai sendo revelado; minimizando: o grande desce e só no fim vira o compacto
-    if (this.compact) team.classList.remove("compact");
-    team.style.overflow = "hidden";
-    team.style.height = `${from}px`;
-    void team.offsetHeight;
-    team.style.transition = "height .38s cubic-bezier(.3,.8,.3,1)";
-    team.style.height = `${Math.max(to, this.compact ? to : 0)}px`;
-    this.animT = setTimeout(() => {
-      team.classList.toggle("compact", this.compact);
-      team.style.transition = "";
-      team.style.height = "";
-      team.style.overflow = "";
-      this.animT = null;
-    }, 400);
+    if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      team.animate([{ opacity: 0.25, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(.23, 1, .32, 1)" });
   }
 
   /** quanto da tela (de baixo pra cima) o painel cobre agora, em px */
@@ -362,14 +340,14 @@ export class Hud {
   private buildCards() {
     const wrap = this.el.querySelector(".team")!;
     for (const c of this.mine()) {
-      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, detOpen: false });
+      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, fly: null });
       const card = document.createElement("div");
       card.className = "driver panel";
       card.dataset.id = c.id;
       card.style.borderTopColor = c.team.color;
       card.title = "Clique no card pra seguir esse piloto";
       card.innerHTML = `
-        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}${partsListHtml()}</div>
+        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}</div>
         <div class="top">
           <div class="p"></div>
           <div class="nm">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
@@ -383,9 +361,10 @@ export class Hud {
         <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
           ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
         </div></div>
-        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre os detalhes"></button></div>
-        <button class="moretog"><span>DETALHES: PNEU, COMBUSTÍVEL, PLANO, ORDENS</span><i>▾</i></button>
-        <div class="det">
+        <div class="boxrow"><button class="boxbtn"></button><button class="stopcfg" title="O que fazer na parada (pneu e combustível): abre a aba do pit stop"></button></div>
+        <div class="tabs"><button data-tab="pit" title="Pit stop: pneu, combustível e peças"><i class="ar"></i>PIT STOP</button><button data-tab="strat" title="Estratégia: plano de paradas e ordens de equipe"><i class="ar"></i>ESTRATÉGIA</button></div>
+        <div class="flyout" data-fly="strat">
+        <div class="flyhead"><b>ESTRATÉGIA</b><span>${esc(c.driver.short)}</span><button data-flyclose title="Fechar">✕</button></div>
         <div class="stats">
           <div>Última<b class="last"></b></div>
           <div>Melhor<b class="best"></b></div>
@@ -398,6 +377,13 @@ export class Hud {
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
         </div></div>
+        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
+          <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
+        </div>
+        <div class="planedit" style="display:none"></div>
+        </div>
+        <div class="flyout" data-fly="pit">
+        <div class="flyhead"><b>PIT STOP</b><span>${esc(c.driver.short)}</span><button data-flyclose title="Fechar">✕</button></div>
         <div class="row2"><span class="lbl">Pneu</span><div class="seg next">
           ${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${t}</button>`).join("")}
         </div></div>
@@ -405,10 +391,8 @@ export class Hud {
           <span class="stepper"><button data-fuel="-1">−</button><b class="fval"></b><button data-fuel="1">+</button></span>
           <button class="btn small" data-fuelauto>até o fim</button>
         </div>
-        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
-          <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
-        </div>
-        <div class="planedit" style="display:none"></div>
+        <div class="flysub">Trocar peças na parada</div>
+        ${partsListHtml()}
         </div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
@@ -459,12 +443,15 @@ export class Hud {
         else this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
         this.update();
       });
-      const toggleDet = (open = !cs.detOpen) => {
-        cs.detOpen = open;
-        card.classList.toggle("detopen", open);
+      const setFly = (f: CardState["fly"]) => {
+        cs.fly = f;
+        this.applyFly(card, cs);
       };
-      card.querySelector(".moretog")!.addEventListener("click", () => toggleDet());
-      card.querySelector(".stopcfg")!.addEventListener("click", () => toggleDet(true));
+      card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) =>
+        b.addEventListener("click", () => setFly(cs.fly === b.dataset.tab ? null : (b.dataset.tab as CardState["fly"]))),
+      );
+      card.querySelectorAll("[data-flyclose]").forEach((b) => b.addEventListener("click", () => setFly(null)));
+      card.querySelector(".stopcfg")!.addEventListener("click", () => setFly(cs.fly === "pit" ? null : "pit"));
       // botão do alerta: a ação certa pro problema mais urgente
       card.querySelector(".calert")!.addEventListener("click", (e) => {
         const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
@@ -588,9 +575,27 @@ export class Hud {
     else if (!ruleOk && left < 8 && canBox) al = { lvl: "warn", t: "🛞 Falta usar o 2º tipo de pneu", sub: "É obrigatório usar dois tipos de pneu seco", act: "box", btn: "BOX AGORA" };
     else if (tt === "quente" && c.pace === "push") al = { lvl: "info", t: "🔥 Pneu quente: desgastando mais", sub: "Tirar um pouco o pé esfria", act: "cool", btn: "POUPAR" };
     else if (tt === "frio" && c.pace !== "push" && !race.sc.active) al = { lvl: "info", t: "🥶 Pneu frio: pouca aderência", sub: "Atacar uma volta esquenta", act: "push", btn: "ATACAR" };
+    // sem problema: a faixa fica com um resumo calmo (os dois cards ficam sempre do mesmo tamanho)
+    if (!al) {
+      const upc = upcomingStop(c);
+      const t = c.retired
+        ? `Fora da corrida: ${c.retireReason ?? ""}`
+        : c.finished
+          ? `🏁 Terminou em P${c.position}`
+          : race.phase === "lights"
+            ? "Na largada: esperando as luzes"
+            : c.boxRequest
+              ? `📻 Box chamado: entra nesta volta (${COMPOUNDS[c.boxRequest].label})`
+              : c.pit !== "none"
+                ? "No pit lane"
+                : upc
+                  ? `✓ Tudo certo · plano: box na volta ${upc.lap} (${COMPOUNDS[upc.compound].label})`
+                  : "✓ Tudo certo · sem parada planejada";
+      al = { lvl: "calm", t };
+    }
     const box = card.querySelector<HTMLElement>(".calert")!;
-    box.hidden = !al;
-    if (al) {
+    box.hidden = false;
+    {
       const cls = `calert ${al.lvl}`;
       if (box.className !== cls) box.className = cls;
       set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
@@ -600,7 +605,13 @@ export class Hud {
     const nx = c.boxRequest ?? cs.next;
     const fuelTxt = c.boxRequest ? `P/ ${this.laps(c.boxFuel)} V` : cs.fuelLaps === null ? "ATÉ O FIM" : `P/ ${cs.fuelLaps} V`;
     set(".stopcfg", `${tyreIcon(nx)}${esc(COMPOUNDS[nx].label.toUpperCase())} · ${fuelTxt} ▾`);
-    card.classList.toggle("detopen", cs.detOpen);
+  }
+
+  /** abre/fecha a aba ao lado do card */
+  private applyFly(card: HTMLElement, cs: CardState) {
+    card.querySelectorAll<HTMLElement>(".flyout").forEach((f) => f.classList.toggle("open", f.dataset.fly === cs.fly));
+    card.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === cs.fly));
+    card.querySelector(".stopcfg")?.classList.toggle("on", cs.fly === "pit");
   }
 
   private renderPlan(c: CarState, card: HTMLElement, cs: CardState) {
@@ -787,7 +798,7 @@ export class Hud {
       const cs = this.cardState.get(id)!;
       const idx = order.indexOf(c);
       card.classList.toggle("follow", id === follow);
-      updateStatus(card.querySelector(".statuscol")!, c, race);
+      updateStatus(card, c, race);
       // chegou a volta da parada planejada: já deixa pneu e combustível do plano escolhidos
       if (c.planDue && !cs.dueApplied) {
         const st = c.plan[c.planIdx];
@@ -873,7 +884,7 @@ export class Hud {
         box.textContent = `PLANO: PARAR NESTA VOLTA? (${COMPOUNDS[cs.next].label}, comb. p/ ${this.laps(this.fuelFor(c))} v)`;
         box.classList.add("suggest");
       } else {
-        box.textContent = race.sc.active ? "CHAMAR PRO BOX (safety car = parada barata!)" : "CHAMAR PRO BOX";
+        box.textContent = "CHAMAR PRO BOX";
       }
     }
   }
