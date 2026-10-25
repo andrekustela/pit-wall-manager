@@ -6,6 +6,7 @@ import { fmtLap } from "../sim/race";
 import { esc, trackTagsHtml } from "./common";
 import { loadRecords } from "./records";
 import { TRACK_HISTORY } from "../sim/trackHistory";
+import { originalTrackName } from "./editorData";
 
 export const ENGINEER_TIPS = [
   "Pneu novo sai frio do box: segure o ritmo na primeira volta do stint.",
@@ -73,7 +74,7 @@ export function showLoading(o: LoadingOpts = {}): Promise<void> {
         </div></div>
       <p class="ldblurb">${esc(t.blurb)}</p>
     </div>` : ""}
-    ${t && TRACK_HISTORY[t.name] ? `<aside class="ldhist"><span>📜 HISTÓRIA DA PISTA</span><p>${esc(TRACK_HISTORY[t.name])}</p></aside>` : ""}
+    ${t && TRACK_HISTORY[originalTrackName(o.trackIndex!)] ? `<aside class="ldhist"><span>📜 HISTÓRIA DA PISTA</span><p>${esc(TRACK_HISTORY[originalTrackName(o.trackIndex!)])}</p></aside>` : ""}
     <div class="ldtip"><span>📻 DICA DO ENGENHEIRO</span><p data-tip>${esc(ENGINEER_TIPS[tip0])}</p></div>
     <div class="ldlogo"><div class="ldlogobox"><img class="base" src="/brand/logo.png" alt=""><img class="fill" src="/brand/logo.png" alt="Pit Wall Manager"></div>
       <div class="ldpct"><span>CARREGANDO</span><b data-pct>0%</b></div>

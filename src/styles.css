@@ -1171,3 +1171,15 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .reqbar i { display: block; height: 100%; background: #ffd23f; transition: width .2s linear; }
 @keyframes reqin { from { opacity: 0; transform: translate(-50%, -8px); } }
 @media (prefers-reduced-motion: reduce) { .reqbox { animation: none; } }
+/* editor */
+.edbox { width: min(760px, 94vw); }
+.edtabs { margin-bottom: 10px; }
+.edsearch { width: 100%; margin-bottom: 8px; }
+.edlist { max-height: min(52vh, 460px); overflow: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+.edrow { display: grid; grid-template-columns: 1fr 1.3fr auto; gap: 8px; align-items: center; }
+label.edrow { grid-template-columns: 1fr 1.3fr; }
+.edrow span { font-size: 14px; }
+.edrow small { color: var(--muted); margin-left: 4px; }
+.edrow .txt { padding: 6px 8px; }
+.edshort { width: 64px; text-transform: uppercase; }
+.m2btn.mode.small { padding-top: 10px; padding-bottom: 10px; }

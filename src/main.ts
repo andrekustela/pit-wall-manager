@@ -7,6 +7,7 @@ import { teamVoice } from "./audio/voice";
 import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
 import { car3dReady } from "./render/car3d";
 import { DriverRequests } from "./ui/requests";
+import { applyEditor } from "./ui/editorData";
 
 /** título da tela de carregamento no começo do fim de semana */
 function weekendLabel(l: LobbyState): string {
@@ -589,6 +590,7 @@ class App {
   await document.fonts?.ready;
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
+  applyEditor(); // nomes de pistas/pilotos do Editor
   const appInst = new App();
   car3dReady(); // já vai carregando o carro 3D (prévias do editor e do lobby)
   onSaveWarn((msg) => toast(msg)); // gravação do campeonato falhou (sem espaço): avisa

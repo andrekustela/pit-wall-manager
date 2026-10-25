@@ -3,6 +3,7 @@
 // não acumular quando a corrida está acelerada.
 import { storeGet, storeSet } from "../ui/common";
 import { RADIO_LINES, radioLineFor, reactionFor, type RadioLine } from "./radioLines";
+import { voiceSuffix } from "../ui/editorData";
 
 type Who = "driver" | "engineer";
 interface Line {
@@ -16,7 +17,9 @@ interface Line {
 }
 
 /** arquivo da fala: o 2º piloto da equipe tem voz própria (sufixo _b) */
-const clipUrl = (id: string, n: number, who: Who, slot: number) => `/radio/${id}_${n}${who === "driver" && slot === 1 ? "_b" : ""}.wav`;
+const clipUrl = (id: string, n: number, who: Who, slot: number) => `/radio/${id}_${n}${who === "driver" ? voiceSuffix(slot) : ""}.wav`;
+/** a voz base (Faber), pra quando a escolhida não tiver aquela fala */
+const baseUrl = (id: string, n: number) => `/radio/${id}_${n}.wav`;
 
 /** troca abreviações do texto da tela pelo jeito falado */
 function speakable(t: string): string {
@@ -193,7 +196,7 @@ class TeamVoice {
       // reação: o texto falado é a fala (o aviso da tela é narração)
       if (line.rec) line.text = rec.lines[n];
       this.beepIn();
-      const play = async () => (await this.playClip(clipUrl(rec.id, n, line.who, line.slot))) ?? (line.slot ? this.playClip(clipUrl(rec.id, n, line.who, 0)) : null);
+      const play = async () => (await this.playClip(clipUrl(rec.id, n, line.who, line.slot))) ?? (voiceSuffix(line.slot) ? this.playClip(baseUrl(rec.id, n)) : null);
       void play().then((dur) => {
         if (id !== this.lineId) return;
         if (dur !== null) setTimeout(done, dur * 1000 + 60);

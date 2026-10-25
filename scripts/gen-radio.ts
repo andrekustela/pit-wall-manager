@@ -11,11 +11,13 @@ const TOOLS = join(process.env.LOCALAPPDATA ?? ".", "pwm-piper");
 const PIPER_ZIP = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip";
 const HF = "https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR";
 /** cada voz: quem usa, sufixo do arquivo e ritmo (length menor = mais rápido) */
-type VoiceKey = "driver" | "driver2" | "engineer";
+type VoiceKey = "driver" | "driver2" | "driver3" | "engineer";
 const VOICES: Record<VoiceKey, { who: RadioWho; suffix: string; name: string; url: string; length: number }> = {
   driver: { who: "driver", suffix: "", name: "pt_BR-faber-medium", url: `${HF}/faber/medium/pt_BR-faber-medium`, length: 0.88 },
   // 2º piloto da equipe: voz própria, pra saber quem está falando
   driver2: { who: "driver", suffix: "_b", name: "pt_BR-jeff-medium", url: `${HF}/jeff/medium/pt_BR-jeff-medium`, length: 0.9 },
+  // 3ª voz de piloto (escolhida no Editor)
+  driver3: { who: "driver", suffix: "_c", name: "pt_BR-cadu-medium", url: `${HF}/cadu/medium/pt_BR-cadu-medium`, length: 0.92 },
   engineer: { who: "engineer", suffix: "", name: "pt_BR-cadu-medium", url: `${HF}/cadu/medium/pt_BR-cadu-medium`, length: 0.98 },
 };
 const OUT = join(process.cwd(), "public", "radio");
@@ -119,7 +121,7 @@ for (const who of Object.keys(VOICES) as VoiceKey[]) {
     l.lines.map((text, n) => ({ text, file: join(TMP, `${l.id}_${n}${v.suffix}.wav`), dst: join(OUT, `${l.id}_${n}${v.suffix}.wav`) })),
   ).filter((j) => all || !existsSync(j.dst));
   if (!jobs.length) continue;
-  console.log(`${{ driver: "piloto 1", driver2: "piloto 2", engineer: "engenheiro" }[who]}: ${jobs.length} falas`);
+  console.log(`${{ driver: "piloto (Faber)", driver2: "piloto (Jeff)", driver3: "piloto (Cadu)", engineer: "engenheiro" }[who]}: ${jobs.length} falas`);
   await synth(exe, who, jobs);
   for (const j of jobs) {
     post(j.file, j.dst);

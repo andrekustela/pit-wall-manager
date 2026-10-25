@@ -5,6 +5,7 @@ import { account } from "../net/account";
 import { statsHtml } from "./login";
 import { deleteSave, listSaves, previousSave, renameSave, restorePrevious } from "./saves";
 import { showBackup } from "./backup";
+import { showEditor } from "./editor";
 import { confirmDialog } from "./confirm";
 import { fillRanking } from "./ranking";
 import { editMyLivery } from "./liveryEditor";
@@ -194,6 +195,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     <nav class="m2nav">
       <button class="m2btn mode" data-panel="solo"><b>MODO SOLO</b><span>Você contra 9 equipes da IA${soloSaves.length ? ` · ${soloSaves.length} campeonato${soloSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
       <button class="m2btn mode" data-panel="online"><b>MODO ONLINE</b><span>Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
+      <button class="m2btn mode small" data-editor><b>EDITOR</b><span>Nomes de pistas e pilotos, vozes do rádio</span><i>▶</i></button>
       <button class="m2btn mode" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
     </nav>`;
   const head = (t: string) => `<div class="m2vhead"><button class="m2back" data-back>◀ VOLTAR</button><b>${t}</b></div>`;
@@ -436,6 +438,7 @@ Ele fica 30 dias na lixeira (Backup dos campeonatos), dá pra restaurar.`, ok: "
   };
 
   root.querySelector("#m-friends")!.addEventListener("click", () => showFriends(redraw));
+  root.querySelector("[data-editor]")?.addEventListener("click", () => showEditor(redraw));
   startLogoFx(root.querySelector<HTMLElement>(".m2logowrap")!);
 }
 
