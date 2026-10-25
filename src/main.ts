@@ -143,10 +143,10 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     // tela de entrada logo de cara (login ou "jogar sem conta")
     if (!account.user && !this.guest && !AUTO) {
       this.screenPhase = "menu";
-      showLogin(app, (guest) => {
+      showLogin(app, async (guest) => {
         this.guest = guest;
-        // campeonatos salvos na nuvem entram na lista do navegador (o mais novo vence)
-        mergeCloudSaves(account.profile?.champs as SaveMap | null);
+        // campeonatos salvos na nuvem entram na lista do navegador (o mais novo vence) antes do menu abrir
+        mergeCloudSaves((await account.loadChamps().catch(() => ({}))) as SaveMap);
         if (account.profile) {
           storeSet("pwm.name", account.profile.name);
           storeSet("pwm.team", account.profile.team_name);
@@ -650,7 +650,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   setupInstall();
   await document.fonts?.ready;
   await account.restore().catch(() => false);
-  mergeCloudSaves(account.profile?.champs as SaveMap | null);
+  mergeCloudSaves((await account.loadChamps().catch(() => ({}))) as SaveMap);
   applyEditor(); // nomes de pistas/pilotos do Editor
   const appInst = new App();
   car3dReady(); // já vai carregando o carro 3D (prévias do editor e do lobby)

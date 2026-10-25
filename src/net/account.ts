@@ -14,7 +14,7 @@ import {
   type Auth,
   type User,
 } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, getFirestore, serverTimestamp, setDoc, type Firestore } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, getFirestore, serverTimestamp, setDoc, type Firestore } from "firebase/firestore";
 import { FIREBASE_CONFIG } from "./config";
 
 export interface PlayerStats {
@@ -198,9 +198,81 @@ class Account {
     void this.publish();
   }
 
-  /** campeonatos salvos na nuvem (junto do perfil) */
-  saveChamps(champs: Record<string, unknown>) {
-    void this.save({ champs });
+  // ---------- campeonatos na nuvem ----------
+  // Cada campeonato num documento próprio (profiles/{uid}/champs/{id}): o perfil não cresce e cada
+  // etapa grava só o que mudou. Enquanto a regra nova não estiver no Firebase, a gravação ali é
+  // recusada e o jogo continua no jeito antigo (todos dentro do perfil). Quando a regra passa a
+  // valer, os antigos são levados pro lugar novo sozinhos.
+  private champsOk: boolean | null = null;
+  private champDoc(id: string) {
+    return doc(F().db, "profiles", this.user!.uid, "champs", id);
+  }
+
+  /** grava (ou atualiza) um campeonato na nuvem */
+  saveChamp(s: { champ: { id?: string }; updated?: number }) {
+    const id = s?.champ?.id;
+    if (!this.user || !this.profile || !id) return;
+    if (this.champsOk === false) return void this.save({ champs: { ...(this.profile.champs ?? {}), [id]: s } });
+    void setDoc(this.champDoc(id), { data: JSON.stringify(s), updated: s.updated ?? Date.now() })
+      .then(() => {
+        this.champsOk = true;
+        void this.migrateChamps();
+      })
+      .catch(() => {
+        // sem a regra nova ainda: jeito antigo
+        this.champsOk = false;
+        void this.save({ champs: { ...(this.profile?.champs ?? {}), [id]: s } });
+      });
+  }
+
+  /** apaga um campeonato da nuvem */
+  deleteChamp(id: string) {
+    if (!this.user || !this.profile) return;
+    if (this.profile.champs && id in this.profile.champs) {
+      const c = { ...this.profile.champs };
+      delete c[id];
+      void this.save({ champs: Object.keys(c).length ? c : null });
+    }
+    if (this.champsOk !== false) void deleteDoc(this.champDoc(id)).catch(() => {});
+  }
+
+  /** todos os campeonatos da nuvem (os do lugar novo + os que ainda estão no perfil) */
+  async loadChamps(): Promise<Record<string, unknown>> {
+    const out: Record<string, unknown> = { ...(this.profile?.champs ?? {}) };
+    if (!this.user) return out;
+    try {
+      const snap = await getDocs(collection(F().db, "profiles", this.user.uid, "champs"));
+      this.champsOk = true;
+      snap.forEach((d) => {
+        try {
+          const s = JSON.parse(String(d.data().data)) as { updated?: number };
+          const cur = out[d.id] as { updated?: number } | undefined;
+          if (!cur || (s.updated ?? 0) >= (cur.updated ?? 0)) out[d.id] = s;
+        } catch {
+          /* doc estragado: ignora */
+        }
+      });
+      void this.migrateChamps();
+    } catch {
+      this.champsOk = false;
+    }
+    return out;
+  }
+
+  /** leva os campeonatos que estão dentro do perfil pro lugar novo e esvazia o perfil */
+  private migrating = false;
+  private async migrateChamps() {
+    const old = this.profile?.champs;
+    if (!this.user || !old || this.champsOk !== true || this.migrating) return;
+    this.migrating = true;
+    try {
+      for (const [id, s] of Object.entries(old)) await setDoc(this.champDoc(id), { data: JSON.stringify(s), updated: (s as { updated?: number }).updated ?? Date.now() });
+      await this.save({ champs: null });
+    } catch {
+      /* tenta de novo na próxima */
+    } finally {
+      this.migrating = false;
+    }
   }
 
   /** soma o resultado de uma corrida nas estatísticas */

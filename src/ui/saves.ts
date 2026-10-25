@@ -58,8 +58,9 @@ function read(): SaveMap {
   return m;
 }
 
-/** grava; false = o navegador recusou (sem espaço): avisa em vez de perder em silêncio */
-function write(m: SaveMap): boolean {
+/** grava no navegador (e na nuvem, só os campeonatos que mudaram / foram apagados);
+ * false = o navegador recusou (sem espaço): avisa em vez de perder em silêncio */
+function write(m: SaveMap, changed: string[] = [], removed: string[] = []): boolean {
   let ok = true;
   try {
     const txt = JSON.stringify(m);
@@ -69,7 +70,8 @@ function write(m: SaveMap): boolean {
     ok = false;
     saveWarn?.("Não deu pra salvar o campeonato neste navegador (sem espaço). Exporte um backup no Modo solo.");
   }
-  account.saveChamps(m); // na nuvem também (se tiver conta)
+  for (const id of changed) if (m[id]) account.saveChamp(m[id]);
+  for (const id of removed) account.deleteChamp(id);
   return ok;
 }
 
@@ -96,7 +98,7 @@ export function putSave(s: ChampSave) {
     storeSet(PREV, JSON.stringify(prev));
   }
   m[id] = s;
-  write(m);
+  write(m, [id]);
 }
 
 export function deleteSave(id: string) {
@@ -107,14 +109,14 @@ export function deleteSave(id: string) {
     storeSet(TRASH, JSON.stringify(t));
   }
   delete m[id];
-  write(m);
+  write(m, [], [id]);
 }
 
 export function renameSave(id: string, name: string) {
   const m = read();
   if (!m[id]) return;
   m[id].champ.name = name.trim().slice(0, 40) || m[id].champ.name;
-  write(m);
+  write(m, [id]);
 }
 
 /** junta os campeonatos da nuvem com os do navegador (o mais novo de cada vence) */
@@ -142,7 +144,7 @@ export function restorePrevious(id: string): boolean {
   if (cur) prev[id] = cur;
   else delete prev[id];
   storeSet(PREV, JSON.stringify(prev));
-  return write(m);
+  return write(m, [id]);
 }
 
 /** campeonatos na lixeira (os com mais de 30 dias somem) */
@@ -166,7 +168,7 @@ export function restoreFromTrash(id: string): boolean {
   m[id] = t[id].s;
   delete t[id];
   storeSet(TRASH, JSON.stringify(t));
-  return write(m);
+  return write(m, [id]);
 }
 
 /** arquivo de backup com todos os campeonatos (e a lixeira) */
@@ -180,16 +182,19 @@ export function importBackup(text: string): { added: number; updated: number } {
   if (data?.app !== "pit-wall-manager" || !data.saves) throw new Error("Esse arquivo não é um backup do Pit Wall Manager.");
   const m = read();
   let added = 0, updated = 0;
+  const changed: string[] = [];
   for (const [id, s] of Object.entries(data.saves)) {
     if (!s?.champ) continue;
     if (!m[id]) {
       m[id] = s;
       added++;
+      changed.push(id);
     } else if ((s.updated ?? 0) > (m[id].updated ?? 0)) {
       m[id] = s;
       updated++;
+      changed.push(id);
     }
   }
-  write(m);
+  write(m, changed);
   return { added, updated };
 }
