@@ -39,7 +39,7 @@ import { confirmDialog } from "./ui/confirm";
 import { account } from "./net/account";
 import { showLogin } from "./ui/login";
 import { setupInstall } from "./ui/install";
-import { mergeCloudSaves, putSave, type SaveMap } from "./ui/saves";
+import { mergeCloudSaves, putSave, type SaveMap, onSaveWarn } from "./ui/saves";
 import { POINTS, standings } from "./sim/championship";
 
 interface Screen {
@@ -583,6 +583,7 @@ class App {
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
+  onSaveWarn((msg) => toast(msg)); // gravação do campeonato falhou (sem espaço): avisa
   if (location.search.includes("debug")) (window as unknown as { __app: App }).__app = appInst;
   // tela de abertura (do index.html): completa a logo e some
   const boot = document.getElementById("boot");

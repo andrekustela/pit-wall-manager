@@ -3,7 +3,8 @@ import type { ChampSave } from "../net/room";
 import { CIRCUITS, randomTrack } from "../sim/track";
 import { account } from "../net/account";
 import { statsHtml } from "./login";
-import { deleteSave, listSaves, renameSave } from "./saves";
+import { deleteSave, listSaves, previousSave, renameSave, restorePrevious } from "./saves";
+import { showBackup } from "./backup";
 import { confirmDialog } from "./confirm";
 import { fillRanking } from "./ranking";
 import { editMyLivery } from "./liveryEditor";
@@ -123,7 +124,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
           <div class="m2bar"><i style="width:${pct}%"></i></div>
           <div class="hint" style="margin:4px 0 8px">${status} · ${esc(s.name)}${s.teamName ? ` (${esc(s.teamName)})` : ""}${when ? ` · ${when}` : ""}</div>
           <div class="row-btns" style="margin:0"><button class="btn small primary" data-cplay title="${s.online && !ch.finished ? "Cria uma sala nova com este campeonato; os amigos entram pelo código e voltam pra equipe deles" : ""}">${ch.finished ? "VER TROFÉUS ▶" : s.online ? "CONTINUAR ONLINE ▶" : "CONTINUAR ▶"}</button>
-            <button class="btn small" data-crename>RENOMEAR</button><button class="btn small" data-cdel>APAGAR</button></div></div>`;
+            <button class="btn small" data-crename>RENOMEAR</button>${previousSave(ch.id ?? "") ? `<button class="btn small" data-cundo title="Volta o campeonato pra como estava antes da última gravação">DESFAZER ÚLTIMA ETAPA</button>` : ""}<button class="btn small" data-cdel>APAGAR</button></div></div>`;
     })
     .join("");
   const soloSaves = saves.filter((s) => !s.online);
@@ -201,7 +202,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       return `${head("MODO SOLO")}
         <button class="m2btn hot" id="m-solo"><b>NOVO JOGO SOLO</b><span>Fim de semana avulso ou campeonato novo (escolha nas regras)</span><i>▶</i></button>
         <h3 class="m2psub">SEUS CAMPEONATOS SOLO</h3>
-        <div class="m2plist">${champRows(soloSaves) || `<p class="hint">Nenhum ainda. Em <b>Novo jogo solo</b>, ligue "Campeonato" nas regras.</p>`}</div>`;
+        <div class="m2plist">${champRows(soloSaves) || `<p class="hint">Nenhum ainda. Em <b>Novo jogo solo</b>, ligue "Campeonato" nas regras.</p>`}</div>
+        <button class="m2btn small" data-backup><b>🗂 BACKUP DOS CAMPEONATOS</b><span>Exportar, importar e lixeira</span><i>▶</i></button>`;
     if (p === "online")
       return `${head("MODO ONLINE")}
         <button class="m2btn hot" id="m-create"><b>CRIAR SALA</b><span>Você é o host: passe o código pros amigos</span><i>▶</i></button>
@@ -299,8 +301,16 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         jb.querySelector("b")!.textContent = `ENTRAR NA SALA ${invite}`;
       }
     }
+    el.querySelector("[data-backup]")?.addEventListener("click", () => showBackup(redraw));
     el.querySelectorAll<HTMLElement>(".m2champ").forEach((row) => {
       const id = row.dataset.cid!;
+      row.querySelector("[data-cundo]")?.addEventListener("click", async () => {
+        const ok = await confirmDialog({ title: "Desfazer última etapa", icon: "↶", text: `Voltar "${save.champ.name ?? "Campeonato"}" pra como estava antes da última gravação?
+Dá pra desfazer de novo (troca as duas versões).`, ok: "DESFAZER" });
+        if (!ok) return;
+        restorePrevious(id);
+        redraw();
+      });
       const save = saves.find((x) => x.champ.id === id)!;
       row.querySelector("[data-cplay]")!.addEventListener("click", () => choose({ mode: "resume", ...get(), save }));
       row.querySelector("[data-crename]")!.addEventListener("click", () => {
@@ -311,7 +321,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         }
       });
       row.querySelector("[data-cdel]")!.addEventListener("click", async () => {
-        const ok = await confirmDialog({ title: "Apagar campeonato", icon: "🗑", text: `Apagar "${save.champ.name ?? "Campeonato"}"? Não dá pra desfazer.`, ok: "APAGAR", danger: true });
+        const ok = await confirmDialog({ title: "Apagar campeonato", icon: "🗑", text: `Apagar "${save.champ.name ?? "Campeonato"}"?
+Ele fica 30 dias na lixeira (Backup dos campeonatos), dá pra restaurar.`, ok: "APAGAR", danger: true });
         if (!ok) return;
         deleteSave(id);
         redraw();
