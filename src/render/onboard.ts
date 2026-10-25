@@ -5,6 +5,7 @@
 // retrovisores e o volante com marcha, velocidade e luzes de giro.
 import type { Race } from "../sim/race";
 import { TRACK_WIDTH, type Track } from "../sim/track";
+import { drawCockpit3d } from "./onboard3d";
 import type { CarState } from "../sim/types";
 
 const COMPOUND_COLOR: Record<string, string> = { S: "#ff3b3b", M: "#ffd23b", H: "#f2f2f2", I: "#3bd16f", W: "#2e8bff" };
@@ -294,14 +295,23 @@ export class OnboardCam {
     }
 
     // ---- cockpit ----
-    // cockpit menor e embaixo: sobra mais pista à vista
-    g.save();
-    const ck = W < 400 ? 0.72 : 0.62;
-    g.translate(W / 2, H);
-    g.scale(ck, ck);
-    g.translate(-W / 2, -H);
-    this.cockpit(g, W, H, car, s0, dt, inTunnel(s0) || night);
-    g.restore();
+    const steer = this.steerFor(car, s0, dt);
+    const ped = this.pedalsFor(car, dt);
+    const kmh = Math.round(car.v * 3.6);
+    const gear = car.v < 1 ? "N" : String(Math.min(8, 1 + Math.floor(Math.max(0, kmh - 20) / 40)));
+    const rev = kmh <= 20 ? kmh / 20 : ((kmh - 20) % 40) / 40;
+    // 3D (render do Blender nos olhos do piloto) ou o desenho em vetor
+    if (drawCockpit3d(g, W, H, car.team, steer, kmh, gear, rev, inTunnel(s0) || night)) this.pedalBars(g, W, H, ped, 0.74);
+    else {
+      // cockpit menor e embaixo: sobra mais pista à vista
+      g.save();
+      const ck = W < 400 ? 0.72 : 0.62;
+      g.translate(W / 2, H);
+      g.scale(ck, ck);
+      g.translate(-W / 2, -H);
+      this.cockpit(g, W, H, car, dt, inTunnel(s0) || night, steer, ped, kmh, gear, rev);
+      g.restore();
+    }
 
     // chuva na viseira
     if (race.rain > 0.05) {
@@ -370,16 +380,9 @@ export class OnboardCam {
    * cor da equipe, pneus da frente com a faixa do composto, halo, retrovisores
    * e o volante com as luvas.
    */
-  private cockpit(g: CanvasRenderingContext2D, W: number, H: number, car: CarState, s0: number, dt: number, tunnel: boolean) {
-    const t = this.race.track;
-    const L = t.L;
-    const acc = car.team.accent;
-    const X = (p: number) => (p * W) / 100;
-    const Y = (p: number) => (p * H) / 100;
-    const u = Math.min(W, H * 1.6) / 100;
-    const v = car.v;
-    this.tread = (this.tread + v * dt * 0.9) % 1;
-    // volante: média da curva logo à frente, girando suave
+  /** volante: média da curva logo à frente, girando suave (-1..1) */
+  private steerFor(car: CarState, s0: number, dt: number): number {
+    const t = this.race.track, L = t.L;
     let k = 0;
     for (let d = 2; d <= 22; d += 4) k += t.curvature[Math.floor(((s0 + d) % L + L) % L) % L];
     k /= 6;
@@ -387,6 +390,44 @@ export class OnboardCam {
     const prev = this.steer.get(car.id) ?? want;
     const steer = prev + (want - prev) * Math.min(1, dt * 7);
     this.steer.set(car.id, steer);
+    return steer;
+  }
+
+  /** acelerador e freio (estimados pela variação da velocidade) */
+  private pedalsFor(car: CarState, dt: number): { thr: number; brk: number } {
+    const v = car.v;
+    const ped = this.pedals.get(car.id) ?? { v, thr: 0.5, brk: 0 };
+    const dv = dt > 0 ? (v - ped.v) / dt : 0;
+    const thrWant = dv < -3 ? 0 : v > 3 ? Math.max(0.35, Math.min(1, 0.55 + dv / 9)) : 0.3;
+    const brkWant = dv < -3 ? Math.min(1, -dv / 32) : 0;
+    const kk = Math.min(1, dt * 10);
+    ped.thr += (thrWant - ped.thr) * kk;
+    ped.brk += (brkWant - ped.brk) * kk;
+    ped.v = v;
+    this.pedals.set(car.id, ped);
+    return ped;
+  }
+
+  /** barras de freio (vermelha) e acelerador (verde), dos lados do volante */
+  private pedalBars(g: CanvasRenderingContext2D, W: number, H: number, ped: { thr: number; brk: number }, top = 0.76) {
+    const bw = (2.2 * W) / 100, bh = (17 * H) / 100, by = top * H;
+    for (const [bx, val, c] of [[(27 * W) / 100, ped.brk, "#ff3b3b"], [(73 * W) / 100 - bw, ped.thr, "#3bd16f"]] as [number, number, string][]) {
+      g.fillStyle = "rgba(0,0,0,.55)";
+      g.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      g.fillStyle = "#1d2027";
+      g.fillRect(bx, by, bw, bh);
+      g.fillStyle = c;
+      g.fillRect(bx, by + bh * (1 - val), bw, bh * val);
+    }
+  }
+
+  private cockpit(g: CanvasRenderingContext2D, W: number, H: number, car: CarState, dt: number, tunnel: boolean, steer: number, ped: { thr: number; brk: number }, kmh: number, gear: string, rev: number) {
+    const acc = car.team.accent;
+    const X = (p: number) => (p * W) / 100;
+    const Y = (p: number) => (p * H) / 100;
+    const u = Math.min(W, H * 1.6) / 100;
+    const v = car.v;
+    this.tread = (this.tread + v * dt * 0.9) % 1;
     const light = tunnel ? -0.35 : 0;
 
     // ---- asa dianteira (na ponta do bico, atrás dos pneus) ----
@@ -450,16 +491,6 @@ export class OnboardCam {
     const key = `${W}x${H}|${car.team.id}|${tunnel ? 1 : 0}`;
     // a camada do carro é mais larga que a tela: as laterais continuam até os cantos
     g.drawImage(this.layer("body|" + key, g, W, H, (c) => this.bodyLayer(c, W, H, car, tunnel), BODY_MARGIN), -W * BODY_MARGIN, 0, W * (1 + 2 * BODY_MARGIN), H);
-    // acelerador e freio (estimados pela variação da velocidade)
-    const ped = this.pedals.get(car.id) ?? { v, thr: 0.5, brk: 0 };
-    const dv = dt > 0 ? (v - ped.v) / dt : 0;
-    const thrWant = dv < -3 ? 0 : v > 3 ? Math.max(0.35, Math.min(1, 0.55 + dv / 9)) : 0.3;
-    const brkWant = dv < -3 ? Math.min(1, -dv / 32) : 0;
-    const kk = Math.min(1, dt * 10);
-    ped.thr += (thrWant - ped.thr) * kk;
-    ped.brk += (brkWant - ped.brk) * kk;
-    ped.v = v;
-    this.pedals.set(car.id, ped);
 
     g.save();
     g.translate(X(50), Y(90));
@@ -492,8 +523,7 @@ export class OnboardCam {
       g.fill();
     });
     // telinha
-    const kmh = Math.round(v * 3.6);
-    const gear = v < 1 ? "N" : String(Math.min(8, 1 + Math.floor(Math.max(0, kmh - 20) / 40)));
+
     g.fillStyle = "#06080b";
     g.fillRect(-ww * 0.55, -wh * 0.7, ww * 1.1, wh * 0.85);
     g.textAlign = "center";
@@ -505,9 +535,8 @@ export class OnboardCam {
     g.font = `700 ${Math.max(5, Math.round(wh * 0.3))}px "Oswald", sans-serif`;
     g.fillText(String(kmh), ww * 0.28, -wh * 0.27);
     // luzes de giro
-    const inGear = kmh <= 20 ? kmh / 20 : ((kmh - 20) % 40) / 40;
     for (let i = 0; i < 10; i++) {
-      const on = i / 10 < inGear;
+      const on = i / 10 < rev;
       g.fillStyle = !on ? "#1d2027" : i < 4 ? "#3bd16f" : i < 7 ? "#ff3b3b" : "#3b8bff";
       g.fillRect(-ww * 0.55 + (i * ww * 1.1) / 10 + 1, -wh * 0.9, (ww * 1.1) / 10 - 2, wh * 0.13);
     }
@@ -525,16 +554,7 @@ export class OnboardCam {
     }
     g.restore();
 
-    // barras de freio (vermelha) e acelerador (verde), dos lados do volante
-    const bw = X(2.2), bh = Y(17), by = Y(76);
-    for (const [bx, val, c] of [[X(27), ped.brk, "#ff3b3b"], [X(73) - bw, ped.thr, "#3bd16f"]] as [number, number, string][]) {
-      g.fillStyle = "rgba(0,0,0,.55)";
-      g.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-      g.fillStyle = "#1d2027";
-      g.fillRect(bx, by, bw, bh);
-      g.fillStyle = c;
-      g.fillRect(bx, by + bh * (1 - val), bw, bh * val);
-    }
+    this.pedalBars(g, W, H, ped);
 
   }
 
