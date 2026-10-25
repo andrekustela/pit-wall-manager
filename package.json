@@ -20,6 +20,7 @@
   "dependencies": {
     "firebase": "^10.12.2",
     "tsx": "^4.23.15",
+    "vosk-browser": "^0.0.8",
     "ws": "^8.22.0"
   },
   "engines": {

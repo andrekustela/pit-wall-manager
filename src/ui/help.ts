@@ -1,6 +1,7 @@
 import { sound } from "../audio/sound";
 import { music } from "../audio/music";
 import { teamVoice } from "../audio/voice";
+import { voiceCmd } from "../audio/voiceCmd";
 import { esc } from "./common";
 
 type Tab = "jogo" | "treino" | "estrategia" | "corrida" | "atalhos";
@@ -91,7 +92,7 @@ export class HelpWidget {
   constructor(private currentTab: () => Tab, onHome?: () => void, showHome?: () => boolean) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn home" data-home title="Voltar ao menu" hidden>⌂</button><button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-voice title="Rádio da equipe falado (liga/desliga)">📻</button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
+    this.el.innerHTML = `<button class="hbtn home" data-home title="Voltar ao menu" hidden>⌂</button><button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-voice title="Rádio da equipe falado (liga/desliga)">📻</button><button class="hbtn off" data-vcmd title="Comando de voz: ligar (depois segure V e fale, ex.: P1 box)">🎙</button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
     const home = this.el.querySelector<HTMLButtonElement>("[data-home]")!;
     home.addEventListener("click", () => onHome?.());
@@ -108,6 +109,23 @@ export class HelpWidget {
     vb.addEventListener("click", () => teamVoice.toggle());
     teamVoice.onChange(renderVoice);
     renderVoice();
+    // comando de voz: liga (pede o microfone e carrega o modelo) / desliga
+    const vc = this.el.querySelector<HTMLButtonElement>("[data-vcmd]")!;
+    vc.hidden = !voiceCmd.supported;
+    const renderVc = () => {
+      const st = voiceCmd.state;
+      vc.classList.toggle("off", st === "off" || st === "error");
+      vc.classList.toggle("busy", st === "loading");
+      vc.classList.toggle("live", st === "listening");
+      vc.title =
+        st === "off" ? "Comando de voz: ligar (depois segure V e fale, ex.: P1 box)"
+        : st === "loading" ? "Comando de voz: preparando..."
+        : st === "error" ? `Comando de voz: ${voiceCmd.error}`
+        : "Comando de voz ligado: segure V e fale (P1 box, P2 atacar, motor rico, cancela box...). Clique pra desligar";
+    };
+    vc.addEventListener("click", () => (voiceCmd.state === "off" || voiceCmd.state === "error" ? void voiceCmd.enable() : voiceCmd.disable()));
+    voiceCmd.onChange(renderVc);
+    renderVc();
     this.el.querySelector("[data-full]")!.addEventListener("click", () => toggleFullscreen());
     document.addEventListener("keydown", (e) => {
       if ((e.key === "f" || e.key === "F") && !(e.target as HTMLElement)?.closest("input, textarea")) toggleFullscreen();

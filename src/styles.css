@@ -1151,3 +1151,9 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 .driver.panel[data-talk] { box-shadow: 0 0 0 1px #ffd23f88, 0 0 18px #ffd23f33; }
 @keyframes talkpulse { 50% { opacity: .35; transform: scale(.9); } }
 @media (prefers-reduced-motion: reduce) { [data-talk] .name::before, .driver.panel[data-talk] .nm::before { animation: none; } }
+/* comando de voz */
+.hbtn.busy { animation: talkpulse 900ms ease-in-out infinite; }
+.hbtn.live { background: #e8202a; border-color: #ff5a62; }
+.vcind { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 60; padding: 10px 18px; background: #0b0e15ee; border: 1px solid #333;
+  color: #e9edf5; font-family: var(--pix); letter-spacing: .12em; font-size: 15px; pointer-events: none; }
+.vcind.on { border-color: #e8202a; box-shadow: 0 0 0 1px #e8202a, 0 0 24px #e8202a55; }

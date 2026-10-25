@@ -4,6 +4,7 @@ import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
 import { showCalendar } from "./ui/calendar";
 import { showLoading } from "./ui/loading";
 import { teamVoice } from "./audio/voice";
+import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
 
 /** título da tela de carregamento no começo do fim de semana */
 function weekendLabel(l: LobbyState): string {
@@ -19,6 +20,7 @@ import { LocalConnection, WsConnection, type Connection } from "./net/connection
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
+import { COMPOUNDS, ENGINE, PACE } from "./sim/types";
 import type { QualiResult } from "./sim/weekend";
 import { storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
@@ -78,6 +80,11 @@ class App {
   /** escolheu jogar sem conta nesta visita */
   private guest = false;
   private recorded = -1;
+
+  /** está numa corrida (com a pista na tela)? */
+  inRace(): boolean {
+    return !!this.view;
+  }
 
   /** está numa tela de jogo (não no menu/login)? */
   inGame(): boolean {
@@ -454,6 +461,8 @@ class App {
       }
     };
     window.addEventListener("keydown", view.onKey);
+    // comando de voz: o engenheiro executa pelos mesmos botões do card do piloto
+    voiceCmd.onCommand = (a, heard) => this.voiceCommand(view, a, heard);
 
     let lastT = performance.now();
     let hudT = 0;
@@ -489,6 +498,59 @@ class App {
     // depuração: ?debug expõe a corrida na tela (window.__view)
     if (params.has("debug")) (window as unknown as { __view: RaceView }).__view = view;
     if (AUTO && params.get("speed")) setSpeed(Number(params.get("speed")));
+  }
+
+  /** comando de voz reconhecido -> clica no botão certo do card e o engenheiro confirma no rádio */
+  private voiceCommand(view: RaceView, a: VoiceAction | null, heard: string) {
+    if (this.view !== view) return;
+    const cars = teamVoice.drivers();
+    const followSlot = cars.findIndex((d) => d.id === view.follow);
+    const slot = a?.slot ?? (followSlot >= 0 ? followSlot : 0);
+    const id = cars[slot]?.id;
+    const car = view.race.cars.find((c) => c.id === id);
+    const card = id ? document.querySelector<HTMLElement>(`.driver.panel[data-id="${id}"]`) : null;
+    const click = (sel: string) => card?.querySelector<HTMLButtonElement>(sel)?.click();
+    const who = `P${slot + 1}`;
+    if (!a || !car || !card) {
+      toast(heard ? `🎙 "${heard}": não entendi` : "🎙 Não ouvi nada");
+      teamVoice.sayId("nao_entendi");
+      return;
+    }
+    let ack = "ok_box", what = "";
+    switch (a.kind) {
+      case "box":
+        if (!car.boxRequest) click(".boxbtn");
+        what = "box nesta volta";
+        break;
+      case "cancelBox":
+        if (car.boxRequest) click(".boxbtn");
+        ack = "ok_cancela";
+        what = "cancelar o box";
+        break;
+      case "tyre":
+        click(`[data-next="${a.compound}"]`);
+        if (a.box && !car.boxRequest) click(".boxbtn");
+        ack = a.box ? "ok_box" : "ok_pneu";
+        what = `pneu ${COMPOUNDS[a.compound].label}${a.box ? " e box" : ""}`;
+        break;
+      case "pace":
+        click(`[data-pace="${a.mode}"]`);
+        ack = a.mode === "push" ? "ok_atacar" : a.mode === "conserve" ? "ok_poupar" : "ok_normal";
+        what = `ritmo ${PACE[a.mode].label}`;
+        break;
+      case "engine":
+        click(`[data-engine="${a.mode}"]`);
+        ack = a.mode === "rich" ? "ok_rico" : a.mode === "lean" ? "ok_pobre" : "ok_motor_normal";
+        what = `motor ${ENGINE[a.mode].label}`;
+        break;
+      case "order":
+        click(`[data-order="${a.mode}"]`);
+        ack = "ok_ordem";
+        what = a.mode === "letPass" ? "deixar o companheiro passar" : a.mode === "hold" ? "manter posições" : "liberados";
+        break;
+    }
+    toast(`🎙 ${who}: ${what}`);
+    teamVoice.sayId(ack);
   }
 
   private teardown() {
@@ -537,6 +599,31 @@ class App {
     if ((e.target as HTMLElement).closest("button")) sound.click();
   }, true);
   appInst.menu();
+  // comando de voz: segura V e fala (só na corrida, com o 🎙 ligado)
+  const vcInd = document.createElement("div");
+  vcInd.className = "vcind";
+  vcInd.hidden = true;
+  document.body.appendChild(vcInd);
+  const renderInd = () => {
+    const st = voiceCmd.state;
+    vcInd.hidden = !(st === "listening" || st === "loading");
+    vcInd.classList.toggle("on", st === "listening");
+    vcInd.textContent = st === "loading" ? "🎙 Preparando o comando de voz (só na 1ª vez demora)..." : "🎙 OUVINDO... (solte o V)";
+    if (st === "error") toast(`🎙 ${voiceCmd.error}`);
+  };
+  voiceCmd.onChange(renderInd);
+  const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement)?.closest?.("input, textarea");
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "KeyV" || e.repeat || typing(e) || !appInst.inRace()) return;
+    if (voiceCmd.state === "off") return toast("🎙 Ligue o comando de voz no botão 🎙 (canto da tela) e segure V pra falar");
+    e.preventDefault();
+    voiceCmd.startListening();
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "KeyV") voiceCmd.stopListening();
+  });
+  window.addEventListener("blur", () => voiceCmd.stopListening());
+
   // ?radio: demonstração das falas gravadas do rádio (um clique libera o som e começa)
   if (location.search.includes("radio")) {
     const box = document.createElement("div");

@@ -89,6 +89,12 @@ class TeamVoice {
     return true;
   }
 
+  /** fala gravada pelo id (ex.: resposta do engenheiro ao comando de voz) */
+  sayId(id: string, slot = 0) {
+    const rec = RADIO_LINES.find((l) => l.id === id);
+    if (rec) this.say(rec.lines[0], rec.who, slot, rec);
+  }
+
   /** piloto reagindo a um evento (box lento, toque, punição...) */
   react(text: string) {
     const rec = reactionFor(text);
