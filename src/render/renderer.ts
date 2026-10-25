@@ -1,6 +1,7 @@
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
+import { CarFx } from "./carFx";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH } from "../sim/track";
 
@@ -182,6 +183,8 @@ export class Renderer {
   private pos = new Map<string, { x: number; y: number; h: number }>();
   /** estado das peças visto no último quadro (pra soltar o pedaço quando algo quebra) */
   private lookSeen = new Map<string, CarLook>();
+  /** rodada, batida, fumaça, poeira, faíscas, marcas de pneu, tremor */
+  private fx = new CarFx();
   /** pedaços de asa voando / caídos na pista (metros do mundo) */
   private debris: { img: CarImage; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
@@ -239,7 +242,8 @@ export class Renderer {
     const o = this.octx;
     // o carro seguido fica no meio da parte da tela que o painel não cobre (desliza junto)
     this.inset += (this.insetTarget - this.inset) * Math.min(1, realDt * 12);
-    const viewX = cx - W / m / 2, viewY = cy - (H - this.inset) / m / 2;
+    const [shx, shy] = this.fx.shakeOffset(realDt);
+    const viewX = cx - W / m / 2 + shx, viewY = cy - (H - this.inset) / m / 2 + shy;
     o.setTransform(1, 0, 0, 1, 0, 0);
     // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
     void speed;
@@ -273,6 +277,8 @@ export class Renderer {
       const { x, y } = toCss(d);
       this.drawCar(o, x, y, d.h, d.img, m * air, d.t > 11 ? (14 - d.t) / 3 : 1);
     }
+    this.fx.step(dt);
+    this.fx.drawGround(o, toCss, m);
     for (const c of sorted) {
       const p = pos.get(c.id)!;
       const { x, y } = toCss(p);
@@ -280,8 +286,16 @@ export class Renderer {
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
-      const hh = p.h + (c.spin > 0 ? c.spin * 2.2 : 0), alpha = c.retired ? 0.6 : 1;
-      const look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
+      const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
+      const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId);
+      const crashed = this.fx.crashed(c);
+      const hh = p.h + yaw, alpha = c.retired && !crashed ? 0.6 : 1;
+      let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
+      // bateu: sem asa dianteira e com uma roda arrancada (os pedaços voam pelo dropParts)
+      if (crashed) {
+        const lost = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 4;
+        look = { ...look, fw: { state: "none", side: "l" }, wheels: look.wheels.map((w, i) => (i === lost ? "off" : w)) as CarLook["wheels"] };
+      }
       this.dropParts(c, look, p);
       if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, m, alpha, look, rainLight, performance.now() / 1000)))
         this.drawCar(o, x, y, hh, carImage(c.team, rainLight), m, alpha);
@@ -294,6 +308,8 @@ export class Renderer {
       const blink = Math.floor(performance.now() / 250) % 2 === 0;
       this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
+
+    this.fx.drawAir(o, toCss, m);
 
     // túnel: o teto cobre os carros (as etiquetas continuam aparecendo)
     if (race.track.tunnel) {

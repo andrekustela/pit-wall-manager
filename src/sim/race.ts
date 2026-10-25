@@ -483,8 +483,9 @@ export class Race {
     for (const c of this.cars) {
       if (c.pit === "parked") continue;
       if (c.retired) {
-        // encosta fora da pista e para
-        c.v = Math.max(0, c.v - 12 * dt);
+        // encosta fora da pista e para (batida para na hora; quebra só desacelera)
+        const hit = c.retireReason === "Acidente" || c.retireReason === "Bateu no muro";
+        c.v = Math.max(0, c.v - (hit ? 45 : 12) * dt);
         c.lateral += Math.max(-4 * dt, Math.min(4 * dt, -13 - c.lateral));
         c.s += c.v * dt;
         if (c.s >= L) c.s -= L;
