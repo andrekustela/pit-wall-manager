@@ -4,6 +4,7 @@
 import { storeGet, storeSet } from "../ui/common";
 import type { Race } from "../sim/race";
 import type { CarState, RaceEvent } from "../sim/types";
+import { parseRadio, teamVoice } from "./voice";
 
 /** velocidade (m/s) a 12.000 rpm em cada marcha */
 const GEAR_TOP = [22, 32, 41, 50, 59, 68, 78, 94];
@@ -248,6 +249,7 @@ class Sound {
   }
 
   stopRace() {
+    teamVoice.stop();
     this.main?.stop();
     this.passBy?.stop();
     this.rain?.gain.disconnect();
@@ -358,6 +360,12 @@ class Sound {
     this.beep(1000, 0.06, 0.05, "square", 0.08);
   }
 
+  /** fim da fala no rádio: bipe curto */
+  radioOut() {
+    this.noise(0.08, 0.05, 2500);
+    this.beep(900, 0.05, 0.04, "square", 0.02);
+  }
+
   go() {
     this.beep(880, 0.4, 0.12, "square");
   }
@@ -393,8 +401,16 @@ class Sound {
       const mine = e.teamId === myTeam;
       switch (e.kind) {
         case "start": this.go(); break;
-        case "radio": if (mine) this.radio(); break;
-        case "plan": if (mine) this.radio(); break;
+        case "radio":
+        case "plan":
+        case "fault": {
+          if (!mine) break;
+          // rádio falado (com bipe/chiado na voz); desligado, só o bipe
+          const r = teamVoice.enabled && teamVoice.supported ? parseRadio(e.text, e.kind) : null;
+          if (r) teamVoice.say(r.text, r.who);
+          else this.radio();
+          break;
+        }
         case "pitout": if (mine) this.pitWrench(); break;
         case "crash": this.crash(); break;
         case "spin": if (mine) this.noise(0.4, 0.15, 900); break;
@@ -410,3 +426,6 @@ class Sound {
 }
 
 export const sound = new Sound();
+teamVoice.volume = () => (sound.muted ? 0 : sound.volume);
+teamVoice.beepIn = () => sound.radio();
+teamVoice.beepOut = () => sound.radioOut();

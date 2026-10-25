@@ -1143,3 +1143,5 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 @keyframes ldhistin { from { opacity: 0; transform: translateX(16px); } }
 @media (max-width: 1100px) { .ldhist { position: static; width: auto; max-width: 640px; margin-top: 16px; } }
 @media (prefers-reduced-motion: reduce) { .ldhist { animation: none; } }
+/* rádio falado desligado */
+.hbtn.off { opacity: .45; filter: grayscale(1); }
