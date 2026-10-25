@@ -56,7 +56,12 @@ class TeamVoice {
   playClip: (url: string) => Promise<number | null> = async () => null;
   private lastVariant = new Map<string, number>();
   /** pilotos da sua equipe na corrida, na ordem (1º, 2º) */
-  drivers: () => { short: string; name: string }[] = () => [];
+  drivers: () => { id: string; short: string; name: string }[] = () => [];
+  /** avisa quem está falando agora (id do carro do piloto, ou null) — o HUD mostra o 📻 no nome */
+  onTalk: (carId: string | null) => void = () => {};
+  private talk(carId: string | null) {
+    this.onTalk(carId);
+  }
 
   /** qual piloto da equipe aparece no texto (o 1º citado, ou o último com target "last"); -1 = nenhum */
   private slotOf(text: string, target?: "last"): number {
@@ -117,6 +122,7 @@ class TeamVoice {
   }
 
   stop() {
+    this.talk(null);
     this.queue = [];
     if ("speechSynthesis" in window) speechSynthesis.cancel();
     this.busy = false;
@@ -162,10 +168,12 @@ class TeamVoice {
     const id = ++this.lineId;
     const done = () => {
       if (!this.busy || id !== this.lineId) return;
+      this.talk(null);
       this.beepOut();
       this.busy = false;
       setTimeout(() => this.next(), 250);
     };
+    this.talk(line.who === "driver" ? (this.drivers()[line.slot]?.id ?? null) : null);
     const rec = line.rec ?? radioLineFor(line.text);
     if (rec) {
       // fala gravada: sorteia uma versão (sem repetir a última)

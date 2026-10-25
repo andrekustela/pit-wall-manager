@@ -384,7 +384,12 @@ class App {
     const mine = race.cars.filter((c) => c.team.id === my).sort((a, b) => a.position - b.position);
     // rádio: 1º e 2º piloto da equipe (ordem fixa da equipe, cada um com sua voz)
     const teamCars = race.cars.filter((c) => c.team.id === my);
-    teamVoice.drivers = () => teamCars.map((c) => ({ short: c.driver.short, name: c.driver.name }));
+    teamVoice.drivers = () => teamCars.map((c) => ({ id: c.id, short: c.driver.short, name: c.driver.name }));
+    // 📻 no nome de quem está falando (classificação e card do piloto)
+    teamVoice.onTalk = (id) => {
+      document.querySelectorAll<HTMLElement>("[data-talk]").forEach((el) => delete el.dataset.talk);
+      if (id) document.querySelectorAll<HTMLElement>(`[data-car="${id}"], .driver.panel[data-id="${id}"]`).forEach((el) => (el.dataset.talk = "1"));
+    };
     const isHost = this.lobby?.hostId === this.lobby?.you;
     const conn = this.conn!;
     const view = { race, follow: mine[0]?.id ?? race.cars[0].id, speed } as RaceView;

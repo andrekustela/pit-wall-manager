@@ -1145,3 +1145,9 @@ body:has(.loginv2) .helpbtns { top: 12px; bottom: auto; left: auto; right: 12px;
 @media (prefers-reduced-motion: reduce) { .ldhist { animation: none; } }
 /* rádio falado desligado */
 .hbtn.off { opacity: .45; filter: grayscale(1); }
+/* rádio: 📻 piscando no nome do piloto que está falando */
+[data-talk] .name::before, .driver.panel[data-talk] .nm::before { content: "📻"; display: inline-block; margin-right: 5px; font-size: .95em; animation: talkpulse 900ms ease-in-out infinite; }
+.row[data-talk] { box-shadow: inset 3px 0 0 #ffd23f; }
+.driver.panel[data-talk] { box-shadow: 0 0 0 1px #ffd23f88, 0 0 18px #ffd23f33; }
+@keyframes talkpulse { 50% { opacity: .35; transform: scale(.9); } }
+@media (prefers-reduced-motion: reduce) { [data-talk] .name::before, .driver.panel[data-talk] .nm::before { animation: none; } }
