@@ -149,9 +149,16 @@ export class DriverRequests {
       this.count.set(c.id, (this.count.get(c.id) ?? 0) + 1);
       this.cur = { kind: ask[0], slot, carId: c.id, text: ask[2], t0: performance.now() };
       teamVoice.sayId(`req_${ask[0]}`, slot);
-      this.el.innerHTML = `<div class="reqtop"><b>📻 P${slot + 1} ${esc(c.driver.short)}</b><span>${esc(ask[2])}</span></div>
+      this.el.innerHTML = `<div class="reqtop"><b>📻 ${esc(c.driver.short)} PEDE</b><span>${esc(ask[2])}</span></div>
         <div class="reqbtns"><button class="btn small primary" data-ans="sim">✓ ACEITAR <kbd>S</kbd></button><button class="btn small" data-ans="nao">✗ RECUSAR <kbd>N</kbd></button>
         <span class="hint" style="margin:0">ou fale "sim" / "não" (V)</span></div><div class="reqbar"><i></i></div>`;
+      // no card do piloto que pediu, logo embaixo do nome (sem card: no topo da tela)
+      const card = document.querySelector<HTMLElement>(`.driver.panel[data-id="${c.id}"]`);
+      const top = card?.querySelector(".top");
+      if (top) top.after(this.el);
+      else if (card) card.prepend(this.el);
+      else document.body.appendChild(this.el);
+      this.el.classList.toggle("incard", !!card);
       this.el.hidden = false;
     });
   }

@@ -5,7 +5,8 @@
 // pronto, mostra uma versão de baixa resolução do mapa inteiro (sem buracos).
 import { TEAMS } from "../sim/data";
 import { Rng } from "../sim/rng";
-import { PIT_LATERAL, TRACK_WIDTH, Track } from "../sim/track";
+import { CIRCUITS, PIT_LATERAL, TRACK_WIDTH, Track } from "../sim/track";
+import { hasRacingLine, racingLineAt } from "../sim/racingLine";
 
 interface Box {
   x0: number;
@@ -238,14 +239,25 @@ export class VectorWorld {
       g.strokeStyle = this.pats.asphalt;
       g.lineWidth = W;
     });
-    // borracha do traçado
-    const rubber = this.chunks(this.line(0, L - 1, (s) => Math.max(-W / 2 + 2.5, Math.min(W / 2 - 2.5, t.curvature[Math.floor(s) % L] * 900)), 2), true);
-    // cor sólida: com transparência, as emendas entre trechos viravam bolinhas escuras
-    stroke(rubber, 2.2, (g) => {
-      g.strokeStyle = "#4a4b50";
-      g.lineWidth = 2.2;
-      g.lineCap = "butt";
-    });
+    // borracha: por onde os carros passam no traçado ideal (o carro de teste achou); pista sem
+    // traçado calculado (as guardadas) fica sem borracha
+    const ti = CIRCUITS.indexOf(t.def);
+    if (hasRacingLine(ti)) {
+      const lat = (s: number) => Math.max(-W / 2 + 1.5, Math.min(W / 2 - 1.5, racingLineAt(ti, s)));
+      const rubber = this.chunks(this.line(0, L - 1, lat, 2), true);
+      // duas passadas: uma larga e clarinha (as rodas espalham) e o miolo mais escuro
+      // (cor sólida: com transparência, as emendas entre trechos viravam bolinhas escuras)
+      stroke(rubber, 3.2, (g) => {
+        g.strokeStyle = "#47484d";
+        g.lineWidth = 3.2;
+        g.lineCap = "butt";
+      });
+      stroke(rubber, 1.6, (g) => {
+        g.strokeStyle = "#3d3e43";
+        g.lineWidth = 1.6;
+        g.lineCap = "butt";
+      });
+    }
     // linhas brancas
     for (const side of [-1, 1]) {
       const edge = this.chunks(this.line(0, L - 1, () => side * (W / 2 - 0.45), 2), true);

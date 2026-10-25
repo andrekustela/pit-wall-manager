@@ -1192,3 +1192,10 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .driver.panel button kbd { display: none; margin-left: 4px; padding: 0 3px; border: 1px solid currentColor; border-radius: 3px; font: 9px var(--pix, monospace); opacity: .55; line-height: 12px; }
 .driver.panel.follow button kbd { display: inline-block; }
 .driver.panel.follow .boxbtn::after { content: "B"; margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font: 10px var(--pix, monospace); opacity: .55; }
+/* pedido do piloto dentro do card dele (embaixo do nome) */
+.reqbox.incard { position: static; transform: none; width: auto; margin: 4px 0 6px; padding: 8px 10px 0; animation: reqin2 240ms cubic-bezier(0.23, 1, 0.32, 1); z-index: auto; box-shadow: 0 0 0 1px #ffd23f55; }
+.reqbox.incard .reqtop b { font-size: 11px; }
+.reqbox.incard .reqtop span { font-size: 13px; margin: 2px 0 6px; }
+.reqbox.incard .reqbtns .hint { display: none; }
+.reqbox.incard .reqbar { margin: 8px -10px 0; }
+@keyframes reqin2 { from { opacity: 0; transform: translateY(-4px); } }
