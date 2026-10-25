@@ -190,8 +190,6 @@ export function mountMenuBackdrop(
   let phase: "intro" | "run" | "exit" | "sweep" = "run";
   /** a pista ainda não apareceu (intro): na ida a faixa não tem o que apagar */
   let empty = false;
-  /** intro: voltando pro lugar com a pista já toda pintada */
-  let introBack = false;
   if (intro && !reduce) {
     phase = "intro";
     empty = true;
@@ -280,17 +278,6 @@ export function mountMenuBackdrop(
     p.closePath();
     return p;
   };
-  /** região à esquerda do centro da faixa */
-  const leftOfStripe = (tx: number) => {
-    const xc = (y: number) => W * (STRIPE_LEFT + STRIPE_W / 2) + tx - SKEW * (y - H * STRIPE_CY);
-    const p = new Path2D();
-    p.moveTo(-10, 0);
-    p.lineTo(xc(0) * dpr, 0);
-    p.lineTo(xc(H) * dpr, cv.height);
-    p.lineTo(-10, cv.height);
-    p.closePath();
-    return p;
-  };
   /** até onde a faixa vai pra direita (sai da tela, mesmo inclinada) */
   const farRight = () => W * (1 - STRIPE_LEFT) + W * 0.05 + H * SKEW * 0.6;
   const setStripe = (tx: number) => {
@@ -329,12 +316,10 @@ export function mountMenuBackdrop(
       pk = Math.min(1, pk + dt / (rushing ? 110 : EXIT_MS));
       const tx = easeInOut(pk) * farRight();
       setStripe(tx);
-      // intro: a faixa vai pra direita pintando a pista por onde passa (o que ficou à esquerda dela)
-      if (empty) drawScene(cur, now, leftOfStripe(tx), 0);
-      else drawScene(cur, now, rightOfStripe(tx), 0, frozenAt);
+      // intro: na ida não tem pista ainda (ela aparece na volta da faixa)
+      if (!empty) drawScene(cur, now, rightOfStripe(tx), 0, frozenAt);
       if (pk >= 1) {
-        // na intro a pista é a mesma (já pintada): a faixa só volta pro lugar; senão sorteia a próxima
-        introBack = empty;
+        // na intro a pista é a mesma (a faixa desenha ela na volta); senão sorteia a próxima
         next = empty ? cur : build(nextIdx(), now + (rushing ? 0 : SWEEP_MS * 0.35));
         if (!empty) onTrack?.(next.tr.idx);
         empty = false;
@@ -347,14 +332,12 @@ export function mountMenuBackdrop(
       const e = easeOut(pk);
       const tx = farRight() * (1 - e);
       setStripe(tx);
-      if (introBack) drawScene(next, now, null, 0);
-      else drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
+      drawScene(next, Math.max(now, next.t0), rightOfStripe(tx), 40 * (1 - e));
       if (pk >= 1) {
         cur = next;
         next = null;
         onState?.(cur.tr.idx, cur.t0);
         phase = "run";
-        introBack = false;
         setStripe(0);
         releaseStripe(lock);
       }
