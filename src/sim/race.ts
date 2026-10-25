@@ -25,6 +25,7 @@ import {
   type Driver,
   type RaceEvent,
   type FaultKind,
+  type PaceMode,
   type Team,
   type TeamOrder,
   type Tuning,
@@ -103,6 +104,10 @@ const LANE_EDGE = TRACK_WIDTH / 2 - 1.6;
 const INSIDE_LINE = 0.45;
 /** quanto a pista toda molhada tira de velocidade (curva / reta), com qualquer pneu */
 const WET_SLOW_CORNER = 0.13;
+/** quanto do dano o piloto sente em cada ritmo */
+const DMG_PACE: Record<PaceMode, number> = { push: 0.8, normal: 1, conserve: 1.15 };
+/** e quanto o dano aumenta a chance de erro em cada ritmo (carro quebrado no limite escapa) */
+const DMG_RISK: Record<PaceMode, number> = { push: 2.2, normal: 1, conserve: 0.5 };
 const WET_SLOW_STRAIGHT = 0.05;
 /** mais briga que na F1 de verdade: multiplica a chance de tentar uma ultrapassagem */
 const ATTACK_BOOST = 1.35;
@@ -394,9 +399,10 @@ export class Race {
     return partLoss(this.dmgMap, part, nominal, this.wet);
   }
 
-  /** quanto o carro perde por volta com os danos de agora (nesta pista, com essa água) */
+  /** estimativa de quanto o carro perde por volta com os danos de agora (nesta pista, com essa água,
+   * nesse ritmo); cada volta varia em volta disso */
   damageLoss(c: CarState): number {
-    return PARTS.reduce((a, p) => a + (c.dmg[p.id] > 0 ? this.partLossSec(p.id, c.dmg[p.id]) : 0), 0);
+    return DMG_PACE[c.pace] * PARTS.reduce((a, p) => a + (c.dmg[p.id] > 0 ? this.partLossSec(p.id, c.dmg[p.id]) : 0), 0);
   }
 
   /** consumo estimado por volta no modo atual do carro */
@@ -622,7 +628,7 @@ export class Race {
     // forçar no molhado é pedir pra rodar
     if (c.pace === "push") rate *= 1.8 * (1 + 2.5 * w);
     // asa traseira e suspensão traseira quebradas: traseira solta (pior ainda na chuva)
-    rate *= 1 + (0.6 * c.dmg.rw + 0.4 * c.dmg.suspR) * (1 + 2 * w);
+    rate *= 1 + (0.6 * c.dmg.rw + 0.4 * c.dmg.suspR) * (1 + 2 * w) * DMG_RISK[c.pace];
     if (c.wear > 0.9) rate *= 3;
     if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 6;
     if (c.tuning.h < this.track.def.minHeight) rate *= 1.5;
@@ -661,7 +667,7 @@ export class Race {
     rate *= 1 + 4 * this.wet * (isWetTyre(c.compound) ? 0.4 : 1.5);
     if (c.wear > 0.8) rate *= 2;
     // asa dianteira e suspensão dianteira quebradas: sai de frente, passa reto
-    rate *= 1 + 0.5 * c.dmg.fw + 0.4 * c.dmg.suspF;
+    rate *= 1 + (0.5 * c.dmg.fw + 0.4 * c.dmg.suspF) * DMG_RISK[c.pace];
     if (c.fault === "brakes") rate *= 3;
     if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 8; // pneu frio escorrega
     if (c.lap <= 0) rate *= 2;
@@ -683,7 +689,7 @@ export class Race {
       c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
       this.hitSide(c, "fw", c.offSide > 0 ? "r" : "l");
       c.damage += dmg;
-      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${this.partLossSec("fw", dmg).toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
+      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (~${this.partLossSec("fw", dmg).toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
     } else {
       this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off", c.id);
     }
@@ -732,7 +738,7 @@ export class Race {
       c.dmg = { ...c.dmg, suspR: c.dmg.suspR + dmg };
       this.hitSide(c, "suspR", c.flatWheel % 2 === 1 ? "r" : "l");
       c.damage += dmg;
-      this.log(`${c.driver.name}: o pneu furado destruiu a suspensão traseira! (+${this.partLossSec("suspR", dmg).toFixed(1)}s por volta)`, c.isHuman, c.isHuman ? c.team.id : undefined, "damage");
+      this.log(`${c.driver.name}: o pneu furado destruiu a suspensão traseira! (~${this.partLossSec("suspR", dmg).toFixed(1)}s por volta)`, c.isHuman, c.isHuman ? c.team.id : undefined, "damage");
     }
   }
 
@@ -813,7 +819,8 @@ export class Race {
         const d = c.dmg[part.id];
         if (d > 0) loss += ((d * dmgWetMult(part.id, this.wet)) / (DMG_REF[part.id] * c.profileLap)) * this.dmgMap.w[part.id][i];
       }
-      v *= 1 - Math.min(0.35, loss);
+      // atacando o piloto compensa parte (e arrisca mais); poupando perde mais (e fica seguro)
+      v *= 1 - Math.min(0.35, loss * DMG_PACE[c.pace] * (c.dmgVar ?? 1));
       // pista molhada: todo mundo mais lento, bem mais nas curvas (o pneu certo só evita o pior)
       v *= 1 - this.wet * (base < 72 ? WET_SLOW_CORNER : WET_SLOW_STRAIGHT);
     }
@@ -1194,7 +1201,7 @@ export class Race {
       victim.damage += dmg;
       this.stats.damages++;
       const name = PARTS.find((x) => x.id === part)!.label.toLowerCase();
-      this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (+${this.partLossSec(part, dmg).toFixed(1)}s por volta)`, !!team, team, "damage", victim.id);
+      this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (~${this.partLossSec(part, dmg).toFixed(1)}s por volta)`, !!team, team, "damage", victim.id);
     } else if (r < 0.94) {
       victim.spin = this.rng.range(3, 6);
       this.stats.spins++;
@@ -1373,6 +1380,12 @@ export class Race {
     if (c.lap >= 1) this.faultLap(c);
     c.lapStartTime = crossT;
     c.lapNoise = this.rng.gauss(lapNoiseSd(c.driver));
+    // com dano, cada volta sai diferente (zebra, tráfego, como o piloto se vira): ±25%, menos pra
+    // piloto constante
+    if (c.damage > 0) {
+      const spread = 0.35 - ((c.driver.profile?.consistency ?? 70) / 100) * 0.2;
+      c.dmgVar = Math.max(0.6, 1 + this.rng.gauss(spread * 0.6));
+    }
 
     const isLeader = c.position === 1 || this.leader() === c;
     if (isLeader && !this.checkered) {

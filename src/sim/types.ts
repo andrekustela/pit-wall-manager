@@ -181,6 +181,10 @@ export interface CarState {
   order: TeamOrder;
 
   lapNoise: number;
+
+  /** quanto o dano pesa nesta volta (sorteado a cada volta: o tempo perdido é estimado, varia) */
+
+  dmgVar?: number;
   lapStartTime: number;
   lastLap: number | null;
   bestLap: number | null;
