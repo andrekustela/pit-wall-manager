@@ -106,24 +106,24 @@ export const RADIO_LINES: RadioLine[] = [
   { id: "batida", who: "driver", react: true, match: / bateu|bateu no muro|preso na brita/, lines: ["Bati! Acabou pra mim. Desculpa, pessoal.", "Droga! Tô fora, o carro já era."] },
   { id: "raiva_motor", who: "driver", react: true, match: /o motor quebrou/, lines: ["O motor estourou! Que porcaria de motor!", "Quebrou o motor! Não acredito, eu tava indo bem!"] },
   { id: "raiva_comb", who: "driver", react: true, match: /ficou sem combustível/, lines: ["Fiquei sem combustível? Quem fez essa conta?!", "Acabou o combustível! Vocês erraram a conta, pessoal!"] },
-  // ---------- engenheiro ----------
-  { id: "ordem_passar", who: "engineer", match: /deixa o .* passar/, lines: ["Atenção: deixa o seu companheiro passar.", "Ordem de equipe: abre pro seu companheiro."] },
-  { id: "ordem_manter", who: "engineer", match: /^Mantenham as posições/, lines: ["Mantenham as posições, sem briga entre vocês.", "Segurem as posições. Nada de disputa entre vocês."] },
-  { id: "ordem_livre", who: "engineer", match: /^Estão liberados/, lines: ["Estão liberados pra correr.", "Liberados. Podem disputar."] },
-  { id: "plano", who: "engineer", match: /^era pra parar nesta volta/, lines: ["Era pra parar nesta volta. Vamos pro box?", "Volta da parada do plano. Chamo pro box?"] },
-  { id: "teste", who: "engineer", match: /^Rádio ligado/, lines: ["Rádio ligado. Tá me ouvindo bem?"] },
-  // ---------- engenheiro respondendo ao seu comando de voz (tocadas pelo id) ----------
-  { id: "ok_box", who: "engineer", react: true, match: /^$/, lines: ["Entendido, box nesta volta.", "Copiado. Box, box."] },
-  { id: "ok_cancela", who: "engineer", react: true, match: /^$/, lines: ["Ok, cancelado o box.", "Entendido, fica na pista."] },
-  { id: "ok_atacar", who: "engineer", react: true, match: /^$/, lines: ["Entendido, pode atacar.", "Copiado, ritmo de ataque."] },
-  { id: "ok_poupar", who: "engineer", react: true, match: /^$/, lines: ["Copiado, poupando os pneus.", "Entendido, vamos poupar."] },
-  { id: "ok_normal", who: "engineer", react: true, match: /^$/, lines: ["Ok, ritmo normal."] },
-  { id: "ok_rico", who: "engineer", react: true, match: /^$/, lines: ["Motor rico, entendido."] },
-  { id: "ok_pobre", who: "engineer", react: true, match: /^$/, lines: ["Motor pobre, copiado."] },
-  { id: "ok_motor_normal", who: "engineer", react: true, match: /^$/, lines: ["Motor no normal, ok."] },
-  { id: "ok_pneu", who: "engineer", react: true, match: /^$/, lines: ["Ok, pneu escolhido pra próxima parada.", "Copiado, já separei o pneu."] },
-  { id: "ok_ordem", who: "engineer", react: true, match: /^$/, lines: ["Entendido, vou passar a ordem.", "Copiado, ordem de equipe."] },
-  { id: "nao_entendi", who: "engineer", react: true, match: /^$/, lines: ["Não entendi, repete.", "Não copiei. Pode repetir?"] },
+  // ---------- piloto respondendo a você (o engenheiro é o jogador) ----------
+  // ordens de equipe: o aviso "Rádio: ..." é você falando; quem responde é o piloto
+  { id: "ordem_passar", who: "driver", match: /deixa o .* passar/, lines: ["Entendido, vou abrir pra ele.", "Copiado, deixo ele passar."] },
+  { id: "ordem_manter", who: "driver", match: /^Mantenham as posições/, lines: ["Entendido, mantenho a posição.", "Copiado, sem briga com o companheiro."] },
+  { id: "ordem_livre", who: "driver", match: /^Estão liberados/, lines: ["Valeu! Agora é pra valer.", "Entendido, vou pra cima."] },
+  { id: "plano", who: "driver", match: /^era pra parar nesta volta/, lines: ["Tá na volta do plano. Entro no box?", "Era pra parar agora, né? Confirma o box?"] },
+  { id: "teste", who: "driver", match: /^Rádio ligado/, lines: ["Rádio ok, tô te ouvindo bem."] },
+  // resposta ao seu comando de voz (tocadas pelo id)
+  { id: "ok_box", who: "driver", react: true, match: /^$/, lines: ["Copiado, entrando no box.", "Entendido, box nesta volta."] },
+  { id: "ok_cancela", who: "driver", react: true, match: /^$/, lines: ["Ok, fico na pista.", "Entendido, cancelado."] },
+  { id: "ok_atacar", who: "driver", react: true, match: /^$/, lines: ["Entendido, vou pra cima!", "Copiado, modo ataque."] },
+  { id: "ok_poupar", who: "driver", react: true, match: /^$/, lines: ["Copiado, vou poupar os pneus.", "Entendido, maneirando."] },
+  { id: "ok_normal", who: "driver", react: true, match: /^$/, lines: ["Ok, ritmo normal."] },
+  { id: "ok_rico", who: "driver", react: true, match: /^$/, lines: ["Motor rico, entendido."] },
+  { id: "ok_pobre", who: "driver", react: true, match: /^$/, lines: ["Copiado, motor pobre."] },
+  { id: "ok_motor_normal", who: "driver", react: true, match: /^$/, lines: ["Motor no normal, ok."] },
+  { id: "ok_pneu", who: "driver", react: true, match: /^$/, lines: ["Entendido, esse pneu na próxima parada.", "Copiado, anotado o pneu."] },
+  { id: "nao_entendi", who: "driver", react: true, match: /^$/, lines: ["Não entendi, repete?", "Não copiei. Pode repetir?"] },
 ];
 
 /** fala gravada pro aviso (texto já sem o "Rádio XXX:") */

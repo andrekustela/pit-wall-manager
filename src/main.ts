@@ -513,7 +513,7 @@ class App {
     const who = `P${slot + 1}`;
     if (!a || !car || !card) {
       toast(heard ? `🎙 "${heard}": não entendi` : "🎙 Não ouvi nada");
-      teamVoice.sayId("nao_entendi");
+      teamVoice.sayId("nao_entendi", slot);
       return;
     }
     let ack = "ok_box", what = "";
@@ -545,12 +545,12 @@ class App {
         break;
       case "order":
         click(`[data-order="${a.mode}"]`);
-        ack = "ok_ordem";
+        ack = ""; // a ordem vira rádio na corrida e o piloto responde por lá
         what = a.mode === "letPass" ? "deixar o companheiro passar" : a.mode === "hold" ? "manter posições" : "liberados";
         break;
     }
     toast(`🎙 ${who}: ${what}`);
-    teamVoice.sayId(ack);
+    if (ack) teamVoice.sayId(ack, slot);
   }
 
   private teardown() {

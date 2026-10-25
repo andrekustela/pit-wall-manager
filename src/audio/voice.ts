@@ -36,8 +36,8 @@ export function parseRadio(text: string, kind?: string): { who: Who; text: strin
   const m = /^Rádio( [^:]+)?: "(.*)"$/.exec(text);
   if (m) return { who: m[1] ? "driver" : "engineer", text: m[2], short: m[1]?.trim() };
   if (kind === "plan") {
-    const p = /^Plano [^:]+: (.*)$/.exec(text);
-    if (p) return { who: "engineer", text: p[1] };
+    const p = /^Plano ([^:]+): (.*)$/.exec(text);
+    if (p) return { who: "driver", text: p[2], short: p[1].trim() };
   }
   return null;
 }
@@ -84,7 +84,8 @@ class TeamVoice {
   radio(text: string, kind?: string): boolean {
     const r = parseRadio(text, kind);
     if (!r) return false;
-    const slot = r.short ? Math.max(0, this.drivers().findIndex((d) => d.short === r.short)) : 0;
+    // "Rádio ABC: ..." = o piloto ABC; "Rádio: ..." = você falando (ordem): responde o piloto citado
+    const slot = r.short ? Math.max(0, this.drivers().findIndex((d) => d.short === r.short)) : Math.max(0, this.slotOf(r.text));
     this.say(r.text, r.who, slot);
     return true;
   }
@@ -179,8 +180,10 @@ class TeamVoice {
       this.busy = false;
       setTimeout(() => this.next(), 250);
     };
-    this.talk(line.who === "driver" ? (this.drivers()[line.slot]?.id ?? null) : null);
     const rec = line.rec ?? radioLineFor(line.text);
+    // quem fala de verdade é o da fala gravada (ex.: ordem sua -> o piloto responde)
+    if (rec) line.who = rec.who;
+    this.talk(line.who === "driver" ? (this.drivers()[line.slot]?.id ?? null) : null);
     if (rec) {
       // fala gravada: sorteia uma versão (sem repetir a última)
       const last = this.lastVariant.get(rec.id) ?? -1;
