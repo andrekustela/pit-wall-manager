@@ -2,14 +2,21 @@
 // navegador/Windows, em português). Piloto e engenheiro com vozes diferentes; fila curta pra
 // não acumular quando a corrida está acelerada.
 import { storeGet, storeSet } from "../ui/common";
-import { RADIO_LINES, radioLineFor } from "./radioLines";
+import { RADIO_LINES, radioLineFor, reactionFor, type RadioLine } from "./radioLines";
 
 type Who = "driver" | "engineer";
 interface Line {
   text: string;
   who: Who;
   at: number;
+  /** piloto 1 ou 2 da equipe (cada um com sua voz) */
+  slot: number;
+  /** fala já escolhida (reações) */
+  rec?: RadioLine;
 }
+
+/** arquivo da fala: o 2º piloto da equipe tem voz própria (sufixo _b) */
+const clipUrl = (id: string, n: number, who: Who, slot: number) => `/radio/${id}_${n}${who === "driver" && slot === 1 ? "_b" : ""}.wav`;
 
 /** troca abreviações do texto da tela pelo jeito falado */
 function speakable(t: string): string {
@@ -25,9 +32,9 @@ function speakable(t: string): string {
 }
 
 /** "Rádio ABC: "texto"" (piloto), "Rádio: "texto"" (engenheiro), "Plano ABC: texto" (engenheiro) */
-export function parseRadio(text: string, kind?: string): { who: Who; text: string } | null {
+export function parseRadio(text: string, kind?: string): { who: Who; text: string; short?: string } | null {
   const m = /^Rádio( [^:]+)?: "(.*)"$/.exec(text);
-  if (m) return { who: m[1] ? "driver" : "engineer", text: m[2] };
+  if (m) return { who: m[1] ? "driver" : "engineer", text: m[2], short: m[1]?.trim() };
   if (kind === "plan") {
     const p = /^Plano [^:]+: (.*)$/.exec(text);
     if (p) return { who: "engineer", text: p[1] };
@@ -48,6 +55,43 @@ class TeamVoice {
   /** toca a fala gravada (com filtro de rádio); null = não tem o arquivo */
   playClip: (url: string) => Promise<number | null> = async () => null;
   private lastVariant = new Map<string, number>();
+  /** pilotos da sua equipe na corrida, na ordem (1º, 2º) */
+  drivers: () => { short: string; name: string }[] = () => [];
+
+  /** qual piloto da equipe aparece no texto (o 1º citado, ou o último com target "last"); -1 = nenhum */
+  private slotOf(text: string, target?: "last"): number {
+    let best = -1, bestPos = target ? -1 : Infinity;
+    this.drivers().forEach((d, i) => {
+      const at = [d.short, d.name].map((k) => (target ? text.lastIndexOf(k) : text.indexOf(k))).filter((x) => x >= 0);
+      if (!at.length) return;
+      const pos = target ? Math.max(...at) : Math.min(...at);
+      if (target ? pos > bestPos : pos < bestPos) {
+        bestPos = pos;
+        best = i;
+      }
+    });
+    // "A passa B": só reclama se quem foi passado é da equipe
+    if (target && best >= 0 && bestPos < text.indexOf(" passa ")) return -1;
+    return best;
+  }
+
+  /** aviso de rádio do jogo ("Rádio ABC: ...", ordens, plano): fala com a voz de quem mandou */
+  radio(text: string, kind?: string): boolean {
+    const r = parseRadio(text, kind);
+    if (!r) return false;
+    const slot = r.short ? Math.max(0, this.drivers().findIndex((d) => d.short === r.short)) : 0;
+    this.say(r.text, r.who, slot);
+    return true;
+  }
+
+  /** piloto reagindo a um evento (box lento, toque, punição...) */
+  react(text: string) {
+    const rec = reactionFor(text);
+    if (!rec || Math.random() > (rec.chance ?? 1)) return;
+    const slot = this.slotOf(text, rec.target);
+    if (slot < 0) return;
+    this.say(text, "driver", slot, rec);
+  }
 
   /** falas gravadas funcionam em qualquer navegador */
   get supported() {
@@ -78,10 +122,11 @@ class TeamVoice {
     this.busy = false;
   }
 
-  say(text: string, who: Who) {
+  /** short = sigla do piloto que está falando (decide a voz) */
+  say(text: string, who: Who, slot = 0, rec?: RadioLine) {
     if (!this.enabled || !this.supported || this.volume() <= 0) return;
     // no máximo 2 esperando: com a corrida acelerada, o que ficou velho é descartado
-    this.queue.push({ text, who, at: performance.now() });
+    this.queue.push({ text, who, at: performance.now(), slot, rec });
     while (this.queue.length > 2) this.queue.shift();
     this.next();
   }
@@ -121,15 +166,18 @@ class TeamVoice {
       this.busy = false;
       setTimeout(() => this.next(), 250);
     };
-    const rec = radioLineFor(line.text);
+    const rec = line.rec ?? radioLineFor(line.text);
     if (rec) {
       // fala gravada: sorteia uma versão (sem repetir a última)
       const last = this.lastVariant.get(rec.id) ?? -1;
       let n = Math.floor(Math.random() * rec.lines.length);
       if (rec.lines.length > 1 && n === last) n = (n + 1) % rec.lines.length;
       this.lastVariant.set(rec.id, n);
+      // reação: o texto falado é a fala (o aviso da tela é narração)
+      if (line.rec) line.text = rec.lines[n];
       this.beepIn();
-      void this.playClip(`/radio/${rec.id}_${n}.wav`).then((dur) => {
+      const play = async () => (await this.playClip(clipUrl(rec.id, n, line.who, line.slot))) ?? (line.slot ? this.playClip(clipUrl(rec.id, n, line.who, 0)) : null);
+      void play().then((dur) => {
         if (id !== this.lineId) return;
         if (dur !== null) setTimeout(done, dur * 1000 + 60);
         else this.speak(line, done, false);
@@ -143,10 +191,12 @@ class TeamVoice {
   async demo(log: (t: string) => void) {
     this.stop();
     for (const l of RADIO_LINES)
-      for (let n = 0; n < l.lines.length; n++) {
-        log(`${l.who === "driver" ? "🏎 Piloto" : "🎧 Engenheiro"}: ${l.lines[n]}`);
+      for (let n = 0; n < l.lines.length * (l.who === "driver" ? 2 : 1); n++) {
+        // piloto: toca a versão do 1º e a do 2º piloto
+        const k = n % l.lines.length, slot = n >= l.lines.length ? 1 : 0;
+        log(`${l.who === "driver" ? `🏎 Piloto ${slot + 1}` : "🎧 Engenheiro"}: ${l.lines[k]}`);
         this.beepIn();
-        const dur = await this.playClip(`/radio/${l.id}_${n}.wav`);
+        const dur = await this.playClip(clipUrl(l.id, k, l.who, slot));
         if (dur === null) {
           log("(arquivo não encontrado: rode npx tsx scripts/gen-radio.ts)");
           return;

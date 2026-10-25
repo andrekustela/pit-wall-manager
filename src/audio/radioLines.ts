@@ -11,6 +11,12 @@ export interface RadioLine {
   /** reconhece o aviso do jogo pelo texto (sem o "Rádio XXX:") */
   match: RegExp;
   lines: string[];
+  /** reação a um evento da corrida (casa com o texto inteiro do aviso, não só com o rádio) */
+  react?: boolean;
+  /** chance de falar (pra não reclamar de tudo) */
+  chance?: number;
+  /** quem fala é o carro citado por último no texto (ex.: "A passa B": fala o B) */
+  target?: "last";
 }
 
 export const RADIO_LINES: RadioLine[] = [
@@ -50,6 +56,56 @@ export const RADIO_LINES: RadioLine[] = [
   { id: "freio", who: "driver", match: /^Pedal de freio/, lines: ["Pedal de freio tá longo, vou ter que frear antes.", "O freio tá fraco, tô freando antes."] },
   { id: "potencia", who: "driver", match: /^Tô perdendo potência/, lines: ["Tô perdendo potência na reta!", "O carro tá sem força, perdi potência!"] },
   { id: "hidraulica", who: "driver", match: /^Luz da hidráulica/, lines: ["Luz da hidráulica acesa no painel!", "Alarme da hidráulica! O que eu faço?"] },
+  // ---------- piloto bravo (reações) ----------
+  {
+    id: "raiva_box",
+    who: "driver",
+    react: true,
+    match: /^Parada lenta de /,
+    lines: ["Que parada foi essa?! Perdi um tempão!", "Pô, pessoal! Que demora foi essa no box?", "De novo uma parada lenta? Assim não dá, caramba!"],
+  },
+  {
+    id: "raiva_liberacao",
+    who: "driver",
+    react: true,
+    match: /liberação insegura/,
+    lines: ["Punição por culpa do box? Vocês tão de brincadeira comigo!", "Me soltaram em cima do outro carro! Que porcaria foi essa?"],
+  },
+  {
+    id: "raiva_estrategia",
+    who: "driver",
+    react: true,
+    match: /não usou 2 compostos/,
+    lines: ["Ninguém me avisou do segundo pneu? Que vacilo, pessoal!", "Punição por erro de estratégia? Que vergonha!"],
+  },
+  {
+    id: "raiva_toque_dano",
+    who: "driver",
+    react: true,
+    match: /danificou a .* no toque com/,
+    lines: ["Ele me acertou! Esse cara é maluco!", "Você viu isso? Ele jogou o carro em cima de mim!", "Quebrou meu carro! Isso tem que ser punição!"],
+  },
+  {
+    id: "raiva_rodou_toque",
+    who: "driver",
+    react: true,
+    match: /rodou depois de um toque/,
+    lines: ["Ele me rodou! Isso tem que ser punição!", "Me tocou e me rodou! Inacreditável!"],
+  },
+  { id: "raiva_toque", who: "driver", react: true, chance: 0.5, match: /^Toque entre /, lines: ["Ei! Ele me tocou!", "Que isso, cara? Encostou em mim!"] },
+  {
+    id: "raiva_ultrapassado",
+    who: "driver",
+    react: true,
+    chance: 0.3,
+    target: "last",
+    match: /^\S+ passa \S+!$/,
+    lines: ["Ele me fechou na freada!", "Droga, perdi a posição!", "Esse carro tá voando na reta, não consigo segurar!"],
+  },
+  { id: "raiva_ordem", who: "driver", react: true, match: /cumpre a ordem e deixa/, lines: ["Tá bom, deixei passar. Mas eu era mais rápido!", "Sério isso? Tá, vou deixar ele passar."] },
+  { id: "batida", who: "driver", react: true, match: / bateu|bateu no muro|preso na brita/, lines: ["Bati! Acabou pra mim. Desculpa, pessoal.", "Droga! Tô fora, o carro já era."] },
+  { id: "raiva_motor", who: "driver", react: true, match: /o motor quebrou/, lines: ["O motor estourou! Que porcaria de motor!", "Quebrou o motor! Não acredito, eu tava indo bem!"] },
+  { id: "raiva_comb", who: "driver", react: true, match: /ficou sem combustível/, lines: ["Fiquei sem combustível? Quem fez essa conta?!", "Acabou o combustível! Vocês erraram a conta, pessoal!"] },
   // ---------- engenheiro ----------
   { id: "ordem_passar", who: "engineer", match: /deixa o .* passar/, lines: ["Atenção: deixa o seu companheiro passar.", "Ordem de equipe: abre pro seu companheiro."] },
   { id: "ordem_manter", who: "engineer", match: /^Mantenham as posições/, lines: ["Mantenham as posições, sem briga entre vocês.", "Segurem as posições. Nada de disputa entre vocês."] },
@@ -60,5 +116,10 @@ export const RADIO_LINES: RadioLine[] = [
 
 /** fala gravada pro aviso (texto já sem o "Rádio XXX:") */
 export function radioLineFor(text: string): RadioLine | undefined {
-  return RADIO_LINES.find((l) => l.match.test(text));
+  return RADIO_LINES.find((l) => !l.react && l.match.test(text));
+}
+
+/** reação do piloto a um evento da corrida (texto inteiro do aviso) */
+export function reactionFor(text: string): RadioLine | undefined {
+  return RADIO_LINES.find((l) => l.react && l.match.test(text));
 }

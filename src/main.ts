@@ -382,6 +382,9 @@ class App {
     const race = new Race(opts);
     const my = this.myTeam();
     const mine = race.cars.filter((c) => c.team.id === my).sort((a, b) => a.position - b.position);
+    // rádio: 1º e 2º piloto da equipe (ordem fixa da equipe, cada um com sua voz)
+    const teamCars = race.cars.filter((c) => c.team.id === my);
+    teamVoice.drivers = () => teamCars.map((c) => ({ short: c.driver.short, name: c.driver.name }));
     const isHost = this.lobby?.hostId === this.lobby?.you;
     const conn = this.conn!;
     const view = { race, follow: mine[0]?.id ?? race.cars[0].id, speed } as RaceView;

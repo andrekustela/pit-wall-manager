@@ -4,7 +4,7 @@
 import { storeGet, storeSet } from "../ui/common";
 import type { Race } from "../sim/race";
 import type { CarState, RaceEvent } from "../sim/types";
-import { parseRadio, teamVoice } from "./voice";
+import { teamVoice } from "./voice";
 
 /** velocidade (m/s) a 12.000 rpm em cada marcha */
 const GEAR_TOP = [22, 32, 41, 50, 59, 68, 78, 94];
@@ -408,16 +408,18 @@ class Sound {
   }
 
   radio() {
-    // chiado + dois bipes de rádio
-    this.noise(0.12, 0.08, 2500);
-    this.beep(1400, 0.06, 0.05, "square");
-    this.beep(1000, 0.06, 0.05, "square", 0.08);
+    // abre o rádio: estalo curto + "bip" limpo e agudo (como na transmissão da F1)
+    this.noise(0.05, 0.06, 3000);
+    this.beep(1760, 0.09, 0.07, "sine", 0.02);
+    this.beep(3520, 0.05, 0.012, "sine", 0.02);
   }
 
   /** fim da fala no rádio: bipe curto */
   radioOut() {
-    this.noise(0.08, 0.05, 2500);
-    this.beep(900, 0.05, 0.04, "square", 0.02);
+    // fecha o rádio: "bip-bip" descendo + chiado cortando
+    this.beep(1760, 0.06, 0.06, "sine");
+    this.beep(1320, 0.08, 0.06, "sine", 0.08);
+    this.noise(0.09, 0.05, 2600);
   }
 
   go() {
@@ -453,6 +455,8 @@ class Sound {
   events(list: RaceEvent[], myTeam: string) {
     for (const e of list) {
       const mine = e.teamId === myTeam;
+      // piloto reclamando no rádio (box lento, toque, punição, abandono...)
+      if (mine && teamVoice.enabled && e.kind && REACT_KINDS.has(e.kind)) teamVoice.react(e.text);
       switch (e.kind) {
         case "start": this.go(); break;
         case "radio":
@@ -460,9 +464,7 @@ class Sound {
         case "fault": {
           if (!mine) break;
           // rádio falado (com bipe/chiado na voz); desligado, só o bipe
-          const r = teamVoice.enabled ? parseRadio(e.text, e.kind) : null;
-          if (r) teamVoice.say(r.text, r.who);
-          else this.radio();
+          if (!(teamVoice.enabled && teamVoice.radio(e.text, e.kind))) this.radio();
           break;
         }
         case "pitout": if (mine) this.pitWrench(); break;
@@ -478,6 +480,9 @@ class Sound {
     }
   }
 }
+
+/** eventos que podem gerar reação do piloto no rádio */
+const REACT_KINDS = new Set(["pitin", "penalty", "damage", "spin", "crash", "out", "overtake", "touch"]);
 
 export const sound = new Sound();
 teamVoice.volume = () => (sound.muted ? 0 : sound.volume);
