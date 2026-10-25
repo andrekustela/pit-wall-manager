@@ -21,6 +21,23 @@ function driveCurve(amount: number): Float32Array {
   return curve;
 }
 
+/** cada equipe com um tom de motor um pouco diferente (até ~6%), pra distinguir quem passa */
+function teamTone(id: string): number {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return 0.94 + ((Math.abs(h) % 13) / 12) * 0.12;
+}
+
+/** grupos de volume (mixer): o jogador ajusta cada um; música fica no player */
+export type MixGroup = "motor" | "ambiente" | "efeitos" | "radio" | "musica";
+export const MIX_GROUPS: { id: MixGroup; label: string }[] = [
+  { id: "motor", label: "Motores" },
+  { id: "ambiente", label: "Torcida e chuva" },
+  { id: "efeitos", label: "Efeitos" },
+  { id: "radio", label: "Rádio" },
+  { id: "musica", label: "Música" },
+];
+
 /** uma "voz" de motor: harmônicos + distorção + filtro + assobio do turbo */
 class EngineVoice {
   private oscs: OscillatorNode[] = [];
@@ -105,7 +122,7 @@ class EngineVoice {
     const throttle = accel > -4 ? 1 : 0.25;
     this.cut = Math.max(0, this.cut - dt);
 
-    const base = (rpm / 60) * 1.5 * doppler; // ~150 a 300 Hz
+    const base = (rpm / 60) * 1.5 * doppler * teamTone(car.team.id); // ~150 a 300 Hz (cada equipe com seu tom)
     for (const o of this.oscs) o.frequency.setTargetAtTime(base * (o as OscillatorNode & { mult: number }).mult, t, 0.015);
     const rf = rpm / MAX_RPM;
     this.filter.frequency.setTargetAtTime(700 + throttle * rf * rf * 5200, t, 0.03);
@@ -131,6 +148,18 @@ class EngineVoice {
 class Sound {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** grupos: o nível do jogador (mix) e, pra motor/ambiente, um abaixador quando o rádio fala */
+  private bus!: Record<Exclude<MixGroup, "musica">, GainNode>;
+  private duck!: GainNode;
+  mix: Record<MixGroup, number> = (() => {
+    const d: Record<MixGroup, number> = { motor: 1, ambiente: 1, efeitos: 1, radio: 1, musica: 1 };
+    try {
+      return { ...d, ...(JSON.parse(storeGet("pwm.mix") || "{}") as Partial<Record<MixGroup, number>>) };
+    } catch {
+      return d;
+    }
+  })();
+  private crowdBoost = 0;
   private main: EngineVoice | null = null;
   private passBy: EngineVoice | null = null;
   private passDist = new Map<string, number>();
@@ -169,6 +198,16 @@ class Sound {
     comp.threshold.value = -14;
     comp.ratio.value = 4;
     this.master.connect(comp).connect(this.ctx.destination);
+    // motor e ambiente passam pelo "abaixador" (rádio falando); efeitos e rádio vão direto
+    this.duck = this.ctx.createGain();
+    this.duck.connect(this.master);
+    const mk = (to: AudioNode, k: MixGroup) => {
+      const g = this.ctx!.createGain();
+      g.gain.value = this.mix[k];
+      g.connect(to);
+      return g;
+    };
+    this.bus = { motor: mk(this.duck, "motor"), ambiente: mk(this.duck, "ambiente"), efeitos: mk(this.master, "efeitos"), radio: mk(this.master, "radio") };
     const len = this.ctx.sampleRate * 2;
     this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
@@ -187,6 +226,23 @@ class Sound {
   onChange(fn: () => void) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** muda o volume de um grupo (0..1) */
+  setMix(k: MixGroup, v: number) {
+    this.mix[k] = Math.max(0, Math.min(1, v));
+    storeSet("pwm.mix", JSON.stringify(this.mix));
+    if (this.ctx && k !== "musica") this.bus[k].gain.setTargetAtTime(this.mix[k], this.ctx.currentTime, 0.05);
+    this.listeners.forEach((f) => f());
+  }
+
+  /** rádio falando: motor e ambiente baixam (~8 dB) e voltam devagar no fim */
+  duckFor(seconds: number) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, g = this.duck.gain;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(0.4, t, 0.05);
+    g.setTargetAtTime(1, t + seconds + 0.15, 0.25);
   }
 
   toggleMute() {
@@ -219,8 +275,8 @@ class Sound {
     const c = this.ctx;
     this.stopRace();
     const noise = (dur: number, vol: number, freq: number) => this.noise(dur, vol, freq);
-    this.main = new EngineVoice(c, this.master, noise);
-    this.passBy = new EngineVoice(c, this.master, noise);
+    this.main = new EngineVoice(c, this.bus.motor, noise);
+    this.passBy = new EngineVoice(c, this.bus.motor, noise);
 
     // chuva: ruído agudo
     const rs = this.noiseSource();
@@ -229,7 +285,7 @@ class Sound {
     rf.frequency.value = 1800;
     const rg = c.createGain();
     rg.gain.value = 0;
-    rs.connect(rf).connect(rg).connect(this.master);
+    rs.connect(rf).connect(rg).connect(this.bus.ambiente);
     rs.start();
     this.rain = { gain: rg };
 
@@ -241,7 +297,7 @@ class Sound {
     cf.Q.value = 0.6;
     const cg = c.createGain();
     cg.gain.value = 0.015;
-    cs.connect(cf).connect(cg).connect(this.master);
+    cs.connect(cf).connect(cg).connect(this.bus.ambiente);
     cs.start();
     this.crowd = { gain: cg };
     this.lightsShown = -1;
@@ -301,7 +357,9 @@ class Sound {
     } else this.passBy!.update(null, dt, 0);
 
     this.rain!.gain.gain.setTargetAtTime(race.rain * 0.12, t, 0.5);
-    this.crowd!.gain.gain.setTargetAtTime(race.checkered ? 0.06 : 0.015, t, 0.8);
+    // torcida: cresce nas ultrapassagens, na última volta e na bandeirada, e volta devagar
+    this.crowdBoost *= Math.exp(-dt / Math.max(1, speed) / 2.5);
+    this.crowd!.gain.gain.setTargetAtTime((race.checkered ? 0.06 : 0.015) + this.crowdBoost, t, 0.35);
 
     // luzes de largada: um bip por luz
     if (race.phase === "lights") {
@@ -356,7 +414,8 @@ class Sound {
     sat.curve = driveCurve(6) as Float32Array<ArrayBuffer>;
     const g = c.createGain();
     g.gain.value = 0.55;
-    src.connect(hp).connect(lp).connect(mid).connect(sat).connect(g).connect(this.master);
+    src.connect(hp).connect(lp).connect(mid).connect(sat).connect(g).connect(this.bus.radio);
+    this.duckFor(buf.duration + 0.12);
     const t = c.currentTime + 0.12;
     src.start(t);
     // chiado do rádio durante a fala
@@ -368,20 +427,20 @@ class Sound {
     nf.frequency.value = 2600;
     const ng = c.createGain();
     ng.gain.value = 0.018;
-    n.connect(nf).connect(ng).connect(this.master);
+    n.connect(nf).connect(ng).connect(this.bus.radio);
     n.start(t);
     n.stop(t + buf.duration + 0.05);
     return buf.duration + 0.12;
   }
 
-  beep(freq: number, dur: number, vol = 0.1, type: OscillatorType = "square", delay = 0) {
+  beep(freq: number, dur: number, vol = 0.1, type: OscillatorType = "square", delay = 0, group: "efeitos" | "radio" = "efeitos") {
     if (!this.ctx) return;
     const c = this.ctx;
     const o = c.createOscillator();
     const g = c.createGain();
     o.type = type;
     o.frequency.value = freq;
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.bus[group]);
     const t = c.currentTime + delay;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(vol, t + 0.005);
@@ -390,14 +449,14 @@ class Sound {
     o.stop(t + dur + 0.05);
   }
 
-  private noise(dur: number, vol: number, freq: number, type: BiquadFilterType = "bandpass") {
+  private noise(dur: number, vol: number, freq: number, type: BiquadFilterType = "bandpass", group: "efeitos" | "radio" = "efeitos") {
     if (!this.ctx || !this.noiseBuf) return;
     const src = this.noiseSource();
     const f = this.ctx.createBiquadFilter();
     f.type = type;
     f.frequency.value = freq;
     const g = this.ctx.createGain();
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(this.bus[group]);
     this.env(g, vol, 0.005, dur);
     src.start();
     src.stop(this.ctx.currentTime + dur + 0.05);
@@ -409,17 +468,17 @@ class Sound {
 
   radio() {
     // abre o rádio: estalo curto + "bip" limpo e agudo (como na transmissão da F1)
-    this.noise(0.05, 0.06, 3000);
-    this.beep(1760, 0.09, 0.07, "sine", 0.02);
-    this.beep(3520, 0.05, 0.012, "sine", 0.02);
+    this.noise(0.05, 0.06, 3000, "bandpass", "radio");
+    this.beep(1760, 0.09, 0.07, "sine", 0.02, "radio");
+    this.beep(3520, 0.05, 0.012, "sine", 0.02, "radio");
   }
 
   /** fim da fala no rádio: bipe curto */
   radioOut() {
     // fecha o rádio: "bip-bip" descendo + chiado cortando
-    this.beep(1760, 0.06, 0.06, "sine");
-    this.beep(1320, 0.08, 0.06, "sine", 0.08);
-    this.noise(0.09, 0.05, 2600);
+    this.beep(1760, 0.06, 0.06, "sine", 0, "radio");
+    this.beep(1320, 0.08, 0.06, "sine", 0.08, "radio");
+    this.noise(0.09, 0.05, 2600, "bandpass", "radio");
   }
 
   go() {
@@ -427,7 +486,13 @@ class Sound {
   }
 
   pitWrench() {
-    for (let i = 0; i < 4; i++) setTimeout(() => this.noise(0.18, 0.12, 3200, "highpass"), i * 160);
+    // macaco baixando (pancada grave), as 4 pistolas e um grito curto da equipe soltando o carro
+    this.noise(0.22, 0.2, 140, "lowpass");
+    for (let i = 0; i < 4; i++) setTimeout(() => this.noise(0.18, 0.12, 3200, "highpass"), 120 + i * 150);
+    setTimeout(() => {
+      this.noise(0.25, 0.09, 140, "lowpass");
+      this.noise(0.3, 0.05, 900, "bandpass");
+    }, 820);
   }
 
   crash() {
@@ -468,11 +533,12 @@ class Sound {
           break;
         }
         case "pitout": if (mine) this.pitWrench(); break;
-        case "crash": this.crash(); break;
+        case "crash": this.crash(); this.crowdBoost += 0.05; break;
+        case "overtake": this.crowdBoost = Math.min(0.08, this.crowdBoost + 0.025); break;
         case "spin": if (mine) this.noise(0.4, 0.15, 900); break;
         case "sc": this.alarm(); break;
         case "green": this.go(); break;
-        case "lastlap": this.beep(1047, 0.15, 0.08, "square"); this.beep(1047, 0.15, 0.08, "square", 0.2); break;
+        case "lastlap": this.beep(1047, 0.15, 0.08, "square"); this.beep(1047, 0.15, 0.08, "square", 0.2); this.crowdBoost += 0.05; break;
         case "checkered": this.fanfare(); break;
         case "rain": this.thunderRain(); break;
         case "fastest": if (mine) this.beep(1568, 0.12, 0.06, "triangle"); break;

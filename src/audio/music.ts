@@ -44,7 +44,7 @@ class Music {
   }
 
   private target() {
-    return this.enabled && !sound.muted ? sound.volume * MUSIC_LEVEL : 0;
+    return this.enabled && !sound.muted ? sound.volume * MUSIC_LEVEL * sound.mix.musica : 0;
   }
 
   private applyVolume() {

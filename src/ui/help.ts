@@ -1,4 +1,4 @@
-import { sound } from "../audio/sound";
+import { MIX_GROUPS, sound, type MixGroup } from "../audio/sound";
 import { music } from "../audio/music";
 import { teamVoice } from "../audio/voice";
 import { voiceCmd } from "../audio/voiceCmd";
@@ -156,6 +156,11 @@ export class HelpWidget {
     document.addEventListener("pointerdown", (e) => {
       if (!player.hidden && !player.contains(e.target as Node) && e.target !== mb) player.hidden = true;
     });
+    // mixer: um controle por grupo de som (motor, torcida/chuva, efeitos, rádio, música)
+    player.addEventListener("input", (e) => {
+      const r = e.target as HTMLInputElement;
+      if (r.dataset.mix) sound.setMix(r.dataset.mix as MixGroup, Number(r.value) / 100);
+    });
     player.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
       const b = t.closest<HTMLElement>("[data-mp]");
@@ -173,6 +178,7 @@ export class HelpWidget {
       player.innerHTML = `<div class="mphead"><b>🎵 MÚSICAS</b><span class="hint" style="margin:0">tocam fora da corrida</span></div>
         <div class="mpnow">${music.enabled && music.current ? `Tocando: <b>${esc(music.current.title)}</b>` : music.enabled ? "Começa no próximo clique / fora da corrida" : "Música desligada"}</div>
         <div class="mpbtns"><button class="btn small" data-mp="prev" title="Anterior">⏮</button><button class="btn small ${music.enabled ? "" : "primary"}" data-mp="toggle">${music.enabled ? "DESLIGAR" : "LIGAR"}</button><button class="btn small" data-mp="next" title="Próxima">⏭</button></div>
+        <div class="mpmix"><b>🎚 VOLUMES</b>${MIX_GROUPS.map((g) => `<label><span>${g.label}</span><input type="range" min="0" max="100" data-mix="${g.id}" value="${Math.round(sound.mix[g.id] * 100)}"></label>`).join("")}</div>
         <div class="mplist">${list
           .map((t, i) => `<button class="mptrack ${music.current?.file === t.file && music.enabled ? "on" : ""}" data-track="${esc(t.file)}"><span>${i + 1}</span>${esc(t.title)}${music.current?.file === t.file && music.enabled ? " <i>♪</i>" : ""}</button>`)
           .join("")}</div>`;
