@@ -102,6 +102,8 @@ const LANE_STEP = 3.4;
 const LANE_EDGE = TRACK_WIDTH / 2 - 1.6;
 /** quanto o lado de dentro da curva encurta o caminho (0 = nada, 1 = geometria pura) */
 const INSIDE_LINE = 0.45;
+/** quanto a velocidade de lado pode mudar por segundo (m/s²) */
+const LAT_ACC = 7;
 /** quanto a pista toda molhada tira de velocidade (curva / reta), com qualquer pneu */
 const WET_SLOW_CORNER = 0.13;
 /** quanto do dano o piloto sente em cada ritmo */
@@ -1130,11 +1132,13 @@ export class Race {
   /** move pro lado sem fechar quem está emparelhado */
   private moveLateral(c: CarState, dt: number) {
     if (c.spin > 0) {
+      c.latV = 0;
       c.lateral += Math.max(-3 * dt, Math.min(3 * dt, -9 - c.lateral)); // rodando, escorrega pra fora
       return;
     }
     if (c.offTrack > 0) {
       // escapando pra fora da curva
+      c.latV = 0;
       const out = c.offSide * (TRACK_WIDTH / 2 + 6);
       c.lateral += Math.max(-5 * dt, Math.min(5 * dt, out - c.lateral));
       return;
@@ -1142,7 +1146,16 @@ export class Race {
     // acompanha o traçado ideal mesmo quando ele cruza a pista rápido (na reta, a 80 m/s)
     const lineRate = c.pit === "none" ? (Math.abs(this.track.lineAt(c.s + 5) - this.track.lineAt(c.s)) / 5) * c.v : 0;
     const rate = 2.6 + Math.min(4, lineRate);
-    const step = Math.max(-rate * dt, Math.min(rate * dt, c.lateralTarget - c.lateral));
+    // com inércia: a velocidade de lado muda aos poucos (senão o carro "deslizava" de lado de um quadro
+    // pro outro) e diminui chegando no ponto (sem passar e voltar)
+    const gap = c.lateralTarget - c.lateral;
+    const want = Math.max(-rate, Math.min(rate, gap * 1.8));
+    const acc = LAT_ACC * dt;
+    let vl = c.latV ?? 0;
+    vl += Math.max(-acc, Math.min(acc, want - vl));
+    if (Math.abs(gap) < 0.02 && Math.abs(vl) < 0.1) vl = 0;
+    c.latV = vl;
+    const step = vl * dt;
     if (step === 0) return;
     const next = c.lateral + step;
     for (const o of this.cars) {
@@ -1150,7 +1163,10 @@ export class Race {
       if (Math.abs(this.rel(c, o)) > CAR_L + 0.8) continue;
       const now = Math.abs(c.lateral - o.lateral);
       const after = Math.abs(next - o.lateral);
-      if (after < CAR_W + 0.25 && after < now) return; // tem carro do lado: espera
+      if (after < CAR_W + 0.25 && after < now) {
+        c.latV = 0; // tem carro do lado: espera
+        return;
+      }
     }
     c.lateral = Math.max(-LANE_EDGE - 0.5, Math.min(LANE_EDGE + 0.5, next));
   }
@@ -1171,10 +1187,18 @@ export class Race {
         const rear = front === a ? b : a;
         if (overlap) {
           // separa
-          const push = (CAR_W * 0.88 - Math.abs(dl)) / 2 + 0.05;
+          // separa aos poucos (rápido, mas sem pular de lado de um quadro pro outro): cada um ganha
+          // velocidade de lado pra longe do outro
+          const push = Math.min((CAR_W * 0.88 - Math.abs(dl)) / 2 + 0.05, 3.5 * dt + 0.02);
           const dir = dl >= 0 ? 1 : -1;
-          if (!a.retired) a.lateral = Math.max(-LANE_EDGE - 0.5, a.lateral - push * dir);
-          if (!b.retired) b.lateral = Math.min(LANE_EDGE + 0.5, b.lateral + push * dir);
+          if (!a.retired) {
+            a.lateral = Math.max(-LANE_EDGE - 0.5, a.lateral - push * dir);
+            a.latV = -dir * Math.max(2.5, -dir * (a.latV ?? 0));
+          }
+          if (!b.retired) {
+            b.lateral = Math.min(LANE_EDGE + 0.5, b.lateral + push * dir);
+            b.latV = dir * Math.max(2.5, dir * (b.latV ?? 0));
+          }
           rear.v = Math.min(rear.v, front.v * 0.95);
           const rel = Math.abs(a.v - b.v);
           this.maybeContact(a, b, rear, Math.min(0.9, 0.2 + rel * 0.04) * (1 + this.wet));

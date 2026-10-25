@@ -228,9 +228,9 @@ export class Renderer {
         off = Math.max(-0.6, Math.min(0.6, angDiff(q.h, chord + angDiff(p0.h, q.h) / 2)));
       }
       // carro de verdade não gira de uma vez: quando ele muda de lado de repente (começa a ultrapassar,
-      // desvia), o bico acompanha em ~0,1 s em vez de pular
+      // desvia), o bico acompanha em ~0,06 s em vez de pular
       const was = this.yawOff.get(c.id) ?? off;
-      const sm = was + (off - was) * (1 - Math.exp(-Math.max(0, realDt) * speed / 0.1));
+      const sm = was + (off - was) * (1 - Math.exp(-Math.max(0, realDt) * speed / 0.06));
       this.yawOff.set(c.id, sm);
       q.h += sm;
       pos.set(c.id, q);

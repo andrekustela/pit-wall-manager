@@ -182,6 +182,10 @@ export interface CarState {
 
   lapNoise: number;
 
+  /** velocidade de lado (m/s): o carro acelera e freia de lado aos poucos, como um carro de verdade */
+
+  latV?: number;
+
   /** quanto o dano pesa nesta volta (sorteado a cada volta: o tempo perdido é estimado, varia) */
 
   dmgVar?: number;
