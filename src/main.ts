@@ -113,7 +113,18 @@ class App {
       : l && !l.solo
         ? "Você sai da sala online (a IA assume o seu carro)."
         : "Este jogo vai ser encerrado.";
-    const ok = await confirmDialog({ title: "Voltar ao menu", icon: "⌂", text, ok: "IR PRO MENU", cancel: "CONTINUAR JOGANDO" });
+    // host numa sala online: também dá pra encerrar a corrida/fim de semana de todo mundo (voltam pro lobby)
+    const host = !!l && !l.solo && l.hostId === l.you && l.phase !== "lobby";
+    const ok = await confirmDialog({
+      title: "Voltar ao menu",
+      icon: "⌂",
+      text: host ? `${text}
+Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` : text,
+      ok: host ? "SÓ EU SAIO" : "IR PRO MENU",
+      cancel: "CONTINUAR JOGANDO",
+      alt: host ? "ENCERRAR PRA TODOS" : undefined,
+      onAlt: () => this.conn?.send({ t: "abort" }),
+    });
     if (ok && this.inGame()) {
       this.autoSetup = null;
       this.leave();

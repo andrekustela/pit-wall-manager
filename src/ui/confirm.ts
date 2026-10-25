@@ -9,6 +9,9 @@ export interface ConfirmOptions {
   /** botão de confirmar em vermelho (ação que não dá pra desfazer) */
   danger?: boolean;
   icon?: string;
+  /** terceiro botão (ex.: "encerrar pra todos"): clicar chama onAlt e fecha sem confirmar */
+  alt?: string;
+  onAlt?: () => void;
 }
 
 export function confirmDialog(o: ConfirmOptions): Promise<boolean> {
@@ -20,6 +23,7 @@ export function confirmDialog(o: ConfirmOptions): Promise<boolean> {
       <div class="confirmtext">${esc(o.text).replace(/\n/g, "<br>")}</div>
       <div class="row-btns" style="justify-content:flex-end">
         <button class="btn" data-no>${esc(o.cancel ?? "CANCELAR")}</button>
+        ${o.alt ? `<button class="btn primary" data-alt>${esc(o.alt)}</button>` : ""}
         <button class="btn ${o.danger ? "primary" : "okbtn"}" data-yes>${esc(o.ok ?? "CONFIRMAR")}</button>
       </div>
     </div>`;
@@ -41,6 +45,10 @@ export function confirmDialog(o: ConfirmOptions): Promise<boolean> {
       const t = e.target as HTMLElement;
       if (t === m || t.closest("[data-no]")) done(false);
       else if (t.closest("[data-yes]")) done(true);
+      else if (t.closest("[data-alt]")) {
+        done(false);
+        o.onAlt?.();
+      }
     });
     window.addEventListener("keydown", onKey, true);
     document.body.appendChild(m);
