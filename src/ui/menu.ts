@@ -15,6 +15,7 @@ import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen } from "./transition";
+import { car3dPref } from "../render/car3d";
 import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -440,6 +441,8 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
       <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="p-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
       <label class="fld"><span>Nome da equipe (vazio = nome original)</span><input class="txt" id="p-team" maxlength="24" placeholder="Ex.: Kustela Racing" value="${esc(team)}"></label>
       <button class="m2btn small profliv" data-liv><b>🎨 PINTURA DO CARRO E EMBLEMA</b><i>▶</i></button>
+      <div class="fld"><span>Carros na pista</span><div class="seg" data-carstyle>
+        <button data-v="3d" class="${car3dPref.on ? "on" : ""}">3D</button><button data-v="2d" class="${car3dPref.on ? "" : "on"}">2D CLÁSSICO</button></div></div>
       <h3 class="m2psub">RECORDES NO MENU</h3>
       <p class="hint" style="margin:-2px 0 8px">Embaixo do nome da pista aparece o melhor tempo e, na pista, os 3 melhores.</p>
       <div class="fld"><span>Contar tempos de</span><div class="seg" data-recmode>
@@ -470,6 +473,7 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
     storeSet("pwm.team", t);
     if (n) account.setNames(n, t);
     const pick = (sel: string) => m.querySelector<HTMLElement>(`${sel} .on`)?.dataset.v;
+    car3dPref.set(pick("[data-carstyle]") !== "2d");
     setRecPrefs({ mode: (pick("[data-recmode]") as RecMode) ?? rp.mode, scope: (pick("[data-recscope]") as RecScope) ?? rp.scope });
     close();
     onDone();
@@ -479,7 +483,7 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
   m.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t === m || t.closest("[data-x]")) return close();
-    const seg = t.closest<HTMLButtonElement>("[data-recmode] button, [data-recscope] button");
+    const seg = t.closest<HTMLButtonElement>("[data-recmode] button, [data-recscope] button, [data-carstyle] button");
     if (seg && !seg.disabled) seg.parentElement!.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === seg));
     if (t.closest("[data-save]")) return save();
     if (t.closest("[data-logout]")) {

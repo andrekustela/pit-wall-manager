@@ -1,5 +1,6 @@
 import type { Race } from "../sim/race";
-import { CAR_LEN_M, carImage } from "./carArt";
+import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
+import { car3dImage, car3dPref, wingPiece, wingStateOf, type WingState } from "./car3d";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH } from "../sim/track";
 
@@ -179,6 +180,10 @@ export class Renderer {
   }
 
   private pos = new Map<string, { x: number; y: number; h: number }>();
+  /** estado da asa dianteira visto no último quadro (pra soltar o pedaço quando ela quebra) */
+  private wingSeen = new Map<string, WingState>();
+  /** pedaços de asa voando / caídos na pista (metros do mundo) */
+  private debris: { img: CarImage; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
   readonly interp = new Map<string, { s: number; lat: number }>();
   /** online: etiqueta dos carros dos jogadores mostra o engenheiro */
@@ -253,6 +258,21 @@ export class Renderer {
     this.screenPos.clear();
     const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
     const sorted = [...race.cars].sort((a, b) => Number(a.id === this.followId) - Number(b.id === this.followId));
+    // pedaços de asa: voam um pouco, escorregam e ficam na pista até sumir
+    const dt = Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed || 1));
+    this.debris = this.debris.filter((d) => (d.t += dt) < 14);
+    for (const d of this.debris) {
+      const f = Math.exp(-2.2 * dt);
+      d.vx *= f;
+      d.vy *= f;
+      d.spin *= Math.exp(-1.6 * dt);
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.h += d.spin * dt;
+      const air = d.t < 0.6 ? 1 + 0.35 * Math.sin((d.t / 0.6) * Math.PI) : 1; // no ar parece maior
+      const { x, y } = toCss(d);
+      this.drawCar(o, x, y, d.h, d.img, m * air, d.t > 11 ? (14 - d.t) / 3 : 1);
+    }
     for (const c of sorted) {
       const p = pos.get(c.id)!;
       const { x, y } = toCss(p);
@@ -260,7 +280,10 @@ export class Renderer {
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
-      this.drawCar(o, x, y, p.h + (c.spin > 0 ? c.spin * 2.2 : 0), carImage(c.team, rainLight), m, c.retired ? 0.6 : 1);
+      const ws = wingStateOf(c.id, c.dmg?.fw ?? 0);
+      this.dropWing(c, ws, p);
+      const img = (car3dPref.on && car3dImage(c.team, rainLight, ws)) || carImage(c.team, rainLight);
+      this.drawCar(o, x, y, p.h + (c.spin > 0 ? c.spin * 2.2 : 0), img, m, c.retired ? 0.6 : 1);
       if (c.retired) this.smoke(o, x, y, m);
     }
 
@@ -312,6 +335,22 @@ export class Renderer {
   }
 
   private tunnelPaths: ReturnType<typeof tunnelPaths> | null = null;
+
+  /** a asa dianteira quebrou neste quadro: solta o pedaço que saiu (ele voa pra frente, girando) */
+  private dropWing(c: Race["cars"][number], ws: WingState, p: { x: number; y: number; h: number }) {
+    const prev = this.wingSeen.get(c.id);
+    this.wingSeen.set(c.id, ws);
+    if (prev === undefined || prev === ws || ws === "ok" || !car3dPref.on) return;
+    // o que saiu: a asa toda, ou a metade que não ficou no carro
+    const part = prev === "ok" ? (ws === "none" ? "full" : ws === "left" ? "right" : "left") : prev === "left" ? "left" : "right";
+    const piece = wingPiece(c.team, part);
+    if (!piece) return;
+    const fx = Math.cos(p.h), fy = Math.sin(p.h), side = (Math.random() - 0.5) * 8;
+    // sai de onde a asa estava (na frente do carro) e gira em volta de si mesma
+    const x = p.x + fx * piece.dx - fy * piece.dy, y = p.y + fy * piece.dx + fx * piece.dy;
+    this.debris.push({ img: piece.img, x, y, h: p.h, vx: fx * c.v * 0.55 - fy * side, vy: fy * c.v * 0.55 + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
+    if (this.debris.length > 12) this.debris.shift();
+  }
 
   private drawCar(o: CanvasRenderingContext2D, x: number, y: number, h: number, img: ReturnType<typeof carImage>, m: number, alpha: number) {
     o.save();

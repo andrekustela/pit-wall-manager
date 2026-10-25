@@ -277,10 +277,16 @@ function bodyPath(g: CanvasRenderingContext2D) {
 
 /** estilos de pintura (desenhados por cima da cor principal, dentro da carroceria) */
 function paintPattern(g: CanvasRenderingContext2D, lv: Livery) {
-  const c = lv.patternColor;
   g.save();
   bodyPath(g);
   g.clip();
+  patternShapes(g, lv);
+  g.restore();
+}
+
+/** as formas de cada estilo, em metros do desenho (frente pra +x); o carro 3D também usa */
+export function patternShapes(g: CanvasRenderingContext2D, lv: Livery) {
+  const c = lv.patternColor;
   g.fillStyle = c;
   const poly = (pts: number[][]) => {
     g.beginPath();
@@ -322,7 +328,6 @@ function paintPattern(g: CanvasRenderingContext2D, lv: Livery) {
       g.fillRect(-2.5, -0.3, 0.45, 0.6);
       break;
   }
-  g.restore();
 }
 
 /** safety car: esportivo amarelo (estilo superesportivo italiano), giroflex no teto */
