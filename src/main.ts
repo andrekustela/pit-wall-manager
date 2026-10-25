@@ -415,10 +415,46 @@ class App {
     const isHost = this.lobby?.hostId === this.lobby?.you;
     const conn = this.conn!;
     const view = { race, follow: mine[0]?.id ?? race.cars[0].id, speed } as RaceView;
-    const setFollow = (id: string) => {
+    // modo TV: a câmera corta sozinha pra disputa mais apertada (escolher um piloto desliga)
+    let tv = false, tvSwitch = 0;
+    const follow = (id: string) => {
       view.follow = id;
       view.renderer.followId = id;
       view.hud.update();
+    };
+    const setFollow = (id: string) => {
+      if (tv) {
+        tv = false;
+        view.hud.setTv(false);
+      }
+      follow(id);
+    };
+    const toggleTv = () => {
+      tv = !tv;
+      tvSwitch = 0;
+      view.hud.note(tv ? "📺 Modo TV ligado: a câmera segue as disputas" : "📺 Modo TV desligado");
+      return tv;
+    };
+    const tvPick = () => {
+      if (!tv || race.time - tvSwitch < 7) return;
+      const order = race.ordered().filter((c) => !c.retired && !c.finished && c.pit === "none");
+      const gapOf = (i: number) => (race.dist(order[i - 1]) - race.dist(order[i])) / Math.max(25, order[i].v);
+      // a atual ainda está brigando: fica nela
+      const cur = order.findIndex((c) => c.id === view.follow);
+      if (cur > 0 && gapOf(cur) < 1.3) return;
+      let best = -1, score = Infinity;
+      for (let i = 1; i < order.length; i++) {
+        const g = gapOf(i);
+        if (g < 1.2 && g + i * 0.04 < score) {
+          score = g + i * 0.04;
+          best = i;
+        }
+      }
+      const id = best > 0 ? order[best].id : order[0]?.id;
+      if (id && id !== view.follow) {
+        tvSwitch = race.time;
+        follow(id);
+      }
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
     view.renderer.showEngineers = !this.lobby?.solo;
@@ -454,6 +490,7 @@ class App {
       setSpeed,
       send: (cmd) => conn.send({ t: "cmd", cmd }),
       skip: () => conn.send({ t: "skip" }),
+      toggleTv,
     });
     view.minimap = new Minimap(view.hud.minimapCanvas, race, setFollow);
     view.onKey = (e: KeyboardEvent) => {
@@ -479,6 +516,7 @@ class App {
         const eng = { KeyZ: "rich", KeyX: "normal", KeyC: "lean" }[k] as EngineMode | undefined;
         if (eng) this.act(view, { kind: "engine", slot, mode: eng }, slot);
       }
+      if (e.code === "KeyT") view.hud.setTv(toggleTv());
       if (e.key === "Tab" && mine.length) {
         e.preventDefault();
         const i = mine.findIndex((c) => c.id === view.follow);
@@ -508,6 +546,7 @@ class App {
         this.soundEvents = race.events.length;
       }
       this.requests?.tick(my);
+      tvPick();
       view.minimap.draw(view.follow);
       view.hud.drawOnboard(realDt, view.renderer.interp);
       view.renderer.setBottomInset(view.hud.coverHeight() * 0.85);

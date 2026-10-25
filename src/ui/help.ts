@@ -79,7 +79,7 @@ const CONTENT: Record<Tab, string> = {
       <li><b>Tab</b>: alternar a câmera entre seus dois pilotos</li>
       <li><b>B</b>: chamar / cancelar o box do piloto seguido</li>
       <li><b>Q / W / E</b>: ritmo atacar / normal / poupar · <b>Z / X / C</b>: motor rico / normal / pobre (no piloto seguido; a letra aparece no botão)</li>
-      <li><b>P</b>: esconder / mostrar a classificação</li>
+      <li><b>P</b>: esconder / mostrar a classificação · <b>T</b> ou 📺: modo TV (a câmera segue as disputas)</li>
       <li><b>V</b> (segurar): comando de voz · <b>S / N</b>: aceitar / recusar pedido do piloto</li>
       <li><b>Esc</b>: fecha a janela de cima (ajuda, músicas, confirmações...)</li>
       <li><b>F</b> ou botão ⛶: tela cheia</li>
