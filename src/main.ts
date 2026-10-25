@@ -2,6 +2,14 @@ import "./fonts.css";
 import "./styles.css";
 import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
 import { showCalendar } from "./ui/calendar";
+import { showLoading } from "./ui/loading";
+
+/** título da tela de carregamento no começo do fim de semana */
+function weekendLabel(l: LobbyState): string {
+  const ch = l.champ;
+  if (!ch) return "FIM DE SEMANA";
+  return `${ch.name ? ch.name.toUpperCase() + " · " : ""}ETAPA ${ch.round + 1} DE ${ch.rounds.length}`;
+}
 import { saveLocalLap } from "./ui/records";
 import { sound } from "./audio/sound";
 import { music } from "./audio/music";
@@ -11,7 +19,7 @@ import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
 import type { QualiResult } from "./sim/weekend";
-import { esc, storeSet, toast, updateWaitBar } from "./ui/common";
+import { storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
 import { LobbyScreen } from "./ui/lobby";
 import { type SoloSetup, showMenu, type MenuChoice } from "./ui/menu";
@@ -296,8 +304,12 @@ class App {
           const draft = !l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1);
           const openDraft = () => draft && !AUTO && showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
           // começo de temporada do campeonato: primeiro o calendário (pistas sorteadas), depois o sorteio dos pilotos
-          if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
-          else openDraft();
+          const afterLoad = () => {
+            if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
+            else openDraft();
+          };
+          if (AUTO) afterLoad();
+          else void showLoading({ trackIndex: l.weekend.trackIndex, laps: l.weekend.laps, label: weekendLabel(l) }).then(afterLoad);
         }
         if (AUTO) conn.send({ t: "ready", ready: true });
         break;
@@ -307,6 +319,10 @@ class App {
         break;
       case "strategy":
         this.screen = new StrategyScreen(app, conn, l, this.quali!.results);
+        if (l.weekend && this.draftSeen !== l.weekend.seed) {
+          this.draftSeen = l.weekend.seed;
+          if (!AUTO) void showLoading({ trackIndex: l.weekend.trackIndex, laps: l.weekend.laps, label: "CORRIDA ÚNICA" });
+        }
         if (AUTO) setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
       case "podium":
@@ -381,21 +397,8 @@ class App {
       view.hud.update();
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
-    // pista ainda montando: tela de carregamento por cima até ela estar desenhável
-    if (!view.renderer.trackReady) {
-      const ld = document.createElement("div");
-      ld.className = "trackload";
-      ld.innerHTML = `<div class="tlbox"><span class="tlhint">PREPARANDO A PISTA</span><b>${esc(race.track.name.toUpperCase())}</b><i class="tlbar"><em></em></i></div>`;
-      app.appendChild(ld);
-      const t0 = performance.now();
-      const poll = setInterval(() => {
-        if (!ld.isConnected) return clearInterval(poll);
-        if (!view.renderer.trackReady && performance.now() - t0 < 8000) return;
-        clearInterval(poll);
-        const out = ld.animate([{ opacity: 1 }, { opacity: 0, filter: "blur(3px)" }], { duration: 320, easing: "ease-out", fill: "forwards" });
-        out.onfinish = () => ld.remove();
-      }, 80);
-    }
+    // largada: tela de carregamento sempre (fica até a pista estar desenhável)
+    if (!AUTO) void showLoading({ trackIndex: opts.trackIndex, laps: opts.laps, label: "LARGADA", ready: () => view.renderer.trackReady });
     view.renderer.showEngineers = !this.lobby?.solo;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
@@ -494,6 +497,18 @@ class App {
   await account.restore().catch(() => false);
   mergeCloudSaves(account.profile?.champs as SaveMap | null);
   const appInst = new App();
+  // tela de abertura (do index.html): completa a logo e some
+  const boot = document.getElementById("boot");
+  if (boot) {
+    const wait = Math.max(0, 1600 - performance.now());
+    setTimeout(() => {
+      boot.classList.add("done");
+      setTimeout(() => {
+        boot.classList.add("out");
+        setTimeout(() => boot.remove(), 450);
+      }, 420);
+    }, wait);
+  }
   new HelpWidget(
     () => appInst.helpTab(),
     () => appInst.exitToMenu(),

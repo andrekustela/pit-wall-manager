@@ -12,8 +12,43 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="preload" href="/fonts/oswald-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/titillium-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      /* carregando o jogo (aparece antes de qualquer script) */
+      #boot { position: fixed; inset: 0; z-index: 100; background: radial-gradient(ellipse at 60% 40%, #182034 0%, #0b0e15 62%, #07090d 100%); color: #e9edf5; font-family: "Titillium Web", "Segoe UI", sans-serif; }
+      #boot .bt-logo { position: absolute; right: 48px; bottom: 44px; width: min(380px, 60vw); }
+      #boot .bt-box { position: relative; }
+      #boot .bt-box img { display: block; width: 100%; }
+      #boot .bt-box .base { filter: grayscale(1) brightness(.28); }
+      #boot .bt-box .fill { position: absolute; inset: 0; clip-path: inset(0 100% 0 0); animation: btfill 3.2s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+      #boot.done .bt-box .fill { animation: none; clip-path: inset(0 0 0 0); transition: clip-path .35s ease-out; }
+      @keyframes btfill { to { clip-path: inset(0 12% 0 0); } }
+      #boot .bt-txt { margin-top: 10px; text-align: right; font-family: "Oswald", "Arial Narrow", sans-serif; letter-spacing: .24em; font-size: 14px; color: #8a93a6; }
+      #boot .bt-tip { position: absolute; left: 48px; bottom: 52px; max-width: min(560px, 45vw); }
+      #boot .bt-tip span { font-family: "Oswald", "Arial Narrow", sans-serif; letter-spacing: .18em; font-size: 12px; color: #8a93a6; }
+      #boot .bt-tip p { margin: 6px 0 0; font-size: 17px; line-height: 1.4; }
+      #boot.out { opacity: 0; transition: opacity .4s ease-out; }
+      @media (max-width: 700px) { #boot .bt-tip { left: 16px; right: 16px; bottom: auto; top: 40px; max-width: none; } #boot .bt-logo { right: 16px; } }
+    </style>
   </head>
   <body>
+    <div id="boot">
+      <div class="bt-tip"><span>📻 DICA DO ENGENHEIRO</span><p id="bt-tip"></p></div>
+      <div class="bt-logo"><div class="bt-box"><img class="base" src="/brand/logo.png" alt=""><img class="fill" src="/brand/logo.png" alt="Pit Wall Manager"></div><div class="bt-txt">CARREGANDO</div></div>
+    </div>
+    <script>
+      // dica sorteada enquanto o jogo carrega (a lista completa fica em src/ui/loading.ts)
+      (function () {
+        var t = [
+          "Pneu novo sai frio do box: segure o ritmo na primeira volta do stint.",
+          "Safety car na pista é a hora mais barata pra parar no box.",
+          "Atrás de outro carro o ar fica sujo: o pneu esquenta e gasta mais rápido.",
+          "Começou a chover? Intermediário na garoa, pneu de chuva no aguaceiro.",
+          "Combustível é escolhido em voltas: tanque cheio deixa o carro mais lento.",
+          "No treino, compare as voltas: o melhor acerto muda a cada pista.",
+        ];
+        document.getElementById("bt-tip").textContent = t[Math.floor(Math.random() * t.length)];
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

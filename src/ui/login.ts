@@ -4,6 +4,7 @@ import { account, accountsEnabled } from "../net/account";
 import { CIRCUITS } from "../sim/track";
 import { backdropMemo, mountMenuBackdrop } from "./menuBg";
 import { coverScreen } from "./transition";
+import { startLogoFx } from "./logoFx";
 import { esc } from "./common";
 
 export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
@@ -112,6 +113,7 @@ export function showLogin(root: HTMLElement, onDone: (guest: boolean) => void) {
     }
   });
   setMode("in");
+  startLogoFx($<HTMLElement>(".m2logowrap"));
 
   // fundo: a mesma pista animada do menu (continua nele depois de entrar)
   const stripe = $<HTMLElement>(".m2stripe");

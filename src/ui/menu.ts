@@ -15,6 +15,7 @@ import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen } from "./transition";
+import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
 
@@ -86,8 +87,8 @@ let openPanel: Panel = null;
 
 /** rodando dentro do programa de PC (.exe)? (a ponte do Electron avisa) */
 const isDesktop = () => !!(window as unknown as { pwmDesktop?: unknown }).pwmDesktop;
-/** download do programa de PC (Releases do GitHub: sempre a versão mais nova) */
-const DOWNLOAD_URL = "https://github.com/andrekustela/pit-wall-manager/releases/latest/download/PitWallManager.exe";
+/** download do programa de PC (Releases do GitHub: sempre a versão mais nova) — botão em "em breve" por enquanto */
+export const DOWNLOAD_URL = "https://github.com/andrekustela/pit-wall-manager/releases/latest/download/PitWallManager.exe";
 
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -132,7 +133,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <canvas class="menubg"></canvas>
       <div class="m2stripe"></div>
       <div class="m2top">
-        ${isDesktop() ? "" : `<a class="m2dl" href="${DOWNLOAD_URL}" title="Programa pra Windows (abre o jogo numa janela própria, dá pra pôr na Steam)">⬇ <span>BAIXAR PRO PC</span></a>`}
+        ${isDesktop() ? "" : `<span class="m2dl soon" title="O programa pra Windows chega em breve">⬇ <span>BAIXAR PRO PC</span><em>EM BREVE</em></span>`}
         <button class="m2friends" id="m-friends" title="Amigos">👥 <span>AMIGOS</span>${account.profile?.friends?.length ? `<em>${account.profile.friends.length}</em>` : ""}</button>
       </div>
       <div class="m2">
@@ -423,6 +424,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
   };
 
   root.querySelector("#m-friends")!.addEventListener("click", () => showFriends(redraw));
+  startLogoFx(root.querySelector<HTMLElement>(".m2logowrap")!);
 }
 
 /** editar perfil (engrenagem): nome, equipe, pintura e sair da conta */
