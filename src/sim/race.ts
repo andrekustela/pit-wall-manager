@@ -110,7 +110,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -251,6 +251,8 @@ export class Race {
         spin: 0,
         damage: 0,
         dmg: { ...NO_DAMAGE },
+        dmgSide: {},
+        flatWheel: -1,
         repair: { fw: true, suspF: true, rw: true, suspR: true },
         engineHealth: Math.max(0.02, opts.engineStart?.[d.id] ?? 1),
         engineSave: false,
@@ -655,6 +657,7 @@ export class Race {
     if (c.offFate === "rejoin" && this.rng.chance(street ? 0.45 : 0.15)) {
       const dmg = this.rng.range(0.4, 1.4);
       c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
+      this.hitSide(c, "fw", c.offSide > 0 ? "r" : "l");
       c.damage += dmg;
       this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
     } else {
@@ -675,9 +678,16 @@ export class Race {
     this.setFault(c, kind);
   }
 
+  /** guarda o lado da pancada numa peça (os dois lados = "b") */
+  private hitSide(c: CarState, part: PartId, side: "l" | "r") {
+    const was = c.dmgSide[part];
+    c.dmgSide = { ...c.dmgSide, [part]: was && was !== side ? "b" : side };
+  }
+
   private setFault(c: CarState, kind: FaultKind) {
     const f = FAULTS[kind];
     c.fault = kind;
+    if (kind === "puncture") c.flatWheel = Math.floor(this.rng.next() * 4); // furo por conta própria: pneu qualquer
     c.faultPen = kind === "puncture" ? f.pen : f.pen * this.rng.range(0.7, 1.3);
     this.stats.faults++;
     const team = c.isHuman ? c.team.id : undefined;
@@ -696,6 +706,7 @@ export class Race {
       // rodou com o pneu furado e estragou a suspensão
       const dmg = this.rng.range(0.6, 1.6);
       c.dmg = { ...c.dmg, suspR: c.dmg.suspR + dmg };
+      this.hitSide(c, "suspR", c.flatWheel % 2 === 1 ? "r" : "l");
       c.damage += dmg;
       this.log(`${c.driver.name}: o pneu furado destruiu a suspensão traseira! (+${dmg.toFixed(1)}s por volta)`, c.isHuman, c.isHuman ? c.team.id : undefined, "damage");
     }
@@ -1043,6 +1054,8 @@ export class Race {
     // quem vem atrás costuma levar a pior
     const victim = this.rng.chance(0.65) ? rear : rear === a ? b : a;
     const other = victim === a ? b : a;
+    // lado do carro que levou o toque: + lateral = direita
+    const side: "l" | "r" = other.lateral > victim.lateral ? "r" : "l";
     const team = victim.isHuman ? victim.team.id : other.isHuman ? other.team.id : undefined;
     // rua: muro do lado, o toque vira dano ou batida com mais facilidade
     const r = this.track.def.street ? 0.25 + this.rng.next() * 0.75 : this.rng.next();
@@ -1053,14 +1066,18 @@ export class Race {
     if (r < 0.6) {
       this.stats.touches++;
       this.log(`Toque entre ${a.driver.short} e ${b.driver.short}! Seguem na pista.`, !!team, team, "touch", a.id);
-      // roda encostou na asa do outro: furo
-      if (!victim.fault && this.rng.chance(0.18)) this.setFault(victim, "puncture");
+      // roda encostou na asa do outro: furo (o pneu do lado do toque: o da frente em quem vinha atrás)
+      if (!victim.fault && this.rng.chance(0.18)) {
+        this.setFault(victim, "puncture");
+        victim.flatWheel = (victim === rear ? 0 : 2) + (side === "r" ? 1 : 0);
+      }
     } else if (r < 0.8) {
       // qual peça quebrou
       const pr = this.rng.next();
       const part: PartId = pr < 0.45 ? "fw" : pr < 0.6 ? "rw" : pr < 0.8 ? "suspF" : "suspR";
       const dmg = part.startsWith("susp") ? this.rng.range(0.7, 2) : this.rng.range(0.4, 1.6);
       victim.dmg = { ...victim.dmg, [part]: victim.dmg[part] + dmg };
+      this.hitSide(victim, part, side);
       victim.damage += dmg;
       this.stats.damages++;
       const name = PARTS.find((x) => x.id === part)!.label.toLowerCase();
@@ -1156,6 +1173,9 @@ export class Race {
         const dmg = { ...c.dmg };
         for (const p of fixedParts) dmg[p.id] = 0;
         c.dmg = dmg;
+        const sides = { ...c.dmgSide };
+        for (const p of fixedParts) delete sides[p.id];
+        c.dmgSide = sides;
         c.damage = PARTS.reduce((a, p) => a + dmg[p.id], 0);
         this.damageWarned.delete(c.id);
         this.log(`${c.driver.short}: trocado (${fixedParts.map((p) => p.label.toLowerCase()).join(", ")}).`, c.isHuman, c.team.id, "info");
@@ -1164,6 +1184,7 @@ export class Race {
     if (c.fault === "puncture") {
       c.fault = null;
       c.faultPen = 0;
+      c.flatWheel = -1;
     }
     c.compound = next;
     c.wear = 0;

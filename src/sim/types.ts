@@ -204,6 +204,10 @@ export interface CarState {
   faultPen: number;
   /** dano por peça (segundos por volta perdidos); conserta no box */
   dmg: { fw: number; suspF: number; rw: number; suspR: number };
+  /** de que lado cada peça danificada levou a pancada (l = esquerda, r = direita, b = os dois) — só pro desenho */
+  dmgSide: Partial<Record<"fw" | "suspF" | "rw" | "suspR", "l" | "r" | "b">>;
+  /** pneu furado (0 dianteiro esq., 1 dianteiro dir., 2 traseiro esq., 3 traseiro dir.; -1 nenhum) */
+  flatWheel: number;
   /** quais peças danificadas trocar na próxima parada */
   repair: { fw: boolean; suspF: boolean; rw: boolean; suspR: boolean };
   /** saúde do motor: 1 novo .. 0 quebra */

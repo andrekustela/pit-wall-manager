@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Teste de dano</title>
+<style>body{margin:0;background:#3b3f44;color:#eee;font:14px sans-serif;display:flex;flex-wrap:wrap;gap:10px;padding:10px}div{background:#2c2f33;padding:6px}b{display:block;margin-bottom:4px}</style></head>
+<body><script type="module">
+import { car3dReady, drawCar3d, LOOK_OK, lookOf } from "/src/render/car3d.ts";
+const team = { id: "t", name: "T", color: "#e8202a", accent: "#ffd23f" };
+const cases = [
+  ["Inteiro", LOOK_OK],
+  ["Asa dianteira folgada (esq.)", lookOf({ fw: 0.3, rw: 0, suspF: 0, suspR: 0 }, { fw: "l" }, -1, false, 0)],
+  ["Perdeu metade da asa (esq.) + traseira folgada", lookOf({ fw: 0.8, rw: 0.4, suspF: 0, suspR: 0 }, { fw: "l", rw: "r" }, -1, false, 0)],
+  ["Sem asa dianteira, traseira pela metade", lookOf({ fw: 1.5, rw: 0.9, suspF: 0, suspR: 0 }, { fw: "b", rw: "r" }, -1, false, 0)],
+  ["Suspensão diant. dir. torta + pneu tras. esq. furado", lookOf({ fw: 0, rw: 0, suspF: 1, suspR: 0 }, { suspF: "r" }, 2, true, 0)],
+  ["Roda traseira esq. arrancada", lookOf({ fw: 0, rw: 0, suspF: 0, suspR: 2 }, { suspR: "l" }, -1, false, 0)],
+  ["Virando pra direita", { ...LOOK_OK, steer: 0.4 }],
+  ["Virando pra esquerda", { ...LOOK_OK, steer: -0.4 }],
+];
+const go = () => {
+  if (!car3dReady()) return setTimeout(go, 100);
+  for (const [name, look] of cases) {
+    const d = document.createElement("div");
+    d.innerHTML = `<b>${name}</b>`;
+    const c = document.createElement("canvas");
+    c.width = 560; c.height = 240;
+    const g = c.getContext("2d");
+    g.fillStyle = "#55595f"; g.fillRect(0, 0, 560, 240);
+    drawCar3d(g, team, 280, 120, 0, 100, 1, look, false, 0.3);
+    d.appendChild(c); document.body.appendChild(d);
+  }
+  document.title = "pronto";
+};
+go();
+</script></body></html>

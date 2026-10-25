@@ -1,6 +1,6 @@
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
-import { car3dImage, car3dPref, wingPiece, wingStateOf, type WingState } from "./car3d";
+import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH } from "../sim/track";
 
@@ -180,8 +180,8 @@ export class Renderer {
   }
 
   private pos = new Map<string, { x: number; y: number; h: number }>();
-  /** estado da asa dianteira visto no último quadro (pra soltar o pedaço quando ela quebra) */
-  private wingSeen = new Map<string, WingState>();
+  /** estado das peças visto no último quadro (pra soltar o pedaço quando algo quebra) */
+  private lookSeen = new Map<string, CarLook>();
   /** pedaços de asa voando / caídos na pista (metros do mundo) */
   private debris: { img: CarImage; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
@@ -280,10 +280,11 @@ export class Renderer {
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
-      const ws = wingStateOf(c.id, c.dmg?.fw ?? 0);
-      this.dropWing(c, ws, p);
-      const img = (car3dPref.on && car3dImage(c.team, rainLight, ws)) || carImage(c.team, rainLight);
-      this.drawCar(o, x, y, p.h + (c.spin > 0 ? c.spin * 2.2 : 0), img, m, c.retired ? 0.6 : 1);
+      const hh = p.h + (c.spin > 0 ? c.spin * 2.2 : 0), alpha = c.retired ? 0.6 : 1;
+      const look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
+      this.dropParts(c, look, p);
+      if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, m, alpha, look, rainLight, performance.now() / 1000)))
+        this.drawCar(o, x, y, hh, carImage(c.team, rainLight), m, alpha);
       if (c.retired) this.smoke(o, x, y, m);
     }
 
@@ -336,21 +337,41 @@ export class Renderer {
 
   private tunnelPaths: ReturnType<typeof tunnelPaths> | null = null;
 
-  /** a asa dianteira quebrou neste quadro: solta o pedaço que saiu (ele voa pra frente, girando) */
-  private dropWing(c: Race["cars"][number], ws: WingState, p: { x: number; y: number; h: number }) {
-    const prev = this.wingSeen.get(c.id);
-    this.wingSeen.set(c.id, ws);
-    if (prev === undefined || prev === ws || ws === "ok" || !car3dPref.on) return;
-    // o que saiu: a asa toda, ou a metade que não ficou no carro
-    const part = prev === "ok" ? (ws === "none" ? "full" : ws === "left" ? "right" : "left") : prev === "left" ? "left" : "right";
-    const piece = wingPiece(c.team, part);
-    if (!piece) return;
-    const fx = Math.cos(p.h), fy = Math.sin(p.h), side = (Math.random() - 0.5) * 8;
-    // sai de onde a asa estava (na frente do carro) e gira em volta de si mesma
-    const x = p.x + fx * piece.dx - fy * piece.dy, y = p.y + fy * piece.dx + fx * piece.dy;
-    this.debris.push({ img: piece.img, x, y, h: p.h, vx: fx * c.v * 0.55 - fy * side, vy: fy * c.v * 0.55 + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
-    if (this.debris.length > 12) this.debris.shift();
+  /** ângulo das rodas da frente: a curvatura um pouco à frente (exagerado pra ler de cima); rodando, contra-esterço */
+  private steerOf(c: Race["cars"][number]): number {
+    const tr = this.race.track;
+    if (c.spin > 0) return Math.sin(performance.now() / 90) * 0.45;
+    const k = tr.curvature[Math.floor(tr.wrap(c.s + 6)) % tr.L] ?? 0;
+    return Math.max(-0.45, Math.min(0.45, Math.atan(k * 3) * 2.2));
   }
+
+  /** alguma peça saiu neste quadro: solta o pedaço (voa pra frente, girando, e fica na pista) */
+  private dropParts(c: Race["cars"][number], look: CarLook, p: { x: number; y: number; h: number }) {
+    const prev = this.lookSeen.get(c.id);
+    this.lookSeen.set(c.id, look);
+    if (!prev || !car3dPref.on) return;
+    const out: ReturnType<typeof partPiece>[] = [];
+    const wing = (part: "asa_d" | "asa_t", a: CarLook["fw"], b: CarLook["fw"]) => {
+      if (a.state === b.state) return;
+      if (b.state === "half") out.push(partPiece(c.team, part, b.side));
+      else if (b.state === "none") out.push(partPiece(c.team, part, a.state === "half" ? (a.side === "l" ? "r" : "l") : "full"));
+    };
+    wing("asa_d", prev.fw, look.fw);
+    wing("asa_t", prev.rw, look.rw);
+    look.wheels.forEach((w, i) => {
+      if (w === "off" && prev.wheels[i] !== "off") out.push(partPiece(c.team, "roda", i));
+    });
+    const fx = Math.cos(p.h), fy = Math.sin(p.h);
+    for (const piece of out) {
+      if (!piece) continue;
+      const side = (Math.random() - 0.5) * 8 + piece.dy * 3;
+      // sai de onde a peça estava no carro e gira em volta de si mesma
+      const x = p.x + fx * piece.dx - fy * piece.dy, y = p.y + fy * piece.dx + fx * piece.dy;
+      this.debris.push({ img: piece.img, x, y, h: p.h, vx: fx * c.v * 0.55 - fy * side, vy: fy * c.v * 0.55 + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
+    }
+    while (this.debris.length > 16) this.debris.shift();
+  }
+
 
   private drawCar(o: CanvasRenderingContext2D, x: number, y: number, h: number, img: ReturnType<typeof carImage>, m: number, alpha: number) {
     o.save();

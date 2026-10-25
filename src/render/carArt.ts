@@ -200,12 +200,18 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   g.fillStyle = "#08090b";
   g.fill();
   const hel = g.createRadialGradient(0.55, -0.04, 0.02, 0.58, 0, 0.14);
-  hel.addColorStop(0, "#fff6b8");
-  hel.addColorStop(1, "#d9b51e");
+  const hc = lv?.helmet ?? "#e2bf2a";
+  hel.addColorStop(0, shade(hc, 0.55));
+  hel.addColorStop(1, hc);
   g.beginPath();
   g.arc(0.58, 0, 0.12, 0, Math.PI * 2);
   g.fillStyle = hel;
   g.fill();
+  if (lv) {
+    // faixa do capacete (de trás pra frente, no meio)
+    g.fillStyle = lv.helmetDetail;
+    g.fillRect(0.47, -0.03, 0.17, 0.06);
+  }
   g.fillStyle = "#1a1a1a";
   g.fillRect(0.64, -0.08, 0.05, 0.16); // viseira
   g.beginPath();

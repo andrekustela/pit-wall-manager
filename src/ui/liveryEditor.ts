@@ -101,7 +101,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
     if (tab === "carro") {
       box.innerHTML = `${tabs}
         <div class="livsec"><b>CORES</b><div class="livcols">
-          ${colorField("base", "Principal", lv.base)}${colorField("accent", "Secundária", lv.accent)}${colorField("patternColor", "Detalhes", lv.patternColor)}${colorField("wing", "Asas", lv.wing)}
+          ${colorField("base", "Principal", lv.base)}${colorField("accent", "Secundária", lv.accent)}${colorField("patternColor", "Detalhes", lv.patternColor)}${colorField("wing", "Asas", lv.wing)}${colorField("helmet", "Capacete", lv.helmet)}${colorField("helmetDetail", "Faixa do capacete", lv.helmetDetail)}
         </div>
         <div class="livpal">${PALETTES.map((p, i) => `<button class="livpalb" data-pal="${i}" title="Paleta pronta" style="background:linear-gradient(135deg, ${p[0]} 0 50%, ${p[1]} 50% 80%, ${p[2]} 80%)"></button>`).join("")}</div></div>
         <div class="livsec"><b>ESTILO DA PINTURA</b><div class="livpats">${PATTERNS.map((p) => `<button class="livpat ${p.id === lv.pattern ? "on" : ""}" data-pat="${p.id}"><canvas data-patcv="${p.id}"></canvas><span>${esc(p.label)}</span></button>`).join("")}</div></div>`;
@@ -138,7 +138,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
       if (k.startsWith("e.")) (lv.emblem as unknown as Record<string, string>)[k.slice(2)] = el.value;
       else (lv as unknown as Record<string, string>)[k] = el.value;
       update();
-      if (tab === "carro" && (k === "base" || k === "accent" || k === "patternColor" || k === "wing")) {
+      if (tab === "carro" && (k === "base" || k === "accent" || k === "patternColor" || k === "wing" || k === "helmet" || k === "helmetDetail")) {
         // miniaturas acompanham as cores
         clearTimeout(thumbT);
         thumbT = setTimeout(renderCtrl, 250);
