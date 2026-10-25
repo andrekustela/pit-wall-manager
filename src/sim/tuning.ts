@@ -8,6 +8,8 @@ import { Rng } from "./rng";
 import type { Profile, Track } from "./track";
 import { FUEL_WEIGHT, bestForWet, wetPenalty, type Compound, type Driver, type Team, type Tuning } from "./types";
 
+/** pista molhada deixa a volta mais lenta com qualquer pneu (média de curva 13% e reta 5% da corrida) */
+export const WET_SLOW_AVG = 0.095;
 export const BASE_SLACK = 1.5; // s: margem do melhor carro pro limite teórico
 
 /** 0..100 -> "cliques" internos 1..11 */
@@ -208,7 +210,7 @@ export function qualiLap(track: Track, team: Team, driver: Driver, t: Tuning, we
   const tyre = qualiTyre(wet);
   const offset = tyre === "S" ? -0.9 : 0;
   const time =
-    p.lap + BASE_SLACK + team.carPace + driver.skill + offset + wetPenalty(tyre, wet) * wetSkillFactor(driver) +
+    p.lap * (1 + WET_SLOW_AVG * wet) + BASE_SLACK + team.carPace + driver.skill + offset + wetPenalty(tyre, wet) * wetSkillFactor(driver) +
     fuelKg * FUEL_WEIGHT + rng.gauss(lapNoiseSd(driver) * 0.6) + (wet > 0.1 ? Math.abs(rng.gauss(0.35 * wet)) : 0);
   return { time, topSpeed: Math.round(p.top * 3.6), tyre, feedback: feedback(track, tuning, cond, driver, rng), tuning };
 }

@@ -531,7 +531,7 @@ export class Hud {
     const dmgChip = fault
       ? `<span class="chip bad" title="${esc(fault.fix)}">⚠ ${esc(fault.label.toUpperCase())}</span>`
       : c.damage > 0.05
-        ? `<span class="chip bad">DANO +${num(c.damage)} s/V</span>`
+        ? `<span class="chip bad" title="Quanto o dano custa nesta pista (pista travada sofre mais com asa quebrada; chuva piora)">DANO +${num(race.damageLoss(c))} s/V</span>`
         : `<span class="chip good">SEM DANOS</span>`;
     set(
       ".chips",
@@ -549,7 +549,7 @@ export class Hud {
     let al: Alert | null = null;
     if (c.retired || c.finished || race.phase === "lights") al = null;
     else if (fault && fault.pen > 5 && canBox) al = { lvl: "bad", t: `⚠ ${fault.label}: +${c.faultPen.toFixed(0)} s por volta`, sub: fault.fix, act: "box", btn: "BOX AGORA" };
-    else if (c.damage > 0.6 && canBox) al = { lvl: "bad", t: `⚠ Carro danificado: +${num(c.damage)} s por volta`, sub: "No box dá pra trocar a peça quebrada", act: "box", btn: "BOX AGORA" };
+    else if (c.damage > 0.6 && canBox) al = { lvl: "bad", t: `⚠ Carro danificado: +${num(race.damageLoss(c))} s por volta`, sub: "No box dá pra trocar a peça quebrada", act: "box", btn: "BOX AGORA" };
     else if (!fuelOk && fuelLaps < need - 0.3) {
       const saving = c.engine === "lean";
       al = {
@@ -815,7 +815,7 @@ export class Hud {
         ` · <span class="tt ${tt}" title="Temperatura do pneu: ${Math.round((c.tyreTemp ?? 0) * 100)}%">${ttTxt}</span>` +
         (c.dirtyAir && !c.finished ? ` · <span class="tt dirty" title="Colado atrás de outro carro: perde aderência nas curvas e o pneu esquenta">💨 ar sujo</span>` : "") +
         (ruleOk ? "" : " · falta usar o 2º tipo de pneu!") +
-        (c.damage > 0 ? ` · ⚠ dano: +${c.damage.toFixed(1)}s/volta` : "");
+        (c.damage > 0 ? ` · ⚠ dano: +${race.damageLoss(c).toFixed(1)}s/volta` : "");
       const cons = race.consumption(c);
       const fuelLaps = c.fuel / cons;
       const left = race.lapsLeft(c);

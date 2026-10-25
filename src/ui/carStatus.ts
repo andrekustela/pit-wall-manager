@@ -125,7 +125,7 @@ export function updateStatus(root: Element, c: CarState, race: Race) {
     const lvl = partLevel(sec);
     const col = lvl === 0 ? (p.id.startsWith("susp") && bottoming ? "#ffb02e" : OK) : LEVEL_COLOR[lvl];
     const fill = lvl >= 2 ? (blink ? col : "transparent") : lvl === 1 ? "rgba(255,210,59,0.35)" : null;
-    const tip = lvl === 0 && p.id.startsWith("susp") && bottoming ? `${p.label}: carro baixo demais, batendo no chão` : partTip(p.label, sec, p.repair, c.repair?.[p.id] ?? true);
+    const tip = lvl === 0 && p.id.startsWith("susp") && bottoming ? `${p.label}: carro baixo demais, batendo no chão` : partTip(p.label, race.partLossSec(p.id, sec), p.repair, c.repair?.[p.id] ?? true);
     setPart(svg, p.id, fill, col, tip);
     // linha da lista
     const chip = root.querySelector<HTMLElement>(`[data-chip="${p.id}"]`);
