@@ -325,7 +325,7 @@ export class Hud {
   private buildTopbar() {
     const host = this.hooks.isHost;
     this.top.innerHTML =
-      [0, ...SPEEDS].map((s) => `<button data-speed="${s}" ${host ? "" : "disabled"}>${s === 0 ? "❚❚" : `${s}x`}</button>`).join("") +
+      [0, ...SPEEDS].map((s, i) => `<button data-speed="${s}" ${host ? "" : "disabled"} title="${s === 0 ? "Pausar (Espaço)" : `${s}x (tecla ${i})`}">${s === 0 ? "❚❚" : `${s}x`}</button>`).join("") +
       // sair da corrida: botão ⌂ do canto
       `<button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button>`;
     this.top.querySelectorAll<HTMLButtonElement>("[data-speed]").forEach((b) =>
@@ -375,10 +375,10 @@ export class Hud {
         <div class="flabel" style="font-size:12px;color:var(--muted);margin:-4px 0 6px"></div>
         <div class="faultlabel"></div>
         <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
-          ${(["push", "normal", "conserve"] as PaceMode[]).map((m) => `<button data-pace="${m}">${PACE[m].label}</button>`).join("")}
+          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${"QWE"[i]} (no piloto seguido)">${PACE[m].label}<kbd>${"QWE"[i]}</kbd></button>`).join("")}
         </div></div>
         <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
-          ${(["rich", "normal", "lean"] as EngineMode[]).map((m) => `<button data-engine="${m}">${ENGINE[m].label}</button>`).join("")}
+          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
         </div></div>
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>

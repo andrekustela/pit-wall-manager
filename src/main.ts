@@ -23,7 +23,7 @@ import { LocalConnection, WsConnection, type Connection } from "./net/connection
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
 import { Race, type RaceOptions } from "./sim/race";
-import { COMPOUNDS, ENGINE, PACE } from "./sim/types";
+import { COMPOUNDS, ENGINE, PACE, type EngineMode, type PaceMode } from "./sim/types";
 import type { QualiResult } from "./sim/weekend";
 import { storeSet, toast, updateWaitBar } from "./ui/common";
 import { Hud, SPEEDS } from "./ui/hud";
@@ -468,6 +468,17 @@ class App {
       if (e.key === "p" || e.key === "P") view.hud.toggleBoard();
       if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
       if (e.key === "-" || e.key === "_") view.renderer.zoomOut();
+      // atalhos do piloto seguido: B box, Q/W/E ritmo, Z/X/C motor
+      const slot = teamVoice.drivers().findIndex((d) => d.id === view.follow);
+      const fc = race.cars.find((c) => c.id === view.follow);
+      if (slot >= 0 && fc && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const k = e.code;
+        if (k === "KeyB") this.act(view, { kind: fc.boxRequest ? "cancelBox" : "box", slot }, slot);
+        const pace = { KeyQ: "push", KeyW: "normal", KeyE: "conserve" }[k] as PaceMode | undefined;
+        if (pace) this.act(view, { kind: "pace", slot, mode: pace }, slot);
+        const eng = { KeyZ: "rich", KeyX: "normal", KeyC: "lean" }[k] as EngineMode | undefined;
+        if (eng) this.act(view, { kind: "engine", slot, mode: eng }, slot);
+      }
       if (e.key === "Tab" && mine.length) {
         e.preventDefault();
         const i = mine.findIndex((c) => c.id === view.follow);

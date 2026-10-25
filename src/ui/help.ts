@@ -77,6 +77,11 @@ const CONTENT: Record<Tab, string> = {
       <li><b>Espaço</b>: pausar / continuar (só o host, no online)</li>
       <li><b>1 a 5</b>: velocidade 1x, 2x, 4x, 8x, 16x</li>
       <li><b>Tab</b>: alternar a câmera entre seus dois pilotos</li>
+      <li><b>B</b>: chamar / cancelar o box do piloto seguido</li>
+      <li><b>Q / W / E</b>: ritmo atacar / normal / poupar · <b>Z / X / C</b>: motor rico / normal / pobre (no piloto seguido; a letra aparece no botão)</li>
+      <li><b>P</b>: esconder / mostrar a classificação</li>
+      <li><b>V</b> (segurar): comando de voz · <b>S / N</b>: aceitar / recusar pedido do piloto</li>
+      <li><b>Esc</b>: fecha a janela de cima (ajuda, músicas, confirmações...)</li>
       <li><b>F</b> ou botão ⛶: tela cheia</li>
       <li><b>M</b>: minimizar / expandir o painel dos seus pilotos (pra ver mais pista)</li>
       <li><b>+ / −</b> ou roda do mouse: zoom</li>
@@ -155,6 +160,20 @@ export class HelpWidget {
     });
     document.addEventListener("pointerdown", (e) => {
       if (!player.hidden && !player.contains(e.target as Node) && e.target !== mb) player.hidden = true;
+    });
+    // Esc fecha a janela de cima: o player de música, depois a janela aberta por último
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (!player.hidden) {
+        player.hidden = true;
+        return;
+      }
+      const top = [...document.querySelectorAll<HTMLElement>(".helpmodal")].pop();
+      if (!top) return;
+      const x = top.querySelector<HTMLElement>("[data-x], [data-close], [data-cancel]");
+      if (x) x.click();
+      else top.remove();
+      if (top === this.modal) this.modal = null;
     });
     // mixer: um controle por grupo de som (motor, torcida/chuva, efeitos, rádio, música)
     player.addEventListener("input", (e) => {
