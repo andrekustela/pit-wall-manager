@@ -273,8 +273,8 @@ export function mountMenuBackdrop(
    * Mais fraca perto do menu (à esquerda) e nas bordas.
    */
   const FLAG_S = 54;
-  /** conceito: ?bandeira=vento = a bandeira tremulando no vento (em vez de deslizar) */
-  const WIND = new URLSearchParams(location.search).get("bandeira") === "vento";
+  /** bandeira tremulando no vento (?bandeira=calma = a versão antiga, que só desliza) */
+  const WIND = new URLSearchParams(location.search).get("bandeira") !== "calma";
   /**
    * Bandeira no vento: presa do lado do menu e solta na ponta direita. Ondas atravessam o tecido
    * (mais fortes na ponta), as casas se deformam com a onda e as dobras ganham luz e sombra.

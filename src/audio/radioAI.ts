@@ -84,6 +84,8 @@ class RadioAI {
   private ttsWorker: Worker | null = null;
   private ttsSeq = 0;
   private ttsWait = new Map<number, { ok: (wav: Blob | null) => void; fail: (e: Error) => void }>();
+  private sttWorker: Worker | null = null;
+  private sttWait = new Map<number, { ok: (text: string) => void; fail: (e: Error) => void }>();
   /** conversa recente com cada piloto (pra ele lembrar do que você perguntou) */
   private hist = new Map<string, { q: string; a: string }[]>();
   private listeners: (() => void)[] = [];
@@ -125,7 +127,7 @@ class RadioAI {
       const v = getEditor().voices;
       this.progress = "Vozes do rádio...";
       this.listeners.forEach((f) => f());
-      await Promise.all([this.tts(v.p1, null), this.tts(v.p2, null)]);
+      await Promise.all([this.tts(v.p1, null), this.tts(v.p2, null), this.stt(null, 0)]);
       this.progress = "";
       this.set("ready");
     } catch (e) {
@@ -146,8 +148,36 @@ class RadioAI {
     this.ttsWorker = null;
     this.ttsWait.forEach((w) => w.fail(new Error("IA desligada")));
     this.ttsWait.clear();
+    this.sttWorker?.terminate();
+    this.sttWorker = null;
+    this.sttWait.forEach((w) => w.fail(new Error("IA desligada")));
+    this.sttWait.clear();
     this.progress = "";
     this.set("off");
+  }
+
+  /** ouvido (Whisper) no processo separado: audio = null só carrega o modelo */
+  private stt(audio: Float32Array | null, rate: number): Promise<string> {
+    if (!this.sttWorker) {
+      this.sttWorker = new Worker(new URL("./sttWorker.ts", import.meta.url), { type: "module" });
+      this.sttWorker.onmessage = (e: MessageEvent<{ id: number; text?: string; error?: string }>) => {
+        const w = this.sttWait.get(e.data.id);
+        if (!w) return;
+        this.sttWait.delete(e.data.id);
+        if (e.data.error) w.fail(new Error(e.data.error));
+        else w.ok(e.data.text ?? "");
+      };
+    }
+    const id = ++this.ttsSeq;
+    return new Promise((ok, fail) => {
+      this.sttWait.set(id, { ok, fail });
+      this.sttWorker!.postMessage(audio ? { id, audio, rate } : { id, warm: true }, audio ? [audio.buffer] : []);
+    });
+  }
+
+  /** o que você falou, em texto (Whisper) */
+  hear(pcm: Float32Array, rate: number): Promise<string> {
+    return this.stt(pcm, rate);
   }
 
   /** voz no processo separado: text = null só carrega a voz (pra 1ª fala não esperar o download) */
@@ -178,17 +208,13 @@ class RadioAI {
     const d = drivers[slot];
     const mate = drivers[1 - slot];
     const past = this.hist.get(d.id) ?? [];
+    // instrução curta: a placa de vídeo lê tudo isto antes de responder (texto longo = mais lento e pesado)
     const sys = [
-      `Você é ${d.name}, PILOTO de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}. Você está DENTRO do carro, correndo agora.`,
-      "Quem fala com você no rádio é o SEU ENGENHEIRO (o jogador). Você NÃO é o engenheiro: nunca dê ordens, nunca diga \"vamos te chamar\", \"você precisa\", \"piloto\". Fale em primeira pessoa, sobre o que VOCÊ sente no carro e o que VOCÊ vai fazer (\"tô sentindo\", \"vou atacar\", \"entendido, entro no box\").",
-      "Responda SEMPRE em português do Brasil, como piloto no rádio: curto (no máximo 2 frases, até 25 palavras), natural, com a emoção da situação (tranquilo, irritado, empolgado, preocupado).",
-      'Exemplos: engenheiro "como tá o carro?" -> {"fala": "Tá bom na reta, mas a traseira escorrega na saída das curvas lentas.", "acao": "nenhuma"}; engenheiro "pode atacar" -> {"fala": "Entendido, vou pra cima dele agora!", "acao": "atacar"}.',
-      "Use só os dados da situação abaixo. Não invente números, tempos nem nomes que não estão lá. Se não souber, diga o que sente no carro.",
-      "Se o engenheiro mandar uma ordem (box, atacar, poupar, motor, deixar o companheiro passar), confirme do seu jeito e coloque a ação. Se for só uma pergunta, a ação é nenhuma.",
-      `Responda só em JSON: {"fala": "o que você diz no rádio", "acao": um de ${ACTIONS.map((a) => `"${a}"`).join(", ")}}`,
-      "",
-      `Situação do seu carro agora:\n${d.status()}`,
-      mate ? `Seu companheiro de equipe: ${mate.name}.` : "",
+      `Você é ${d.name}, piloto de F1 (${team}${d.style ? `, ${d.style}` : ""}), dentro do carro. Quem fala com você no rádio é o seu engenheiro.`,
+      "Responda como PILOTO, em primeira pessoa, em português do Brasil: no máximo 2 frases curtas, com emoção. Nunca fale como engenheiro nem dê ordens.",
+      "Use só a situação abaixo; não invente números nem nomes. Se ele mandar uma ordem, confirme e ponha a ação; pergunta = ação nenhuma.",
+      `Só JSON: {"fala": "...", "acao": ${ACTIONS.map((a) => `"${a}"`).join("|")}}`,
+      `Situação:\n${d.status()}${mate ? `\nCompanheiro: ${mate.name}.` : ""}`,
     ].join("\n");
     const msgs = [
       { role: "system" as const, content: sys },
@@ -212,7 +238,7 @@ class RadioAI {
       }
       text = text.replace(/^["'“”\s-]+|["'“”\s]+$/g, "").replace(/\s+/g, " ").slice(0, 220);
       if (!text) text = "Copiado.";
-      this.hist.set(d.id, [...past, { q: heard, a: text }].slice(-3));
+      this.hist.set(d.id, [...past, { q: heard, a: text }].slice(-2));
       return { slot, text, action };
     } finally {
       if (this.state === "thinking") this.set("ready");

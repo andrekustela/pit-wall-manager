@@ -1,4 +1,5 @@
 import { fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
+import { mountWavingFlag } from "./checkerFlag";
 import {
   ALL_COMPOUNDS,
   COMPOUNDS,
@@ -99,7 +100,7 @@ export class Hud {
         <div class="rows"></div></div>
       <div class="topbar panel"></div>
       <div class="banner"></div>
-      <div class="checkered"><div class="flag"></div><div class="txt">BANDEIRA QUADRICULADA</div></div>
+      <div class="checkered"><canvas class="flag"></canvas><div class="txt">BANDEIRA QUADRICULADA</div></div>
       <div class="raceinfo panel"><div class="head">CORRIDA</div><div class="body"></div></div>
       <div class="feed"></div>
       <div class="teamwrap"><button class="btn small teamtoggle" title="Minimizar/expandir (tecla M)"></button><div class="team"></div></div>
@@ -113,6 +114,7 @@ export class Hud {
     this.spd = this.el.querySelector(".mini .spd")!;
     this.banner = this.el.querySelector(".banner")!;
     this.flag = this.el.querySelector(".checkered")!;
+    mountWavingFlag(this.flag.querySelector("canvas")!);
     this.minimapCanvas = this.el.querySelector(".mini canvas")!;
 
     this.banner.addEventListener("click", () => {

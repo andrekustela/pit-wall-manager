@@ -66,6 +66,11 @@ class VoiceCommands {
   private listeners: (() => void)[] = [];
   /** ditado livre (a IA do rádio interpreta a frase inteira) em vez da lista fechada de palavras */
   free: () => boolean = () => false;
+  /** IA do rádio ligada: guarda o áudio da fala pro Whisper (bem melhor que o Vosk em frase livre) */
+  capture: () => boolean = () => false;
+  /** fala gravada (com o que o Vosk achou, de reserva) */
+  onAudio: (pcm: Float32Array, rate: number, voskHeard: string) => void = () => {};
+  private chunks: Float32Array[] = [];
   /** comando reconhecido (texto bruto junto, pra mostrar) */
   onCommand: (a: VoiceAction | null, heard: string) => void = () => {};
 
@@ -128,13 +133,27 @@ class VoiceCommands {
       const heard = m.result.text || partial;
       this.rec = null;
       rec.remove();
+      if (this.capture() && this.chunks.length) {
+        const n = this.chunks.reduce((a, c) => a + c.length, 0), pcm = new Float32Array(n);
+        let o = 0;
+        for (const c of this.chunks) {
+          pcm.set(c, o);
+          o += c.length;
+        }
+        this.chunks = [];
+        this.onAudio(pcm, this.ctx?.sampleRate ?? 48000, heard);
+        return;
+      }
       this.onCommand(parseCommand(heard), heard);
     });
     this.rec = rec;
+    this.chunks = [];
+    const keep = this.capture();
     // ScriptProcessor ainda é o jeito mais simples e compatível de pegar o áudio cru
     this.proc = this.ctx.createScriptProcessor(4096, 1, 1);
     this.proc.onaudioprocess = (ev) => {
       try {
+        if (keep) this.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
         this.rec?.acceptWaveform(ev.inputBuffer);
       } catch {
         /* reconhecedor já fechado */

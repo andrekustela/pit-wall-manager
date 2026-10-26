@@ -153,7 +153,7 @@ export class HelpWidget {
         title: "IA no rádio",
         icon: "🤖",
         text: `Segure V e fale livre com seus pilotos: "Senna, como tá o carro?", "P2, pode atacar". Eles entendem, respondem com fala nova na voz deles e cumprem a ordem.
-Roda no seu PC, sem custo: na primeira vez baixa uns 1,1 GB (a IA e as vozes) e o navegador guarda. Precisa de placa de vídeo razoável. A resposta leva alguns segundos.`,
+Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as vozes) e o navegador guarda. Precisa de placa de vídeo razoável. A resposta leva alguns segundos.`,
         ok: "LIGAR",
       });
       if (!ok) return;

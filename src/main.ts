@@ -4,7 +4,7 @@ import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
 import { showCalendar } from "./ui/calendar";
 import { showLoading } from "./ui/loading";
 import { teamVoice } from "./audio/voice";
-import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
+import { parseCommand, voiceCmd, type VoiceAction } from "./audio/voiceCmd";
 import { pickSlot, radioAI, type AIAction } from "./audio/radioAI";
 import { carStatusText } from "./ui/radioContext";
 import { car3dReady } from "./render/car3d";
@@ -654,6 +654,26 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     if (r.ack) teamVoice.sayId(r.ack, slot);
   }
 
+  /** fala gravada com a IA ligada: o Whisper transcreve e segue como um comando de voz normal */
+  async hearAI(pcm: Float32Array, rate: number, vosk: string) {
+    const view = this.view;
+    if (!view) return;
+    if (pcm.length < rate * 0.3) return void view.hud.note("🎙 Não ouvi nada");
+    this.voicePin("🎙 Entendendo o que você falou...");
+    let heard = vosk;
+    try {
+      heard = (await radioAI.hear(pcm, rate)) || vosk;
+    } catch {
+      /* Whisper falhou: fica o que o Vosk ouviu */
+    } finally {
+      this.voicePin(null);
+    }
+    if (this.view !== view) return;
+    // o Whisper às vezes "ouve" frases de legenda no silêncio
+    if (!heard.trim() || /^(obrigad|legenda|\[|\()/i.test(heard.trim())) return void view.hud.note("🎙 Não entendi, fala de novo?");
+    this.voiceCommand(view, parseCommand(heard), heard);
+  }
+
   /** reação do piloto a um evento, escrita pela IA e na voz dele; false = não deu (toca a fala pronta) */
   async aiReact(event: string, slot: number): Promise<boolean> {
     const view = this.view;
@@ -820,6 +840,9 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   };
   voiceCmd.onChange(renderInd);
   voiceCmd.free = () => radioAI.ready;
+  // com a IA ligada, quem ouve a frase é o Whisper (o Vosk fica de reserva)
+  voiceCmd.capture = () => radioAI.ready;
+  voiceCmd.onAudio = (pcm, rate, vosk) => void appInst.hearAI(pcm, rate, vosk);
   // com a IA ligada, as reações do seu piloto (ultrapassagem, toque, box lento...) também saem dela;
   // se ela estiver ocupada ou demorar, toca a fala pronta
   teamVoice.aiReact = (event, slot) => appInst.aiReact(event, slot);
