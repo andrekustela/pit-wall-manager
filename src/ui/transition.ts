@@ -1,6 +1,7 @@
 // Transição entre telas com a faixa vermelha do menu: ela vai pra esquerda
 // cobrindo a tela atual (por onde passa fica escuro) e, quando a tela nova já
 // está montada, volta pra direita revelando ela.
+import { flagCanvas } from "./flagField";
 const reduce = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TAN = Math.tan((18 * Math.PI) / 180);
 /** faixa parada no menu: esquerda em 33vw, 9vw de largura, inclinada em volta de 55vh (igual ao CSS de .m2stripe) */
@@ -23,6 +24,8 @@ let cover: Cover | null = null;
 function make(): Cover {
   const shade = document.createElement("div");
   shade.className = "tshade";
+  // a bandeira do fundo continua mexendo por baixo da faixa (é a mesma das telas, no mesmo ritmo)
+  shade.appendChild(flagCanvas());
   const band = document.createElement("div");
   band.className = "tband";
   document.body.append(shade, band);

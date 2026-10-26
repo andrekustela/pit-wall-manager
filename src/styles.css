@@ -1382,9 +1382,7 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 /* bandeira de fundo nas telas do fim de semana: atrás do conteúdo, por cima do fundo escuro da tela */
 .screen > .flagbg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 /* a transição também mostra a bandeira (antes o lado coberto ficava um escuro liso) */
-.tshade { background:
-  repeating-conic-gradient(rgba(205,215,240,.028) 0 25%, transparent 0 50%) 0 0 / 108px 108px,
-  radial-gradient(ellipse at 70% 40%, #182034 0%, #0b0e15 62%, #07090d 100%); }
+.tshade > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 /* tela dos pilotos (sorteio ou escolha): seus dois pilotos à esquerda, equipes/lista à direita */
 .screen.drvscreen { padding: 14px 20px; overflow: hidden; }
@@ -1428,3 +1426,52 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
   .drvscreen .dmain { grid-template-columns: 1fr; }
   .drvscreen .dtop { padding-right: 0; }
 }
+
+/* tela dos pilotos: cartas maiores e sempre do mesmo tamanho (as duas na altura da maior) */
+.drvscreen .dmain { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+.drvscreen .dseats { align-items: stretch; }
+.drvscreen .dseat { min-height: 0; }
+.drvscreen .dseat .flip { flex: 1; min-height: 600px; }
+.drvscreen .flip > div, .drvscreen .flip .dcard { height: 100%; box-sizing: border-box; }
+.drvscreen .dcard { padding: 16px 18px; font-size: 15px; }
+.drvscreen .dcard .dname { font-size: 22px; }
+@media (max-height: 760px) { .drvscreen .dseat .flip { min-height: 520px; } .drvscreen .dcard { font-size: 13px; padding: 12px; } }
+
+/* estratégia numa tela só: topo numa linha, cada piloto com edição à esquerda e resumo à direita */
+.screen.stratscreen { padding: 14px 20px; overflow: hidden; }
+.stratscreen .swrap { height: 100%; max-width: 1640px; margin: 0 auto; display: grid; grid-template-rows: auto auto auto; align-content: center; gap: 12px; }
+.stratscreen .shead { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-right: 420px; }
+.stratscreen .shead .title { font-size: 30px; line-height: 1; }
+.stratscreen .shead .sub { margin: 4px 0 0; font-size: 13px; }
+.stratscreen .sfore { background: #0d1119; border: 2px solid var(--line); padding: 6px 12px; font-size: 13px; }
+.stratscreen .sinfo { color: var(--muted); font-size: 12px; cursor: help; border-bottom: 1px dashed var(--muted); }
+.stratscreen .scols { grid-template-columns: 1fr 1fr; gap: 14px; }
+.stratscreen .scols > .box { padding: 12px 14px; display: flex; flex-direction: column; min-height: 0; }
+.stratscreen .scols h3 { margin: 0 0 6px; }
+.stratscreen .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; }
+.stratscreen .presets .hint { margin: 0 4px 0 0; }
+.stratscreen .sbody { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.stratscreen .sedit { max-height: calc(100vh - 290px); overflow-y: auto; padding-right: 4px; }
+.stratscreen .sedit .stop { padding: 6px 8px; margin-bottom: 6px; }
+.stratscreen .sana .analysis { margin-top: 0; }
+.stratscreen .sbtns { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.stratscreen .sbtns .phint { margin-right: auto; color: var(--muted); font-size: 13px; }
+.stratscreen .sbtns .go { margin: 0; font-size: 16px; padding: 10px 22px; }
+@media (max-width: 1100px), (max-height: 640px) {
+  .screen.stratscreen { overflow-y: auto; }
+  .stratscreen .swrap { height: auto; }
+  .stratscreen .scols, .stratscreen .sbody { grid-template-columns: 1fr; }
+  .stratscreen .shead { padding-right: 0; }
+  .stratscreen .sedit { max-height: none; }
+}
+/* pilotos: o selecionado ganha borda vermelha na própria carta (o contorno de fora cortava torto) */
+.drvscreen .dmain.choose .dseat { outline: none; }
+.drvscreen .dseat .dcard { transition: border-color .15s, box-shadow .15s; }
+.drvscreen .dmain.choose .dseat.sel .dcard { border-color: var(--accent, #e8202a); box-shadow: 0 0 0 1px var(--accent, #e8202a), 0 0 22px rgba(232,32,42,.22); }
+.drvscreen .dmain.choose .dseat:not(.sel):hover .dcard { border-color: #4a5262; }
+/* lista: cabeçalho quebra em duas linhas e as colunas cabem em tela menor */
+.drvscreen .dlisthead { display: flex; flex-wrap: wrap; }
+.drvscreen .dlisthead .dsearch { flex: 1; min-width: 180px; }
+.drvscreen .dright, .drvscreen .dlist { min-width: 0; }
+.drvscreen .drow { grid-template-columns: minmax(0, 1fr) 56px 32px minmax(90px, 150px); }
+@media (max-width: 1500px) { .drvscreen .dmain { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } .drvscreen .dcard { font-size: 13px; padding: 12px; } .drvscreen .dcard .dname { font-size: 19px; } }

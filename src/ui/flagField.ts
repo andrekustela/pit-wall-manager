@@ -62,14 +62,11 @@ export function mountFlagBackdrop(screen: HTMLElement) {
   screen.prepend(cv);
   const g = cv.getContext("2d")!;
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let last = 0;
   const frame = (now: number) => {
     if (!cv.isConnected) return;
     requestAnimationFrame(frame);
-    // ~30 quadros por segundo bastam pro tecido (sobra pra tela de verdade)
-    if (now - last < 33) return;
-    last = now;
-    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    // todo quadro (com limite de quadros ela engasgava); resolução de 1x basta pra uma bandeira apagada
+    const dpr = 1;
     const W = window.innerWidth, H = window.innerHeight;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
       cv.width = Math.round(W * dpr);
@@ -77,7 +74,33 @@ export function mountFlagBackdrop(screen: HTMLElement) {
     }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    drawWaveFlag(g, W, H, reduce ? 0 : now / 1000, { x0: 0.05, fadeLeft: false, strength: 0.75 });
+    drawWaveFlag(g, W, H, reduce ? 0 : now / 1000, SCREEN_FLAG);
   };
   requestAnimationFrame(frame);
+}
+
+/** a mesma bandeira das telas (a transição usa esta, pra parecer que ela nunca parou) */
+export const SCREEN_FLAG: FlagOpts = { x0: 0.05, fadeLeft: false, strength: 0.8 };
+
+/** canvas com a bandeira animada (pra transição): para sozinho quando sai da tela */
+export function flagCanvas(): HTMLCanvasElement {
+  const cv = document.createElement("canvas");
+  const g = cv.getContext("2d")!;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const frame = (now: number) => {
+    if (!cv.isConnected && cv.dataset.started) return;
+    cv.dataset.started = "1";
+    requestAnimationFrame(frame);
+    const dpr = 1;
+    const W = window.innerWidth, H = window.innerHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+    }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    drawWaveFlag(g, W, H, reduce ? 0 : now / 1000, SCREEN_FLAG);
+  };
+  requestAnimationFrame(frame);
+  return cv;
 }

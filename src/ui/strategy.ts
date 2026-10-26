@@ -44,17 +44,19 @@ export class StrategyScreen {
     this.cons = fuelPerLap(w.laps);
     this.maxLaps = Math.floor((FUEL_MAX - 1) / this.cons);
     root.innerHTML = `
-      <div class="screen"><div class="wrap">
-        <h1 class="title">ESTRA<span>TÉGIA</span></h1>
-        <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · ${w.laps} voltas · o tanque cabe combustível pra ${Math.min(this.maxLaps, w.laps)} voltas</p>
-        <div class="box" style="margin-bottom:12px"><h3>PREVISÃO</h3>
-          Largada: <b>${wetLabel(w.startWet)}</b> · ${esc(forecastText(w))}
-          <div class="hint" style="margin-top:6px">Escolha um plano pronto ou monte o seu. Combustível é escolhido em voltas:
-          mais voltas = carro mais pesado (mais lento), menos voltas = vai ter que parar pra reabastecer.
-          O plano é um lembrete: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você (e dá pra mudar as paradas na corrida).</div>
-        </div>
-        <div class="cols" id="s-cars"></div>
-        <div class="row-btns" style="align-items:center;margin-top:28px"><button class="go" id="s-go" style="margin:0">IR PARA O GRID ▶</button>${backButtonHtml(lobby, "VOLTAR PRA CLASSIFICAÇÃO")}</div>
+      <div class="screen stratscreen"><div class="swrap">
+        <header class="shead">
+          <div><h1 class="title">ESTRA<span>TÉGIA</span></h1>
+            <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · ${w.laps} voltas · o tanque cabe combustível pra ${Math.min(this.maxLaps, w.laps)} voltas</p></div>
+          <div class="sfore" title="Previsão do tempo pra corrida">${w.startWet > 0.15 ? "🌧" : "☀"} Largada: <b>${wetLabel(w.startWet)}</b> · ${esc(forecastText(w))}</div>
+          <span class="sinfo" title="Escolha um plano pronto ou monte o seu. Combustível é escolhido em voltas: mais voltas = carro mais pesado (mais lento), menos voltas = vai ter que parar pra reabastecer. O plano é um lembrete: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você (e dá pra mudar as paradas na corrida).">ⓘ como funciona</span>
+        </header>
+        <div class="cols scols" id="s-cars"></div>
+        <footer class="sbtns">
+          <span class="phint">Plano pronto num clique ou monte o seu. Na volta marcada o engenheiro avisa; quem decide o box é você.</span>
+          ${backButtonHtml(lobby, "VOLTAR PRA CLASSIFICAÇÃO")}
+          <button class="go" id="s-go">IR PARA O GRID ▶</button>
+        </footer>
       </div></div>`;
 
     const wrap = root.querySelector("#s-cars")!;
@@ -201,8 +203,8 @@ export class StrategyScreen {
     const kgTxt = (laps: number) => `<span class="hint">(${this.kg(laps)} kg)</span>`;
     p.el.innerHTML = `
       <h3>${esc(p.el.dataset.title)}</h3>
-      <div class="hint" style="margin:0">Planos prontos:</div>
-      <div class="presets">${this.presetNames(w.startWet).map((name, i) => `<button class="btn small" data-preset="${i}" ${dis}>${esc(name)}</button>`).join("")}</div>
+      <div class="presets"><span class="hint">Planos prontos:</span>${this.presetNames(w.startWet).map((name, i) => `<button class="btn small" data-preset="${i}" ${dis}>${esc(name)}</button>`).join("")}</div>
+      <div class="sbody"><div class="sedit">
       <div class="stop"><b>Largada</b><span></span>
         <span>Pneu</span>${tyreSeg(s.tyre, "tyre")}
         <span>Combustível</span><span>${stepper(`${s.fuelLaps} voltas`, "fuel")} ${kgTxt(s.fuelLaps)}</span></div>
@@ -216,7 +218,7 @@ export class StrategyScreen {
         )
         .join("")}</div>
       <button class="btn small" data-act="add" style="margin-top:6px" ${dis}>+ ADICIONAR PARADA</button>
-      ${this.analysis(s)}`;
+      </div><div class="sana">${this.analysis(s)}</div></div>`;
 
     p.el.querySelectorAll<HTMLButtonElement>("button").forEach((b) =>
       b.addEventListener("click", () => {

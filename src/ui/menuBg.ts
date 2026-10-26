@@ -4,7 +4,7 @@
 // direita) já aparece a pista nova; na frente (à esquerda) ainda é a antiga.
 import { ACTIVE_TRACKS, CIRCUITS, getTrack, randomTrack, type Vec } from "../sim/track";
 import { MENU_HANDOFF } from "./transition";
-import { drawWaveFlag } from "./flagField";
+import { SCREEN_FLAG, drawWaveFlag } from "./flagField";
 
 const RUNNERS = [
   { color: "#ff2a32", speed: 0.06, start: 0 }, // líder: a volta dele troca a pista
@@ -283,7 +283,8 @@ export function mountMenuBackdrop(
   const drawWindFlag = (now: number) => {
     g.save();
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawWaveFlag(g, W, H, reduce ? 0 : now / 1000, { x0: 0.3, fadeLeft: true, strength: 1 });
+    // a mesma bandeira das outras telas (só some atrás dos botões do menu): de uma tela pra outra ela continua
+    drawWaveFlag(g, W, H, reduce ? 0 : now / 1000, { ...SCREEN_FLAG, fadeLeft: true });
     g.restore();
   };
   const drawFlag = (now: number) => {
