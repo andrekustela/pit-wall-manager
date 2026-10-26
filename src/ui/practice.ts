@@ -87,11 +87,12 @@ export class PracticeScreen {
           <div class="ptune">${LABELS.map(
             ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
               <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
-          ).join("")}</div>
+          ).join("")}
+            <button class="btn primary pplay" data-go></button>
+          </div>
           <div class="pside">
             <canvas class="lapcanvas"></canvas>
             <div class="radio" data-radio>Rádio: "Pronto pra sair, é só mandar."</div>
-            <button class="btn primary pplay" data-go></button>
           </div>
         </div>
         <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th title="Asa dianteira / traseira / altura / suspensão diant. e tras.">ACERTO</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;

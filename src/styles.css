@@ -1373,3 +1373,8 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
   .qscreen .qmain { grid-template-columns: 1fr; }
   .qscreen .qtop { padding-right: 0; }
 }
+
+/* treino: botão da volta embaixo dos ajustes (à esquerda) e o rádio maior à direita, cabendo a fala inteira */
+.practice2 .ptune { display: flex; flex-direction: column; }
+.practice2 .ptune .pplay { margin-top: 8px; }
+.practice2 .radio { height: 132px; }
