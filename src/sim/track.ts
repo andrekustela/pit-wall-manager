@@ -23,6 +23,9 @@ export interface TrackDef {
   grass: [string, string];
   /** circuito de rua: muro colado na pista, prédios em vez de árvores, sem brita */
   street?: boolean;
+  /** ondulações do asfalto (início e fim em metros desde a largada): onde o assoalho bate e solta faísca.
+   * Sem isso, o jogo põe algumas sozinho nas retas rápidas */
+  bumps?: [number, number][];
   /** corrida de noite, com a pista iluminada por refletores */
   night?: boolean;
   /** facilidade de ultrapassar (1 = normal; Mônaco é bem menos) */
@@ -310,6 +313,7 @@ export class Track {
     this.vProfile = p.v;
     this.idealLap = p.lap;
     this.drsZones = this.findDrsZones();
+    this.bumps = def.bumps ?? this.autoBumps();
   }
 
   /** zonas de DRS: as 2 retas mais longas (pelo menos 350 m acima de 75 m/s); [início, fim] em s */
@@ -332,6 +336,50 @@ export class Track {
       .sort((x, y) => y[1] - x[1])
       .slice(0, 2)
       .map(([st, len]) => [st + 40, st + len - 30] as [number, number]); // abre logo depois da saída da curva
+  }
+
+  /** ondulações: onde o assoalho bate (faísca) */
+  bumps: [number, number][] = [];
+
+  /** sem ondulações marcadas: uma no fim de cada reta rápida (o carro afunda antes da freada) e mais
+   * umas no meio das retas longas; pista de rua tem mais. Sempre as mesmas pra cada pista */
+  private autoBumps(): [number, number][] {
+    const n = this.L, out: [number, number][] = [];
+    let seed = 0;
+    for (const ch of this.def.name) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    let i0 = 0;
+    while (i0 < n && this.vProfile[i0] > 70) i0++;
+    let a = -1;
+    for (let k = i0; k <= i0 + n; k++) {
+      const fast = this.vProfile[k % n] > 70;
+      if (fast && a < 0) a = k;
+      else if (!fast && a >= 0) {
+        const len = k - a;
+        if (len >= 220) {
+          // compressão antes da freada
+          const st = a + len * (0.78 + rnd() * 0.1), w = 30 + rnd() * 20;
+          out.push([st % n, (st + w) % n]);
+          // retas longas: mais uma no meio (rua: quase sempre)
+          if (len > 600 || (this.def.street && rnd() < 0.8)) {
+            const m = a + len * (0.35 + rnd() * 0.2);
+            out.push([m % n, (m + 25 + rnd() * 20) % n]);
+          }
+        }
+        a = -1;
+      }
+    }
+    return out;
+  }
+
+  /** quanto a pista ondula em s (0 = lisa, 1 = no meio da ondulação) */
+  bumpAt(s: number): number {
+    s = this.wrap(s);
+    for (const [a, b] of this.bumps) {
+      const len = this.wrap(b - a), d = this.wrap(s - a);
+      if (d < len) return Math.sin((Math.PI * d) / len);
+    }
+    return 0;
   }
 
   /** dentro de uma zona de DRS? (devolve o índice da zona ou -1) */

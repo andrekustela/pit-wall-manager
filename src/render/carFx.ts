@@ -45,7 +45,7 @@ export class CarFx {
   }
 
   /** chamado uma vez por carro por quadro: devolve o giro extra do desenho (rad) */
-  update(c: CarState, p: { x: number; y: number; h: number }, dt: number, curv: number, street: boolean, follow: boolean): number {
+  update(c: CarState, p: { x: number; y: number; h: number }, dt: number, curv: number, street: boolean, follow: boolean, bump = 0): number {
     let s = this.st.get(c.id);
     if (!s) this.st.set(c.id, (s = { spinDur: 0, spinTotal: 0, prevSpin: 0, crashT: -1, crashYaw: 0, last: null }));
     const fx = Math.cos(p.h), fy = Math.sin(p.h);
@@ -91,6 +91,22 @@ export class CarFx {
       const [x, y] = at(-1.6, (Math.random() - 0.5) * 1.2);
       if (street) this.parts.push({ x, y, vx: -fx * 8 + (Math.random() - 0.5) * 10, vy: -fy * 8 + (Math.random() - 0.5) * 10, t: 0, life: 0.3, size: 0.5, kind: "faisca" });
       else this.parts.push({ x, y, vx: -fx * c.v * 0.15 + (Math.random() - 0.5) * 3, vy: -fy * c.v * 0.15 + (Math.random() - 0.5) * 3, t: 0, life: 1.4, size: 1.1, kind: "poeira" });
+    }
+    // ---- assoalho batendo na ondulação: faíscas saindo por trás, como na F1 ----
+    // mais rápido, mais baixo (acerto) e mais pesado (combustível) = mais faísca
+    if (bump > 0 && c.v > 55 && c.spin <= 0 && c.offTrack <= 0) {
+      const h = c.tuning?.h ?? 50;
+      const low = Math.max(0.25, 1.7 - h / 55);
+      const k = bump * Math.min(1, (c.v - 55) / 25) * low * (1 + Math.min(1, c.fuel / 100) * 0.6);
+      let n = k * 140 * dt;
+      while (n > 0 && (n >= 1 || Math.random() < n)) {
+        n -= 1;
+        const side = (Math.random() - 0.5) * 1.1;
+        const [x, y] = at(-1.9 - Math.random() * 0.4, side);
+        // o pedaço do assoalho raspa e a faísca fica pra trás (no chão ela anda mais devagar que o carro)
+        const fwd = c.v * (0.35 + Math.random() * 0.35), lat = side * 6 + (Math.random() - 0.5) * 5;
+        this.parts.push({ x, y, vx: fx * fwd - fy * lat, vy: fy * fwd + fx * lat, t: 0, life: 0.12 + Math.random() * 0.22, size: 0.5, kind: "faisca" });
+      }
     }
     if (smoke && Math.random() < dt * 18) {
       const [x, y] = at(-1.6, (Math.random() < 0.5 ? -1 : 1) * 0.65);
@@ -164,12 +180,17 @@ export class CarFx {
     for (const p of this.parts) {
       const q = p.t / p.life, { x, y } = toCss(p);
       if (p.kind === "faisca") {
-        o.strokeStyle = `rgba(255,${180 + Math.round(60 * (1 - q))},60,${(1 - q).toFixed(3)})`;
-        o.lineWidth = Math.max(1, 0.12 * m);
+        // risco brilhante (somando luz) com a ponta quase branca
+        o.globalCompositeOperation = "lighter";
+        o.strokeStyle = `rgba(255,${150 + Math.round(90 * (1 - q))},${40 + Math.round(80 * (1 - q))},${(1 - q).toFixed(3)})`;
+        o.lineWidth = Math.max(1.4, 0.16 * m);
         o.beginPath();
         o.moveTo(x, y);
-        o.lineTo(x - p.vx * 0.03 * m, y - p.vy * 0.03 * m);
+        o.lineTo(x - p.vx * 0.045 * m, y - p.vy * 0.045 * m);
         o.stroke();
+        o.fillStyle = `rgba(255,250,220,${(0.9 * (1 - q)).toFixed(3)})`;
+        o.fillRect(x - 1, y - 1, 2, 2);
+        o.globalCompositeOperation = "source-over";
       } else {
         const r = (p.size + q * (p.kind === "fumaca" ? 1.2 : 2)) * m;
         o.fillStyle = p.kind === "poeira" ? `rgba(160,132,92,${(0.45 * (1 - q)).toFixed(3)})` : `rgba(210,210,214,${(0.24 * (1 - q)).toFixed(3)})`;

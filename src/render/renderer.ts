@@ -284,7 +284,8 @@ export class Renderer {
     const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
     const sorted = [...race.cars].sort((a, b) => Number(a.id === this.followId) - Number(b.id === this.followId));
     // pedaços de asa: voam um pouco, escorregam e ficam na pista até sumir
-    const dt = Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed || 1));
+    // pausado: fumaça, faíscas e pedaços param junto com a corrida
+    const dt = speed === 0 ? 0 : Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed));
     this.debris = this.debris.filter((d) => (d.t += dt) < 14);
     for (const d of this.debris) {
       const f = Math.exp(-2.2 * dt);
@@ -308,7 +309,7 @@ export class Renderer {
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
-      const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId);
+      const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
       const crashed = this.fx.crashed(c);
       const hh = p.h + yaw, alpha = c.retired && !crashed ? 0.6 : 1;
       let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
