@@ -60,6 +60,8 @@ export interface SoloSetup {
   equalCars: boolean;
   champPct: number;
   champName: string;
+  /** pilotos sorteados ou escolhidos */
+  pickMode: "draw" | "choose";
 }
 
 /** últimas escolhas do jogo solo (o formulário já abre com elas) */
@@ -69,14 +71,16 @@ interface SoloPrefs {
   realDrivers: boolean;
   equalCars: boolean;
   champPct: number;
+  pickMode: "draw" | "choose";
 }
 function soloPrefs(): SoloPrefs {
-  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30 };
+  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30, pickMode: "draw" };
   const x = loadJson<Partial<SoloPrefs>>("pwm.soloCfg") ?? {};
   return {
     track: typeof x.track === "number" && (x.track === -1 || (CIRCUITS[x.track] && !CIRCUITS[x.track].standby)) ? x.track : d.track,
     laps: LAP_OPTIONS.includes(x.laps as number) ? (x.laps as number) : d.laps,
     realDrivers: x.realDrivers ?? d.realDrivers,
+    pickMode: x.pickMode === "choose" ? "choose" : "draw",
     equalCars: x.equalCars ?? d.equalCars,
     champPct: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(x.champPct as number) ? (x.champPct as number) : d.champPct,
   };
@@ -232,6 +236,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
           : `<div class="fld"><span>Pista</span><div data-tpick></div></div>`}
         <div class="fld"><span>Voltas da corrida</span><div class="seg lapseg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}" title="${isPct(n) ? `${-n}% das voltas da corrida oficial da pista (arredonda pra cima)` : `${n} voltas`}">${lapChoiceLabel(n)}</button>`).join("")}</div>
           <span class="hint" style="margin:4px 0 0" data-lapshint></span></div>
+        <div class="fld"><span>Seus pilotos</span><div class="seg" data-seg="pick"><button data-v="0" class="${sp.pickMode === "draw" ? "on" : ""}" title="Os dois pilotos saem no sorteio (dá pra trocar 1 pelo reserva)">🎲 SORTEADOS</button><button data-v="1" class="${sp.pickMode === "choose" ? "on" : ""}" title="Você escolhe os dois entre todos os pilotos">✋ ESCOLHER</button></div></div>
         ${toggle("realDrivers", sp.realDrivers, "Lendas da F1", "Pilotos reais de todas as eras. Desligado = fictícios.")}
         ${toggle("equalCars", sp.equalCars, "Carros iguais", "Todo mundo com o mesmo carro: ganha quem acerta e decide melhor.")}
         <button class="m2btn hot" id="m-start" data-kind="${p === "cfg-corrida" ? "corrida" : p === "cfg-fds" ? "fds" : "campeonato"}"><b>COMEÇAR</b><span>${camp ? "1ª etapa: treino livre" : p === "cfg-fds" ? "Começa pelo treino livre" : "Vai direto pra estratégia"}</span><i>▶</i></button>`;
@@ -286,6 +291,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         realDrivers: chk("realDrivers"),
         equalCars: chk("equalCars"),
         champPct: segV("champPct", sp.champPct),
+        pickMode: segV("pick", sp.pickMode === "choose" ? 1 : 0) === 1 ? "choose" : "draw",
       };
       storeSet("pwm.soloCfg", JSON.stringify(prefs));
       const setup: SoloSetup = {
@@ -296,6 +302,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         realDrivers: prefs.realDrivers,
         equalCars: prefs.equalCars,
         champPct: prefs.champPct,
+        pickMode: prefs.pickMode,
         champName: el.querySelector<HTMLInputElement>("[data-opt=champName]")?.value.trim() ?? "",
       };
       choose({ mode: "solo", ...get(), setup });
@@ -364,7 +371,7 @@ Ele fica 30 dias na lixeira (Backup dos campeonatos), dá pra restaurar.`, ok: "
    * (à esquerda) ainda a antiga — igual à troca de pista do fundo.
    */
   const stage = root.querySelector<HTMLElement>("#m-stage")!;
-  const VIEW_MS = 560;
+  const VIEW_MS = 680;
   const TAN = Math.tan((18 * Math.PI) / 180);
   const easeIO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   let busy = false;
@@ -406,7 +413,7 @@ Ele fica 30 dias na lixeira (Backup dos campeonatos), dá pra restaurar.`, ok: "
     const W = window.innerWidth, H = window.innerHeight;
     const endTx = -(W * 0.375 + H * TAN * 0.6 + 80); // até a faixa sair pela esquerda
     // ida (pra esquerda): a faixa vai apagando a vista antiga; volta (pra direita): a nova vai aparecendo atrás dela
-    const BACK_MS = 640;
+    const BACK_MS = 780;
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
     neu.style.clipPath = "polygon(0 0, 0 0, 0 0)";
     const t0 = performance.now();

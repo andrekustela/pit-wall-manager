@@ -180,6 +180,11 @@ export class LobbyScreen {
             (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"} title="${isPct(n) ? `${-n}% das voltas oficiais da pista (arredonda pra cima)` : ""}">${lapChoiceLabel(n).toLowerCase()}</button>`,
           ).join("")}</div>
           ${isPct(lobby.laps) && lobby.trackIndex >= 0 ? `<div class="hint" style="margin:4px 0 0">${officialLaps(lobby.trackIndex)} voltas oficiais → ${resolveLaps(lobby.laps, lobby.trackIndex)} voltas</div>` : isPct(lobby.laps) ? `<div class="hint" style="margin:4px 0 0">${-lobby.laps}% das voltas oficiais de cada pista</div>` : ""}</div>
+        <div><div class="hint" style="margin:0 0 6px">Pilotos de cada jogador</div>
+          <div class="seg" style="min-width:220px">
+            <button data-pick="draw" class="${lobby.pickMode !== "choose" ? "on" : ""}" ${isHost ? "" : "disabled"} title="Sorteados (dá pra trocar 1 pelo reserva)">🎲 sorteados</button>
+            <button data-pick="choose" class="${lobby.pickMode === "choose" ? "on" : ""}" ${isHost ? "" : "disabled"} title="Cada jogador escolhe a sua dupla">✋ escolher</button>
+          </div></div>
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
@@ -195,6 +200,9 @@ export class LobbyScreen {
       <p class="hint">Regras: reabastecimento liberado · 2 compostos de pneu obrigatórios (menos se usar pneu de chuva) · pode chover, ter batida e safety car.</p>`;
     root.querySelectorAll<HTMLButtonElement>("[data-laps]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "options", laps: Number(b.dataset.laps) })),
+    );
+    root.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach((b) =>
+      b.addEventListener("click", () => this.conn.send({ t: "options", pickMode: b.dataset.pick as "draw" | "choose" })),
     );
     root.querySelector<HTMLInputElement>("#l-real")!.addEventListener("change", (e) =>
       this.conn.send({ t: "options", realDrivers: (e.target as HTMLInputElement).checked }),

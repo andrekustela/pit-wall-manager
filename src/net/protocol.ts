@@ -21,6 +21,9 @@ export interface LobbyPlayer {
   livery?: import("../sim/livery").Livery;
 }
 
+/** como os pilotos da sua equipe saem: sorteados ou escolhidos */
+export type PickMode = "draw" | "choose";
+
 export interface WeekendPublic {
   seed: number;
   trackIndex: number;
@@ -58,6 +61,8 @@ export interface LobbyState {
   champ: ChampState | null;
   /** pilotos reais (lendas) em vez dos fictícios */
   realDrivers: boolean;
+  /** pilotos sorteados (com 1 troca pelo reserva) ou escolhidos por você */
+  pickMode: PickMode;
   /** pilotos sorteados de cada equipe */
   lineup: import("../sim/drivers").Lineup;
   /** equipes que já usaram a troca pelo reserva */
@@ -81,7 +86,7 @@ export type ClientMsg =
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; quick?: boolean; champName?: string; realDrivers?: boolean }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; quick?: boolean; champName?: string; realDrivers?: boolean; pickMode?: PickMode }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }
@@ -94,6 +99,8 @@ export type ClientMsg =
   | { t: "back" }
   | { t: "reroll" }
   | { t: "swapDriver"; carId: string }
+  /** pilotos "escolher": troca o seu piloto carId pelo driverId (que vai pra equipe onde ele estava) */
+  | { t: "pickDriver"; carId: string; driverId: string }
   | { t: "leave" };
 
 /** mensagem do chat (só entre jogadores) */

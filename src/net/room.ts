@@ -15,6 +15,7 @@ import { ALL_COMPOUNDS, DEFAULT_TUNING, FUEL_MAX, type CarSetup, type Tuning } f
 import { PRACTICE_LAPS, practiceLap, runQualifying, weekendWeather, type WeekendInfo } from "../sim/weekend";
 import {
   LAP_OPTIONS,
+  type PickMode,
   MAX_PLAYERS,
   SPEEDS,
   type ClientMsg,
@@ -61,6 +62,7 @@ export interface ChampSave {
   laps: number;
   equalCars: boolean;
   realDrivers: boolean;
+  pickMode?: "draw" | "choose";
   teamId: string;
   name: string;
   teamName: string;
@@ -95,6 +97,7 @@ export class Room {
 
   /** pilotos reais (lendas da F1) em vez dos fictícios */
   realDrivers = true;
+  pickMode: PickMode = "draw";
 
   private newLineup() {
     const seed = (Math.random() * 2 ** 32) >>> 0;
@@ -126,6 +129,7 @@ export class Room {
       laps: this.laps,
       equalCars: this.equalCars,
       realDrivers: this.realDrivers,
+      pickMode: this.pickMode,
       teamId: p.teamId,
       name: p.name,
       teamName: p.teamName,
@@ -165,6 +169,7 @@ export class Room {
     this.laps = s.laps;
     this.equalCars = s.equalCars;
     this.realDrivers = s.realDrivers;
+    this.pickMode = s.pickMode ?? "draw";
     this.champMode = true;
     this.lineup = s.lineup;
     this.reserves = s.reserves;
@@ -323,6 +328,7 @@ export class Room {
         if (msg.champName !== undefined) this.champName = clean(String(msg.champName), 40);
         if (msg.champPct !== undefined && [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(msg.champPct)) this.champPct = msg.champPct;
         if (msg.realDrivers !== undefined) this.realDrivers = !!msg.realDrivers;
+        if (msg.pickMode === "draw" || msg.pickMode === "choose") this.pickMode = msg.pickMode;
         if (msg.quick !== undefined) this.quick = !!msg.quick;
         this.broadcastLobby();
         break;
@@ -395,6 +401,56 @@ export class Room {
           this.setPhase("quali");
           this.broadcast({ t: "quali", results: this.lastQuali.results, wet: this.lastQuali.wet });
         }
+        break;
+      }
+      case "pickDriver": {
+        // pilotos "escolher": no começo do fim de semana (no campeonato, só no começo da temporada)
+        const team = p.teamId;
+        const ch = this.champ;
+        const early = this.phase === "practice" || (this.phase === "strategy" && this.quick && !ch);
+        if (this.pickMode !== "choose" || !team || !early || !this.owns(p, msg.carId)) return;
+        if (ch && (ch.round !== 0 || (ch.season ?? 1) !== 1)) return;
+        const want = msg.driverId;
+        if (!poolOf(this.realDrivers).some((d) => d.id === want) || this.lineup[team].includes(want)) return;
+        // piloto de outro jogador não dá pra pegar
+        const humans = new Set([...this.players.values()].map((x) => x.teamId).filter(Boolean));
+        const from = Object.keys(this.lineup).find((t) => this.lineup[t].includes(want));
+        if (from && humans.has(from)) return;
+        const mine = [...this.lineup[team]] as [string, string];
+        mine[mine.indexOf(msg.carId)] = want;
+        const next = { ...this.lineup, [team]: mine };
+        if (from) {
+          // troca de lugar: quem saiu da sua equipe vai pro lugar dele
+          const theirs = [...this.lineup[from]] as [string, string];
+          theirs[theirs.indexOf(want)] = msg.carId;
+          next[from] = theirs;
+        }
+        this.lineup = next;
+        if (this.weekend) this.weekend.lineup = this.lineup;
+        // reservas: quem saiu fica no lugar de reserva de quem entrou
+        for (const t of Object.keys(this.reserves)) if (this.reserves[t] === want) this.reserves[t] = msg.carId;
+        // o carro (evolução, mecânicos, motor) fica com a equipe: cada piloto assume o carro do outro
+        if (ch) {
+          const TMP = "__troca__";
+          moveCar(ch, want, TMP);
+          moveCar(ch, msg.carId, want);
+          moveCar(ch, TMP, msg.carId);
+        }
+        const dev = this.weekend?.dev;
+        if (dev) {
+          const a = dev[msg.carId], b = dev[want];
+          if (a !== undefined) dev[want] = a;
+          else delete dev[want];
+          if (b !== undefined) dev[msg.carId] = b;
+          else delete dev[msg.carId];
+        }
+        p.tunings[want] = p.tunings[msg.carId] ?? { ...DEFAULT_TUNING };
+        delete p.tunings[msg.carId];
+        delete p.practiceCount[msg.carId];
+        delete p.practiceLaps[msg.carId];
+        // corrida única: o grid sai de uma classificação simulada, então refaz com o piloto novo
+        if (this.phase === "strategy" && this.quick && !ch) this.recalcQuali();
+        this.broadcastLobby();
         break;
       }
       case "swapDriver": {
@@ -618,6 +674,17 @@ export class Room {
 
   private lastQuali: { results: ReturnType<typeof runQualifying>["results"]; wet: number } | null = null;
 
+  /** corrida única: refaz a classificação simulada (trocou piloto) sem mudar de fase */
+  private recalcQuali() {
+    const tunings: Record<string, Tuning> = {};
+    for (const pl of this.players.values()) Object.assign(tunings, pl.tunings);
+    const q = runQualifying(this.weekend!, tunings);
+    this.qualiGrid = q.grid;
+    this.qualiTunings = q.tunings;
+    this.lastQuali = { results: q.results, wet: q.wet };
+    this.broadcast({ t: "quali", results: q.results, wet: q.wet });
+  }
+
   private startQuali() {
     const tunings: Record<string, Tuning> = {};
     for (const p of this.players.values()) Object.assign(tunings, p.tunings);
@@ -741,6 +808,7 @@ export class Room {
         ? { name: this.champ.name ?? "Campeonato", done: this.champ.results.length, total: this.champ.rounds.length, waiting: this.reserved.filter((r) => ![...this.players.values()].some((p) => p.teamId === r.teamId)).map((r) => ({ name: r.name, teamId: r.teamId })) }
         : null,
       realDrivers: this.realDrivers,
+      pickMode: this.pickMode,
       lineup: this.lineup,
       swapUsed: [...this.swapUsed],
       champ: this.champ,

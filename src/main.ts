@@ -7,6 +7,8 @@ import { teamVoice } from "./audio/voice";
 import { parseCommand, voiceCmd, type VoiceAction } from "./audio/voiceCmd";
 import { pickSlot, radioAI, type AIAction } from "./audio/radioAI";
 import { carStatusText } from "./ui/radioContext";
+import { mountFlagBackdrop } from "./ui/flagField";
+import { DriversScreen } from "./ui/drivers";
 import { car3dReady } from "./render/car3d";
 import { DriverRequests } from "./ui/requests";
 import { applyEditor } from "./ui/editorData";
@@ -35,7 +37,6 @@ import { PodiumScreen } from "./ui/podium";
 import { PracticeScreen } from "./ui/practice";
 import { QualiScreen } from "./ui/quali";
 import { StrategyScreen } from "./ui/strategy";
-import { showDraft } from "./ui/draft";
 import { HqScreen } from "./ui/hq";
 import { ReplayRecorder, showReplay } from "./render/replay";
 import { getLivery } from "./ui/liveryStore";
@@ -235,6 +236,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         laps: s.laps,
         trackIndex: s.trackIndex,
         realDrivers: s.realDrivers,
+        pickMode: s.pickMode,
         equalCars: s.equalCars,
         champ: s.kind === "campeonato",
         champPct: s.champPct,
@@ -345,15 +347,16 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         break;
       case "practice":
         this.quali = null;
-        this.screen = new PracticeScreen(app, conn, l);
-        // pilotos acabaram de ser sorteados (fim de semana novo ou 1ª etapa do campeonato)
-        if (l.weekend && this.draftSeen !== l.weekend.seed) {
-          this.draftSeen = l.weekend.seed;
-          const draft = !l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1);
-          const openDraft = () => draft && !AUTO && showDraft(l, (carId) => conn.send({ t: "swapDriver", carId }));
-          // começo de temporada do campeonato: primeiro o calendário (pistas sorteadas), depois o sorteio dos pilotos
-          if (l.champ && l.champ.round === 0 && !AUTO) showCalendar(l.champ, openDraft);
-          else openDraft();
+        // pilotos acabaram de sair (fim de semana novo ou 1ª etapa do campeonato): primeiro a tela
+        // dos pilotos (sorteio ou escolha), depois o treino, com a transição de sempre
+        if (this.needDrivers(l)) {
+          this.draftSeen = l.weekend!.seed;
+          this.screen = new DriversScreen(app, conn, l, () => this.afterDrivers(), "VAMOS PRO TREINO ▶");
+          // começo de temporada do campeonato: o calendário (pistas sorteadas) aparece por cima
+          if (l.champ && l.champ.round === 0) showCalendar(l.champ, () => {});
+        } else {
+          if (l.weekend) this.draftSeen = l.weekend.seed;
+          this.screen = new PracticeScreen(app, conn, l);
         }
         if (AUTO && HOLD !== "practice") conn.send({ t: "ready", ready: true });
         break;
@@ -362,6 +365,13 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         if (AUTO && HOLD !== "quali") setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
       case "strategy":
+        // corrida única com "escolher": monta a dupla antes da estratégia (o grid é refeito)
+        if (this.needDrivers(l) && l.pickMode === "choose" && !l.champ) {
+          this.draftSeen = l.weekend!.seed;
+          this.screen = new DriversScreen(app, conn, l, () => this.afterDrivers(), "PRA ESTRATÉGIA ▶");
+          break;
+        }
+        if (l.weekend) this.draftSeen = l.weekend.seed;
         this.screen = new StrategyScreen(app, conn, l, this.quali!.results);
         if (AUTO && HOLD !== "strategy") setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
@@ -380,6 +390,9 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         break;
     }
     window.scrollTo(0, 0);
+    // fundo com a bandeira quadriculada apagada (menos no pódio, que tem o dele)
+    const sc = app.querySelector<HTMLElement>(":scope > .screen");
+    if (sc && l.phase !== "podium") mountFlagBackdrop(sc);
     updateWaitBar(l); // online: painel de quem já está pronto
     revealScreen();
     enterScreen(app);
@@ -722,6 +735,28 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     view.setFollow(car.id);
     view.hud.note(`🎥 Câmera em ${car.driver.name} (P${car.position})`);
     return true;
+  }
+
+  /** a tela dos pilotos aparece agora? (fim de semana novo; no campeonato, só no começo da temporada) */
+  private needDrivers(l: LobbyState): boolean {
+    if (!l.weekend || AUTO || this.draftSeen === l.weekend.seed) return false;
+    return !l.champ || (l.champ.round === 0 && (l.champ.season ?? 1) === 1);
+  }
+
+  /** saiu da tela dos pilotos: abre o treino (ou a estratégia) com a transição de sempre */
+  private afterDrivers() {
+    const l = this.lobby, conn = this.conn;
+    if (!l || !conn) return;
+    wipe();
+    this.screen?.destroy();
+    app.innerHTML = "";
+    this.screen = l.phase === "strategy" && this.quali ? new StrategyScreen(app, conn, l, this.quali.results) : new PracticeScreen(app, conn, l);
+    window.scrollTo(0, 0);
+    const sc = app.querySelector<HTMLElement>(":scope > .screen");
+    if (sc) mountFlagBackdrop(sc);
+    updateWaitBar(l);
+    revealScreen();
+    enterScreen(app);
   }
 
   /** conversa com a IA do rádio: quem você chamou responde com uma fala nova, na voz dele */

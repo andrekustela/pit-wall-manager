@@ -5,8 +5,8 @@ const reduce = () => window.matchMedia("(prefers-reduced-motion: reduce)").match
 const TAN = Math.tan((18 * Math.PI) / 180);
 /** faixa parada no menu: esquerda em 33vw, 9vw de largura, inclinada em volta de 55vh (igual ao CSS de .m2stripe) */
 const REST_LEFT = 0.33, WIDTH = 0.09, CY = 0.55;
-const COVER_MS = 460;
-const REVEAL_MS = 700;
+const COVER_MS = 600;
+const REVEAL_MS = 900;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 

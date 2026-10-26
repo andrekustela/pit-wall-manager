@@ -1378,3 +1378,53 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .practice2 .ptune { display: flex; flex-direction: column; }
 .practice2 .ptune .pplay { margin-top: 8px; }
 .practice2 .radio { height: 132px; }
+
+/* bandeira de fundo nas telas do fim de semana: atrás do conteúdo, por cima do fundo escuro da tela */
+.screen > .flagbg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+/* a transição também mostra a bandeira (antes o lado coberto ficava um escuro liso) */
+.tshade { background:
+  repeating-conic-gradient(rgba(205,215,240,.028) 0 25%, transparent 0 50%) 0 0 / 108px 108px,
+  radial-gradient(ellipse at 70% 40%, #182034 0%, #0b0e15 62%, #07090d 100%); }
+
+/* tela dos pilotos (sorteio ou escolha): seus dois pilotos à esquerda, equipes/lista à direita */
+.screen.drvscreen { padding: 14px 20px; overflow: hidden; }
+.drvscreen .dwrap { height: 100%; max-width: 1560px; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+.drvscreen .dtop { display: flex; align-items: flex-end; gap: 20px; padding-right: 420px; }
+.drvscreen .dtop .title { font-size: 30px; line-height: 1; }
+.drvscreen .dtop .sub { margin: 4px 0 0; font-size: 13px; }
+.drvscreen .dtop .go { margin: 0 0 0 auto; font-size: 15px; padding: 10px 20px; }
+.drvscreen .dmain { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 18px; min-height: 0; }
+.drvscreen h3 { margin: 0 0 8px; color: var(--muted); font: 600 11px var(--pix, monospace); letter-spacing: .14em; }
+.drvscreen .dmine { min-height: 0; overflow-y: auto; }
+.drvscreen .dseats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.drvscreen .dseat { display: flex; flex-direction: column; gap: 6px; }
+.drvscreen .dmain.choose .dseat { cursor: pointer; outline: 2px solid transparent; outline-offset: 3px; transition: outline-color .15s; }
+.drvscreen .dmain.choose .dseat.sel { outline-color: var(--accent, #e8202a); }
+.drvscreen .dseat-tag { text-align: center; font: 600 11px var(--pix, monospace); letter-spacing: .08em; color: var(--muted); }
+.drvscreen .dseat.sel .dseat-tag { color: #ff8a8f; }
+/* a carta ocupa a altura do conteúdo (frente e verso no mesmo lugar) */
+.drvscreen .flip { display: grid; min-height: 0; }
+.drvscreen .flip > div { position: relative; inset: auto; grid-area: 1 / 1; }
+.drvscreen .flip.still > div { transition: none; }
+.drvscreen .dright { min-height: 0; display: flex; flex-direction: column; }
+.drvscreen .dright .draft-others { overflow-y: auto; }
+.drvscreen .dlisthead { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-bottom: 8px; }
+.drvscreen .dlisthead h3 { margin: 0; }
+.drvscreen .dsearch { padding: 7px 10px; font-size: 13px; }
+.drvscreen .dsort button { padding: 5px 10px; font-size: 11px; }
+.drvscreen .dlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; padding-right: 4px; }
+.drvscreen .drow { display: grid; grid-template-columns: minmax(0, 1fr) 64px 36px 170px; align-items: center; gap: 10px; padding: 6px 10px; text-align: left; background: #0d1119; border: 1px solid var(--line); color: var(--text); font: 13px var(--font); cursor: pointer; transition: border-color .12s, background .12s; }
+.drvscreen .drow:hover:not(:disabled) { border-color: #e9edf5; background: #141a26; }
+.drvscreen .drow:disabled { opacity: .45; cursor: default; }
+.drvscreen .drow.mine { opacity: .8; border-color: var(--accent, #e8202a); }
+.drvscreen .drow .dn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drvscreen .drow .dn small { color: var(--muted); margin-left: 6px; }
+.drvscreen .drow .dstat { color: var(--muted); font-size: 12px; text-align: right; }
+.drvscreen .drow .drate { font: 700 15px var(--num, monospace); font-style: normal; text-align: right; }
+.drvscreen .drow .dteamtag { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 8px; border-left: 3px solid var(--tc); }
+@media (max-width: 1100px), (max-height: 640px) {
+  .screen.drvscreen { overflow-y: auto; }
+  .drvscreen .dwrap { height: auto; }
+  .drvscreen .dmain { grid-template-columns: 1fr; }
+  .drvscreen .dtop { padding-right: 0; }
+}
