@@ -5,6 +5,8 @@ import { showCalendar } from "./ui/calendar";
 import { showLoading } from "./ui/loading";
 import { teamVoice } from "./audio/voice";
 import { voiceCmd, type VoiceAction } from "./audio/voiceCmd";
+import { pickSlot, radioAI, type AIAction } from "./audio/radioAI";
+import { carStatusText } from "./ui/radioContext";
 import { car3dReady } from "./render/car3d";
 import { DriverRequests } from "./ui/requests";
 import { applyEditor } from "./ui/editorData";
@@ -619,6 +621,14 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   /** comando de voz reconhecido: responde um pedido do piloto (sim/não) ou executa a ordem */
   private voiceCommand(view: RaceView, a: VoiceAction | null, heard: string) {
     if (this.view !== view) return;
+    // IA do rádio ligada: a frase inteira vai pra ela (menos "sim/não" a um pedido e ordem curtinha,
+    // que já resolvem na hora)
+    if (radioAI.ready && heard.trim()) {
+      const short = heard.trim().split(/s+/).length <= 3;
+      const yn = a?.kind === "yes" || a?.kind === "no";
+      if (yn && this.requests?.answer(a.kind === "yes")) return;
+      if (!(short && a && !yn)) return void this.askAI(view, heard);
+    }
     if (a?.kind === "yes" || a?.kind === "no") {
       if (!this.requests?.answer(a.kind === "yes")) view.hud.note(`🎙 Você: "${heard}" (nenhum pedido pra responder)`);
       return;
@@ -634,6 +644,55 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     }
     view.hud.note(`🎙 Você → P${slot + 1}: ${r.what}`);
     if (r.ack) teamVoice.sayId(r.ack, slot);
+  }
+
+  /** conversa com a IA do rádio: quem você chamou responde com uma fala nova, na voz dele */
+  private async askAI(view: RaceView, heard: string) {
+    const race = view.race;
+    const mine = teamVoice.drivers();
+    const cars = mine.map((d) => race.cars.find((c) => c.id === d.id)!).filter(Boolean);
+    if (!cars.length) return;
+    const named = pickSlot(heard, cars.map((c) => ({ name: c.driver.name, short: c.driver.short })));
+    const followSlot = mine.findIndex((d) => d.id === view.follow);
+    const slot = named >= 0 ? named : followSlot >= 0 ? followSlot : 0;
+    const car = cars[slot] ?? cars[0];
+    view.hud.note(`🎙 Você → ${car.driver.short}: "${heard}"`);
+    this.voicePin(`📻 ${car.driver.short} pensando...`);
+    try {
+      const drivers = cars.map((c) => ({ id: c.id, name: c.driver.name, short: c.driver.short, style: c.driver.profile?.style, status: () => carStatusText(race, c) }));
+      const r = await radioAI.ask(heard, slot, drivers, car.team.name);
+      if (this.view !== view) return;
+      const done = this.aiAct(view, r.action, slot);
+      view.hud.note(`📻 ${car.driver.short}: "${r.text}"${done ? ` (${done})` : ""}`);
+      try {
+        teamVoice.sayUrl(await radioAI.voice(r.text, slot), slot, r.text);
+      } catch {
+        /* sem a voz: fica só o texto no feed */
+      }
+    } catch (e) {
+      view.hud.note(`📻 A IA do rádio não respondeu (${String((e as Error)?.message ?? e).slice(0, 60)})`);
+    } finally {
+      this.voicePin(null);
+    }
+  }
+
+  /** ação que a IA entendeu na sua fala -> a mesma ordem dos botões do card */
+  private aiAct(view: RaceView, act: AIAction, slot: number): string | null {
+    const map: Partial<Record<AIAction, Exclude<VoiceAction, { kind: "yes" } | { kind: "no" }>>> = {
+      box: { kind: "box", slot },
+      cancelar_box: { kind: "cancelBox", slot },
+      atacar: { kind: "pace", slot, mode: "push" },
+      normal: { kind: "pace", slot, mode: "normal" },
+      poupar: { kind: "pace", slot, mode: "conserve" },
+      motor_rico: { kind: "engine", slot, mode: "rich" },
+      motor_normal: { kind: "engine", slot, mode: "normal" },
+      motor_pobre: { kind: "engine", slot, mode: "lean" },
+      deixar_passar: { kind: "order", slot, mode: "letPass" },
+      manter: { kind: "order", slot, mode: "hold" },
+      livre: { kind: "order", slot, mode: "none" },
+    };
+    const a = map[act];
+    return a ? (this.act(view, a, slot)?.what ?? null) : null;
   }
 
   private teardown() {
@@ -694,6 +753,21 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     if (st === "error") toast(`🎙 ${voiceCmd.error}`);
   };
   voiceCmd.onChange(renderInd);
+  voiceCmd.free = () => radioAI.ready;
+  // IA do rádio: andamento do download no canto e aviso quando fica pronta (ou falha)
+  let aiWas = radioAI.state;
+  radioAI.onChange(() => {
+    const st = radioAI.state;
+    if (st === "loading") appInst.voicePin(`🤖 Preparando a IA do rádio... ${radioAI.progress}`);
+    else if (aiWas === "loading") {
+      appInst.voicePin(null);
+      if (st === "ready") toast("🤖 IA do rádio pronta: segure V e fale com seus pilotos");
+    }
+    if (st === "error" && aiWas !== "error") toast(`🤖 ${radioAI.error}`);
+    aiWas = st;
+  });
+  // IA do rádio que você deixou ligada: já vai carregando (o navegador guardou o modelo)
+  if (radioAI.wanted && radioAI.supported) void radioAI.enable();
   const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement)?.closest?.("input, textarea");
   window.addEventListener("keydown", (e) => {
     if (e.code !== "KeyV" || e.repeat || typing(e) || !appInst.inRace()) return;

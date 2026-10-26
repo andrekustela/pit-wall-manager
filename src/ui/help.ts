@@ -2,6 +2,8 @@ import { MIX_GROUPS, sound, type MixGroup } from "../audio/sound";
 import { music } from "../audio/music";
 import { teamVoice } from "../audio/voice";
 import { voiceCmd } from "../audio/voiceCmd";
+import { radioAI } from "../audio/radioAI";
+import { confirmDialog } from "./confirm";
 import { esc } from "./common";
 
 type Tab = "jogo" | "treino" | "estrategia" | "corrida" | "atalhos";
@@ -97,7 +99,7 @@ export class HelpWidget {
   constructor(private currentTab: () => Tab, onHome?: () => void, showHome?: () => boolean) {
     this.el = document.createElement("div");
     this.el.className = "helpbtns";
-    this.el.innerHTML = `<button class="hbtn home" data-home title="Voltar ao menu" hidden>⌂</button><button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-voice title="Rádio da equipe falado (liga/desliga)">📻</button><button class="hbtn off" data-vcmd title="Comando de voz: ligar (depois segure V e fale, ex.: P1 box)">🎙</button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
+    this.el.innerHTML = `<button class="hbtn home" data-home title="Voltar ao menu" hidden>⌂</button><button class="hbtn" data-help title="Ajuda">?</button><button class="hbtn" data-full title="Tela cheia (F)">⛶</button><button class="hbtn" data-mute title="Liga/desliga o som"></button><button class="hbtn" data-voice title="Rádio da equipe falado (liga/desliga)">📻</button><button class="hbtn off" data-vcmd title="Comando de voz: ligar (depois segure V e fale, ex.: P1 box)">🎙</button><button class="hbtn off" data-ai title="IA no rádio: conversa livre com os pilotos">🤖</button><button class="hbtn" data-music>🎵</button><input class="vol" type="range" min="0" max="100" title="Volume"><span class="fps" title="Quadros por segundo"></span>`;
     document.body.appendChild(this.el);
     const home = this.el.querySelector<HTMLButtonElement>("[data-home]")!;
     home.addEventListener("click", () => onHome?.());
@@ -131,6 +133,35 @@ export class HelpWidget {
     vc.addEventListener("click", () => (voiceCmd.state === "off" || voiceCmd.state === "error" ? void voiceCmd.enable() : voiceCmd.disable()));
     voiceCmd.onChange(renderVc);
     renderVc();
+    // IA no rádio: você fala livre (segura V) e o piloto responde com fala nova, na voz dele
+    const ai = this.el.querySelector<HTMLButtonElement>("[data-ai]")!;
+    ai.hidden = !radioAI.supported || !voiceCmd.supported;
+    const renderAi = () => {
+      const st = radioAI.state;
+      ai.classList.toggle("off", st === "off" || st === "error");
+      ai.classList.toggle("busy", st === "loading" || st === "thinking");
+      ai.title =
+        st === "off" ? "IA no rádio: ligar (conversa livre com os pilotos, roda no seu PC)"
+        : st === "loading" ? `IA no rádio: preparando... ${radioAI.progress}`
+        : st === "error" ? `IA no rádio: ${radioAI.error}`
+        : st === "thinking" ? "IA no rádio: o piloto está pensando..."
+        : "IA no rádio ligada: segure V e fale (\"Senna, como tá o carro?\", \"P2, pode atacar\"). Clique pra desligar";
+    };
+    ai.addEventListener("click", async () => {
+      if (radioAI.ready || radioAI.state === "loading") return radioAI.disable();
+      const ok = await confirmDialog({
+        title: "IA no rádio",
+        icon: "🤖",
+        text: `Segure V e fale livre com seus pilotos: "Senna, como tá o carro?", "P2, pode atacar". Eles entendem, respondem com fala nova na voz deles e cumprem a ordem.
+Roda no seu PC, sem custo: na primeira vez baixa uns 1,1 GB (a IA e as vozes) e o navegador guarda. Precisa de placa de vídeo razoável. A resposta leva alguns segundos.`,
+        ok: "LIGAR",
+      });
+      if (!ok) return;
+      if (voiceCmd.state === "off" || voiceCmd.state === "error") void voiceCmd.enable();
+      void radioAI.enable();
+    });
+    radioAI.onChange(renderAi);
+    renderAi();
     this.el.querySelector("[data-full]")!.addEventListener("click", () => toggleFullscreen());
     document.addEventListener("keydown", (e) => {
       if ((e.key === "f" || e.key === "F") && !(e.target as HTMLElement)?.closest("input, textarea")) toggleFullscreen();

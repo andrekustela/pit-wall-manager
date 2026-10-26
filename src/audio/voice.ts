@@ -14,6 +14,8 @@ interface Line {
   slot: number;
   /** fala já escolhida (reações) */
   rec?: RadioLine;
+  /** áudio pronto (fala gerada pela IA do rádio) */
+  url?: string;
 }
 
 /** arquivo da fala: o 2º piloto da equipe tem voz própria (sufixo _b) */
@@ -91,6 +93,14 @@ class TeamVoice {
     const slot = r.short ? Math.max(0, this.drivers().findIndex((d) => d.short === r.short)) : Math.max(0, this.slotOf(r.text));
     this.say(r.text, r.who, slot);
     return true;
+  }
+
+  /** fala gerada na hora (IA do rádio): o áudio já vem pronto, com a voz do piloto */
+  sayUrl(url: string, slot: number, text: string) {
+    if (!this.enabled || this.volume() <= 0) return;
+    // resposta a você: entra na frente da fila (não descarta por velha)
+    this.queue.unshift({ text, who: "driver", at: performance.now(), slot, url });
+    this.next();
   }
 
   /** fala gravada pelo id (ex.: resposta do engenheiro ao comando de voz) */
@@ -183,6 +193,16 @@ class TeamVoice {
       this.busy = false;
       setTimeout(() => this.next(), 250);
     };
+    if (line.url) {
+      this.talk(this.drivers()[line.slot]?.id ?? null);
+      this.beepIn();
+      void this.playClip(line.url).then((dur) => {
+        if (id !== this.lineId) return;
+        URL.revokeObjectURL(line.url!);
+        setTimeout(done, (dur ?? 0.3) * 1000 + 60);
+      });
+      return;
+    }
     const rec = line.rec ?? radioLineFor(line.text);
     // quem fala de verdade é o da fala gravada (ex.: ordem sua -> o piloto responde)
     if (rec) line.who = rec.who;

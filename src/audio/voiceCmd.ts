@@ -64,6 +64,8 @@ class VoiceCommands {
   private proc: ScriptProcessorNode | null = null;
   private rec: KaldiRecognizer | null = null;
   private listeners: (() => void)[] = [];
+  /** ditado livre (a IA do rádio interpreta a frase inteira) em vez da lista fechada de palavras */
+  free: () => boolean = () => false;
   /** comando reconhecido (texto bruto junto, pra mostrar) */
   onCommand: (a: VoiceAction | null, heard: string) => void = () => {};
 
@@ -114,7 +116,9 @@ class VoiceCommands {
   startListening() {
     if (this.state !== "ready" || !this.model || !this.ctx || !this.source) return;
     void this.ctx.resume();
-    const rec = new this.model.KaldiRecognizer(this.ctx.sampleRate, JSON.stringify([...WORDS, "[unk]"]));
+    const rec = this.free()
+      ? new this.model.KaldiRecognizer(this.ctx.sampleRate)
+      : new this.model.KaldiRecognizer(this.ctx.sampleRate, JSON.stringify([...WORDS, "[unk]"]));
     let partial = "";
     rec.on("partialresult", (m) => {
       if (m.event === "partialresult") partial = m.result.partial;
