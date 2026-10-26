@@ -26,7 +26,7 @@ import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
 import { LocalConnection, WsConnection, type Connection } from "./net/connection";
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer } from "./render/renderer";
-import { Race, type RaceOptions } from "./sim/race";
+import { Race, setChaos, type RaceOptions } from "./sim/race";
 import { COMPOUNDS, ENGINE, PACE, type EngineMode, type PaceMode } from "./sim/types";
 import type { QualiResult } from "./sim/weekend";
 import { storeSet, toast, updateWaitBar } from "./ui/common";
@@ -74,6 +74,8 @@ const params = new URLSearchParams(location.search);
 const AUTO = params.has("auto");
 /** teste: ?auto&hold=practice|quali|strategy para nessa tela (pra ver/capturar) */
 const HOLD = params.get("hold");
+// teste: ?caos = muito mais rodadas, saídas de pista e batidas (pra ver o guindaste e o safety car)
+if (params.has("caos")) setChaos(40);
 
 class App {
   private conn: Connection | null = null;
@@ -604,6 +606,12 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     // depuração: ?debug expõe a corrida na tela (window.__view)
     if (params.has("debug")) (window as unknown as { __view: RaceView }).__view = view;
     if (AUTO && params.get("speed")) setSpeed(Number(params.get("speed")));
+    // teste: ?auto&podio pula direto pro pódio (com a ordem do começo da corrida)
+    if (params.has("podio"))
+      setTimeout(() => {
+        cancelAnimationFrame(view.raf);
+        this.screen = new PodiumScreen(app, conn, view.race, this.lobby!);
+      }, 2500);
   }
 
   /** executa uma ordem num piloto (clica no botão certo do card); devolve o que foi feito e a resposta no rádio */

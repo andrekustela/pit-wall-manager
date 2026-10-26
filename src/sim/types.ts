@@ -237,8 +237,17 @@ export interface CarState {
   defendLat: number;
   /** ultrapassando: de que lado do traçado ideal (m, relativo a ele) */
   otOff?: number;
-  /** segundos restantes de uma rodada */
+  /** rodando (> 0 enquanto o carro está solto numa rodada) */
   spin: number;
+  /**
+   * carro solto (rodou, passou reto, bateu): segue reto pela inércia em vez de acompanhar a pista.
+   * psi = direção do movimento e yaw = do carro, as duas em relação à pista (rad); stop = tempo parado (s)
+   */
+  slide?: { mode: "spin" | "off" | "crash"; psi: number; yaw: number; yawRate: number; stop: number } | null;
+  /** fora da corrida e parado: como ficou virado (rad, em relação à pista) */
+  restYaw?: number | null;
+  /** guindaste retirando o carro: tempo (s), duração e se ele está em cima da pista (segura o safety car) */
+  recover?: { t: number; dur: number; onTrack: boolean } | null;
   position: number;
   penalty: number;
 

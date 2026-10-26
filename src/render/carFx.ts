@@ -20,17 +20,12 @@ interface Skid {
   t: number;
 }
 interface St {
-  spinDur: number;
-  spinTotal: number;
-  prevSpin: number;
   crashT: number;
-  crashYaw: number;
   last: [number, number][] | null;
 }
 
 /** abandonos que são batida de verdade (o resto só para: motor, combustível...) */
 const CRASH = new Set(["Acidente", "Bateu no muro"]);
-const ease = (q: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, q)), 3);
 
 export class CarFx {
   private st = new Map<string, St>();
@@ -47,34 +42,22 @@ export class CarFx {
   /** chamado uma vez por carro por quadro: devolve o giro extra do desenho (rad) */
   update(c: CarState, p: { x: number; y: number; h: number }, dt: number, curv: number, street: boolean, follow: boolean, bump = 0): number {
     let s = this.st.get(c.id);
-    if (!s) this.st.set(c.id, (s = { spinDur: 0, spinTotal: 0, prevSpin: 0, crashT: -1, crashYaw: 0, last: null }));
+    if (!s) this.st.set(c.id, (s = { crashT: -1, last: null }));
     const fx = Math.cos(p.h), fy = Math.sin(p.h);
     const at = (dx: number, dy: number) => [p.x + fx * dx - fy * dy, p.y + fy * dx + fx * dy] as [number, number];
     let yaw = 0, smoke = false, marks = false;
 
-    // ---- rodada: gira rápido e vai freando, fica virado um instante, depois o piloto dá a volta ----
-    if (c.spin > 0 && s.prevSpin <= 0) {
-      s.spinDur = c.spin;
-      // a traseira escapa pro lado da curva; meia volta ou volta inteira
-      const dir = curv >= 0 ? 1 : -1;
-      s.spinTotal = dir * (Math.random() < 0.6 ? Math.PI * (0.85 + Math.random() * 0.3) : Math.PI * 2);
-    }
-    s.prevSpin = c.spin;
-    if (c.spin > 0 && s.spinDur > 0) {
-      const q = 1 - c.spin / s.spinDur;
-      const full = Math.abs(s.spinTotal) > Math.PI * 1.5;
-      if (q < 0.35) {
-        yaw = s.spinTotal * ease(q / 0.35);
-        smoke = marks = true;
-      } else if (q < 0.7) yaw = s.spinTotal + Math.sin(q * 40) * 0.02;
-      else yaw = full ? s.spinTotal : s.spinTotal + Math.sign(s.spinTotal) * (Math.PI * 2 - Math.abs(s.spinTotal)) * ease((q - 0.7) / 0.3);
-    }
+    // ---- solto (rodou, passou reto, bateu): o giro vem da física; fumaça e marca de pneu enquanto arrasta ----
+    if (c.slide) {
+      yaw = c.slide.yaw;
+      marks = c.v > 3;
+      smoke = c.slide.mode !== "off" && c.v > 6;
+    } else if (c.retired && c.restYaw != null) yaw = c.restYaw;
 
     // ---- batida: estoura no impacto e gira até parar torto ----
     if (this.crashed(c)) {
       if (s.crashT < 0) {
         s.crashT = performance.now();
-        s.crashYaw = (Math.random() < 0.5 ? -1 : 1) * (0.7 + Math.random() * 1.8);
         for (let i = 0; i < 36; i++) {
           const a = Math.random() * Math.PI * 2, v = 6 + Math.random() * 22;
           this.parts.push({ x: p.x, y: p.y, vx: Math.cos(a) * v + fx * c.v * 0.3, vy: Math.sin(a) * v + fy * c.v * 0.3, t: 0, life: 0.25 + Math.random() * 0.35, size: 0.6, kind: "faisca" });
@@ -82,8 +65,6 @@ export class CarFx {
         for (let i = 0; i < 10; i++) this.parts.push({ x: p.x, y: p.y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, t: 0, life: 1.2 + Math.random(), size: 1.2, kind: street ? "fumaca" : "poeira" });
         if (follow) this.kick(0.9);
       }
-      yaw = s.crashYaw * ease((performance.now() - s.crashT) / 900);
-      if (c.v > 3) marks = true;
     }
 
     // ---- saída de pista: poeira na brita, faísca no muro ----

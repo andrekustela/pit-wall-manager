@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/three": "^0.170.0",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
@@ -23,6 +24,7 @@
     "@mlc-ai/web-llm": "0.2.78",
     "firebase": "^10.12.2",
     "onnxruntime-web": "1.18.0",
+    "three": "^0.170.0",
     "tsx": "^4.23.15",
     "vosk-browser": "^0.0.8",
     "ws": "^8.22.0"

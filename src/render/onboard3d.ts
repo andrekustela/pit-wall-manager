@@ -1,12 +1,24 @@
 // Cockpit 3D da câmera onboard (render do Blender nos olhos do piloto: art/render_onboard.py),
-// pintado com as cores da equipe. O volante vem separado: gira com a curva e a telinha dele
-// mostra marcha e velocidade. Sem os arquivos (ou com o 2D clássico), a onboard usa o vetor.
+// pintado com as cores da equipe. O volante e os braços do piloto vêm parados e o jogo gira os dois
+// juntos (suave); o braço já vem sumindo perto de onde o cockpit o corta. A telinha do volante mostra
+// marcha e velocidade. Sem os arquivos (ou com o 2D clássico), a onboard usa o vetor.
 import type { Team } from "../sim/types";
 import { liveryKey } from "../sim/livery";
 import { car3dPref } from "./car3d";
 
-interface Info { w: number; h: number; wheel: [number, number, number, number]; display: [number, number, number, number] }
-let assets: { info: Info; corpo: [ImageData, ImageData]; volante: [ImageData, ImageData] } | null = null;
+interface Info {
+  w: number;
+  h: number;
+  wheel: [number, number, number, number];
+  display: [number, number, number, number];
+  /** volante: onde fica o recorte (px) e os cantos do vidro da telinha (sup. esq., sup. dir., inf. esq., fração) */
+  wheelCrop: [number, number, number, number];
+  quad: [number, number][];
+  /** giro máximo do volante (rad) e onde fica o recorte dos braços (px) */
+  max: number;
+  armsCrop: [number, number, number, number];
+}
+let assets: { info: Info; corpo: [ImageData, ImageData]; volante: [ImageData, ImageData]; bracos: HTMLImageElement } | null = null;
 let loading = false;
 
 function pixels(img: HTMLImageElement): ImageData {
@@ -27,13 +39,14 @@ function ready(): boolean {
         const i = new Image();
         i.onload = () => ok(i);
         i.onerror = fail;
-        i.src = `/onboard/${n}.png`;
+        i.src = `/onboard/${n.includes(".") ? n : n + ".png"}`;
       });
     void fetch("/onboard/info.json")
       .then((r) => r.json() as Promise<Info>)
       .then(async (info) => {
-        const [bc, mc, bv, mv] = await Promise.all(["base_corpo", "mask_corpo", "base_volante", "mask_volante"].map(img));
-        assets = { info, corpo: [pixels(bc), pixels(mc)], volante: [pixels(bv), pixels(mv)] };
+        if (!info.wheelCrop) throw new Error("formato antigo");
+        const [bc, mc, bv, mv, br] = await Promise.all(["base_corpo", "mask_corpo", "base_volante", "mask_volante", "base_bracos"].map(img));
+        assets = { info, corpo: [pixels(bc), pixels(mc)], volante: [pixels(bv), pixels(mv)], bracos: br };
       })
       .catch(() => {
         /* sem os arquivos: fica no vetor */
@@ -60,6 +73,8 @@ function paint([base, mask]: [ImageData, ImageData], body: number[], wing: numbe
 }
 
 const cache = new Map<string, { corpo: HTMLCanvasElement; volante: HTMLCanvasElement }>();
+/** volante suavizado (ângulo em rad) e hora do último quadro */
+const wheelSm = { a: 0, t: 0 };
 
 /**
  * Desenha o cockpit 3D (false = use o vetor). `steer` -1..1, `kmh`, `gear` e `rev` (0..1, luzes de giro).
@@ -79,43 +94,88 @@ export function drawCockpit3d(g: CanvasRenderingContext2D, W: number, H: number,
   const { info } = assets;
   // encostado embaixo e um pouco cortado (14%), pra sobrar mais pista por cima do halo
   const s = W / info.w, y0 = H - info.h * s * 0.86;
+  const px = (fx: number, fy: number) => [fx * W, y0 + fy * info.h * s];
   g.save();
   if (dark) g.filter = "brightness(0.62)";
   g.drawImage(p.corpo, 0, y0, W, info.h * s);
-  // volante: gira em volta do centro dele
+  // volante suavizado (a direção chega tremida)
+  const now = performance.now(), dt = Math.min(0.1, (now - wheelSm.t) / 1000);
+  wheelSm.t = now;
+  wheelSm.a += (steer * 0.85 - wheelSm.a) * Math.min(1, dt * 10);
+  const a = Math.max(-info.max, Math.min(info.max, wheelSm.a));
+  // ---- volante: gira em volta do centro dele, com a telinha ----
   const [wx0, wy0, wx1, wy1] = info.wheel;
-  const cx = ((wx0 + wx1) / 2) * W, cy = y0 + ((wy0 + wy1) / 2) * info.h * s;
+  const [cx, cy] = px((wx0 + wx1) / 2, (wy0 + wy1) / 2);
+  const [vx, vy, vw, vh] = info.wheelCrop;
+  g.save();
   g.translate(cx, cy);
-  g.rotate(steer * 0.85);
+  g.rotate(a);
   g.translate(-cx, -cy);
-  g.drawImage(p.volante, 0, y0, W, info.h * s);
+  g.drawImage(p.volante, vx * s, y0 + vy * s, vw * s, vh * s);
+  g.save();
+  const [tl, tr, bl] = info.quad.map(([qx, qy]) => px(qx, qy));
+  const lu = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]), lv = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
+  g.transform((tr[0] - tl[0]) / lu, (tr[1] - tl[1]) / lu, (bl[0] - tl[0]) / lv, (bl[1] - tl[1]) / lv, tl[0], tl[1]);
   g.filter = "none";
-  // telinha do volante: marcha, velocidade e luzes de giro (giram junto)
-  const [dx0, dy0, dx1, dy1] = info.display;
-  const x = dx0 * W, y = y0 + dy0 * info.h * s, w = (dx1 - dx0) * W, h = (dy1 - dy0) * info.h * s;
-  g.fillStyle = "#05070a";
-  g.fillRect(x + w * 0.04, y + h * 0.08, w * 0.92, h * 0.84);
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.fillStyle = "#e9edf5";
-  g.font = `700 ${Math.max(7, Math.round(h * 0.55))}px "Oswald", sans-serif`;
-  g.fillText(gear, x + w * 0.3, y + h * 0.56);
-  g.fillStyle = "#9fe2ff";
-  g.font = `700 ${Math.max(6, Math.round(h * 0.32))}px "Oswald", sans-serif`;
-  g.fillText(String(kmh), x + w * 0.7, y + h * 0.56);
-  for (let i = 0; i < 10; i++) {
-    const on = i / 10 < rev;
-    g.fillStyle = !on ? "#1d2027" : i < 4 ? "#3bd16f" : i < 7 ? "#ff3b3b" : "#3b8bff";
-    g.fillRect(x + w * 0.06 + (i * w * 0.88) / 10, y + h * 0.14, (w * 0.88) / 10 - 1, h * 0.12);
-  }
+  // a tela cinza do render ocupa esta fração do vidro
+  drawDisplay(g, lu * 0.15, lv * 0.22, lu * 0.69, lv * 0.74, gear, kmh, rev);
+  g.restore();
+  // ---- braços: presos no volante, giram junto ----
+  const [ax, ay, aw, ah] = info.armsCrop;
+  g.drawImage(assets.bracos, ax * s, y0 + ay * s, aw * s, ah * s);
+  g.restore();
   g.restore();
   return true;
 }
 
+/** telinha do volante: marcha, velocidade e luzes de giro */
+function drawDisplay(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, gear: string, kmh: number, rev: number) {
+  const glass = g.createLinearGradient(0, y, 0, y + h);
+  glass.addColorStop(0, "#0d1118");
+  glass.addColorStop(1, "#040507");
+  g.fillStyle = glass;
+  g.beginPath();
+  g.roundRect(x, y, w, h, Math.max(1, h * 0.12));
+  g.fill();
+  g.save();
+  g.clip();
+  // luzes de giro: uma fileira fina no alto
+  const n = 10, lw = (w * 0.86) / n;
+  for (let i = 0; i < n; i++) {
+    const on = i / n < rev;
+    g.fillStyle = !on ? "#1a1d24" : i < 4 ? "#3bd16f" : i < 7 ? "#ff3b3b" : "#4a8cff";
+    g.fillRect(x + w * 0.07 + i * lw + lw * 0.12, y + h * 0.1, lw * 0.76, Math.max(1, h * 0.1));
+  }
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillStyle = "#f2f4f8";
+  g.font = `600 ${Math.max(6, Math.round(h * 0.6))}px "Oswald", sans-serif`;
+  g.fillText(gear, x + w * 0.27, y + h * 0.6);
+  g.fillStyle = "#9fe2ff";
+  g.font = `600 ${Math.max(5, Math.round(h * 0.34))}px "Oswald", sans-serif`;
+  g.fillText(String(kmh), x + w * 0.68, y + h * 0.54);
+  g.fillStyle = "#6c7684";
+  g.font = `500 ${Math.max(4, Math.round(h * 0.14))}px "Oswald", sans-serif`;
+  g.fillText("KM/H", x + w * 0.68, y + h * 0.8);
+  // reflexo do vidro
+  g.fillStyle = "rgba(255,255,255,0.05)";
+  g.fillRect(x, y, w, h * 0.35);
+  g.restore();
+}
+
 // ---------- carros à frente (vistos de trás) ----------
-let rear: { base: ImageData; mask: ImageData; widM: number; ground: number } | null = null;
+// em vários ângulos (yaw > 0 = o bico aponta pra direita da tela): na curva aparece a lateral
+interface RearFrame { base: ImageData; mask: ImageData; widM: number; ground: number }
+let rear: { frames: RearFrame[]; yaws: number[] } | null = null;
 let rearLoading = false;
-const rearCache = new Map<string, HTMLCanvasElement>();
+const rearCache = new Map<string, HTMLCanvasElement[]>();
+
+/** linha do chão: a última com pixel (embaixo dos pneus) */
+function groundOf(base: ImageData) {
+  for (let y = base.height - 1; y > 0; y--)
+    for (let x = 0; x < base.width; x++) if (base.data[(y * base.width + x) * 4 + 3] > 20) return y;
+  return base.height - 1;
+}
 
 function rearReady(): boolean {
   if (rear) return true;
@@ -128,47 +188,54 @@ function rearReady(): boolean {
         i.onerror = fail;
         i.src = `/onboard/${n}.png`;
       });
-    void Promise.all([fetch("/onboard/tras.json").then((r) => r.json() as Promise<{ widM: number }>), img("base_tras"), img("mask_tras")])
-      .then(([info, b, m]) => {
-        const base = pixels(b);
-        // linha do chão: a última com pixel (embaixo dos pneus)
-        let ground = base.height - 1;
-        for (let y = base.height - 1; y > 0; y--) {
-          let hit = false;
-          for (let x = 0; x < base.width && !hit; x++) hit = base.data[(y * base.width + x) * 4 + 3] > 20;
-          if (hit) {
-            ground = y;
-            break;
-          }
-        }
-        rear = { base, mask: pixels(m), widM: info.widM, ground };
+    void fetch("/onboard/tras.json")
+      .then((r) => r.json() as Promise<{ yaws: number[]; widsM: number[] }>)
+      .then(async (info) => {
+        const frames = await Promise.all(
+          info.yaws.map(async (_, i) => {
+            const [b, m] = await Promise.all([img(`base_tras${i}`), img(`mask_tras${i}`)]);
+            const base = pixels(b);
+            return { base, mask: pixels(m), widM: info.widsM[i], ground: groundOf(base) };
+          }),
+        );
+        rear = { frames, yaws: info.yaws };
       })
       .catch(() => {});
   }
   return false;
 }
 
-/** carro à frente na onboard, visto de trás (false = use o vetor). (x, y) = ponto no chão; k = px por metro */
-export function drawRearCar(g: CanvasRenderingContext2D, team: Team, x: number, y: number, k: number, rainLight: boolean): boolean {
+/**
+ * carro à frente na onboard, visto de trás (false = use o vetor). (x, y) = ponto no chão; k = px por metro;
+ * yaw = pra onde o bico dele aponta em relação à linha de visão (graus, > 0 = direita da tela)
+ */
+export function drawRearCar(g: CanvasRenderingContext2D, team: Team, x: number, y: number, k: number, rainLight: boolean, yaw = 0): boolean {
   if (!car3dPref.on || !rearReady() || !rear) return false;
   const key = `${team.id}|${liveryKey(team.livery)}`;
-  let c = rearCache.get(key);
-  if (!c) {
+  let cs = rearCache.get(key);
+  if (!cs) {
     if (rearCache.size > 30) rearCache.clear();
     const lv = team.livery;
-    c = paint([rear.base, rear.mask], rgb(lv?.base ?? team.color), rgb(lv?.wing ?? lv?.accent ?? team.accent));
-    rearCache.set(key, c);
+    const body = rgb(lv?.base ?? team.color), wing = rgb(lv?.wing ?? lv?.accent ?? team.accent);
+    cs = rear.frames.map((f) => paint([f.base, f.mask], body, wing));
+    rearCache.set(key, cs);
   }
-  // escala: a imagem tem widM metros de largura (o carro 3D tem ~2 m; o vetor usava ~2 m também)
-  const pxPerM = c.width / rear.widM, s = k / pxPerM;
+  // ângulo mais perto
+  let i = 0;
+  rear.yaws.forEach((v, j) => {
+    if (Math.abs(v - yaw) < Math.abs(rear!.yaws[i] - yaw)) i = j;
+  });
+  const c = cs[i], f = rear.frames[i];
+  // escala: a imagem tem widM metros de largura
+  const s = k / (c.width / f.widM);
   const w = c.width * s, h = c.height * s;
   // sombra no chão
   g.fillStyle = "rgba(0,0,0,.35)";
   g.beginPath();
   g.ellipse(x, y, w * 0.45, Math.max(1, k * 0.16), 0, 0, Math.PI * 2);
   g.fill();
-  g.drawImage(c, x - w / 2, y - rear.ground * s, w, h);
-  if (rainLight) {
+  g.drawImage(c, x - w / 2, y - f.ground * s, w, h);
+  if (rainLight && Math.abs(rear.yaws[i]) < 30) {
     g.fillStyle = "#ff3030";
     g.shadowColor = "#ff3030";
     g.shadowBlur = Math.max(2, k * 0.25);

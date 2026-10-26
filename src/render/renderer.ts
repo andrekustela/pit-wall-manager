@@ -1,3 +1,4 @@
+import { drawProp, prop } from "./props";
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
@@ -303,15 +304,18 @@ export class Renderer {
     this.fx.drawGround(o, toCss, m);
     for (const c of sorted) {
       const p = pos.get(c.id)!;
-      const { x, y } = toCss(p);
-      const margin = CAR_LEN_M * m;
+      let { x, y } = toCss(p);
+      const margin = CAR_LEN_M * m * (c.recover ? 12 : 1);
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
       const crashed = this.fx.crashed(c);
-      const hh = p.h + yaw, alpha = c.retired && !crashed ? 0.6 : 1;
+      let hh = p.h + yaw, alpha = c.retired && !crashed ? 0.6 : 1, mm = m;
+      // guindaste retirando o carro: desenha o caminhão e leva o carro junto
+      const lift = c.recover ? this.crane(o, c, p, hh, toCss, m) : null;
+      if (lift) ({ x, y, h: hh, scale: mm, alpha } = { ...lift, scale: m * lift.scale, alpha: alpha * lift.alpha });
       let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
       // bateu: sem asa dianteira e com uma roda arrancada (os pedaços voam pelo dropParts)
       if (crashed) {
@@ -319,16 +323,42 @@ export class Renderer {
         look = { ...look, fw: { state: "none", side: "l" }, wheels: look.wheels.map((w, i) => (i === lost ? "off" : w)) as CarLook["wheels"] };
       }
       this.dropParts(c, look, p);
-      if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, m, alpha, look, rainLight, performance.now() / 1000)))
-        this.drawCar(o, x, y, hh, carImage(c.team, rainLight), m, alpha);
-      if (c.retired) this.smoke(o, x, y, m);
+      if (lift && lift.scale > 1.01) {
+        // no ar: sombra no chão, deslocada
+        o.fillStyle = "rgba(0,0,0,.28)";
+        o.beginPath();
+        o.ellipse(x + (lift.scale - 1) * 6 * m, y + (lift.scale - 1) * 9 * m, 1 * m, 2.6 * m, hh + Math.PI / 2, 0, Math.PI * 2);
+        o.fill();
+      }
+      if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, mm, alpha, look, rainLight, performance.now() / 1000)))
+        this.drawCar(o, x, y, hh, carImage(c.team, rainLight), mm, alpha);
+      if (!lift && c.retired) this.smoke(o, x, y, m);
     }
 
     if (scPos) {
       const { x, y } = toCss(scPos);
       this.screenPos.set("SC", { x, y });
       const blink = Math.floor(performance.now() / 250) % 2 === 0;
-      this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
+      const sc3d = car3dPref.on ? prop("sc") : null;
+      if (sc3d) {
+        drawProp(o, sc3d, x, y, scPos.h, m);
+        // giroflex no teto: laranja piscando, um lado de cada vez
+        const fx = Math.cos(scPos.h), fy = Math.sin(scPos.h);
+        o.save();
+        o.globalCompositeOperation = "lighter";
+        for (const sd of [-1, 1]) {
+          const on = blink === (sd > 0);
+          const lx = x + (-fx * 0.15 - fy * sd * 0.45) * m, ly = y + (-fy * 0.15 + fx * sd * 0.45) * m;
+          const gl = o.createRadialGradient(lx, ly, 0, lx, ly, (on ? 2.2 : 0.6) * m);
+          gl.addColorStop(0, on ? "rgba(255,180,40,.95)" : "rgba(255,150,20,.35)");
+          gl.addColorStop(1, "rgba(255,150,20,0)");
+          o.fillStyle = gl;
+          o.beginPath();
+          o.arc(lx, ly, (on ? 2.2 : 0.6) * m, 0, Math.PI * 2);
+          o.fill();
+        }
+        o.restore();
+      } else this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
 
     this.fx.drawAir(o, toCss, m);
@@ -467,6 +497,48 @@ export class Renderer {
       o.arc(sx, sy, r, 0, Math.PI * 2);
       o.fill();
     }
+  }
+
+  /**
+   * Guindaste (render do Blender, visto de cima): chega por trás pela área de escape, para com o gancho
+   * em cima do carro, levanta e vai embora com ele pendurado. Devolve onde o carro está (px), virado pra
+   * onde, escala (no ar) e opacidade.
+   */
+  private crane(o: CanvasRenderingContext2D, c: Race["cars"][number], p: { x: number; y: number; h: number }, carH: number, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number) {
+    const r = c.recover!, q = Math.min(1, r.t / r.dur);
+    const t = this.race.track;
+    const ease = (v: number) => {
+      const k = Math.max(0, Math.min(1, v));
+      return k * k * (3 - 2 * k);
+    };
+    const seg = (a: number, b: number) => ease((q - a) / (b - a));
+    const cr = prop("crane");
+    const hookF = cr?.hookF ?? 5.8, hookL = cr?.hookL ?? 0;
+    // direções: frente da pista e "pra fora" (lado em que o carro parou)
+    const fx = Math.cos(p.h), fy = Math.sin(p.h);
+    const a = t.pose(c.s, c.lateral), b = t.pose(c.s, c.lateral + 1);
+    const side = c.lateral >= 0 ? 1 : -1;
+    const nx = (b.x - a.x) * side, ny = (b.y - a.y) * side;
+    const at = (f: number, n: number) => ({ x: p.x + fx * f + nx * n, y: p.y + fy * f + ny * n });
+    // o gancho para em cima do carro: o caminhão fica atrás dele, alinhado com a pista
+    const park = at(-hookF, 0), from = at(-60, 10), away = at(70, 18);
+    const inn = seg(0, 0.3), out = seg(0.7, 1);
+    const tx = from.x + (park.x - from.x) * inn + (away.x - park.x) * out;
+    const ty = from.y + (park.y - from.y) * inn + (away.y - park.y) * out;
+    const turn = (h0: number, h1: number, k: number) => h0 + angDiff(h0, h1) * k;
+    const th = q < 0.3 ? turn(Math.atan2(park.y - from.y, park.x - from.x), p.h, inn) : turn(p.h, Math.atan2(away.y - park.y, away.x - park.x), Math.min(1, out * 3));
+    const tfx = Math.cos(th), tfy = Math.sin(th);
+    // gancho no mundo (anda com o caminhão)
+    const hook = { x: tx + tfx * hookF - tfy * hookL, y: ty + tfy * hookF + tfx * hookL };
+    // carro: parado até o gancho chegar; depois sobe e vai pendurado (girando pra ficar alinhado)
+    const up = seg(0.4, 0.55);
+    const hang = q >= 0.4;
+    const carW = hang ? hook : { x: p.x, y: p.y };
+    const fade = 1 - seg(0.92, 1);
+    const tp = toCss({ x: tx, y: ty });
+    if (cr) drawProp(o, cr, tp.x, tp.y, th, m, fade);
+    const cp = toCss(carW);
+    return { x: cp.x, y: cp.y, h: turn(carH, th, seg(0.55, 0.75)), scale: 1 + up * 0.18, alpha: fade };
   }
 
   private smoke(o: CanvasRenderingContext2D, x: number, y: number, m: number) {

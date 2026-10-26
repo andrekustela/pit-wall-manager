@@ -59,6 +59,9 @@ export interface Livery {
   /** capacete do piloto: cor e faixa */
   helmet: string;
   helmetDetail: string;
+  /** macacão do piloto: cor e faixas */
+  suit: string;
+  suitDetail: string;
   emblem: Emblem;
 }
 
@@ -77,6 +80,8 @@ export function defaultLivery(base: string, accent: string, teamName = ""): Live
     numberColor: "#ffffff",
     helmet: accent,
     helmetDetail: base,
+    suit: base,
+    suitDetail: accent,
     emblem: { shape: "escudo", symbol: "iniciais", initials: initialsOf(teamName), bg: base, border: accent, fg: "#ffffff" },
   };
 }
@@ -104,6 +109,8 @@ export function cleanLivery(x: unknown): Livery | null {
     numberColor: color(l.numberColor, "#ffffff"),
     helmet: color(l.helmet, accent),
     helmetDetail: color(l.helmetDetail, base),
+    suit: color(l.suit, base),
+    suitDetail: color(l.suitDetail, accent),
     emblem: {
       shape: EMBLEM_SHAPES.some((s) => s.id === e.shape) ? (e.shape as EmblemShape) : "escudo",
       symbol: EMBLEM_SYMBOLS.some((s) => s.id === e.symbol) ? (e.symbol as EmblemSymbol) : "iniciais",
@@ -117,5 +124,5 @@ export function cleanLivery(x: unknown): Livery | null {
 
 /** chave curta pra cache de desenho */
 export function liveryKey(l: Livery | undefined): string {
-  return l ? [l.base, l.accent, l.wing, l.pattern, l.patternColor, l.number, l.numberColor, l.helmet, l.helmetDetail].join("|") : "";
+  return l ? [l.base, l.accent, l.wing, l.pattern, l.patternColor, l.number, l.numberColor, l.helmet, l.helmetDetail, l.suit, l.suitDetail].join("|") : "";
 }

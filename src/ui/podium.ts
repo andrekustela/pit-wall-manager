@@ -4,6 +4,7 @@ import { engineerLabel } from "../sim/entrants";
 import type { Race } from "../sim/race";
 import type { CarState } from "../sim/types";
 import type { DevArea } from "../sim/development";
+import { driverCanvas, driverGround, loadDriver3d, uniformOf } from "../render/driver3d";
 import { esc, updateWaitBar } from "./common";
 import { resultsTable } from "./results";
 import { bindTelemetry, telemetryHtml } from "./telemetry";
@@ -11,11 +12,13 @@ import { bindTelemetry, telemetryHtml } from "./telemetry";
 import { POINTS, standings } from "../sim/championship";
 
 
-const W = 320, H = 180;
+const W = 960, H = 520;
 
 export class PodiumScreen {
   private raf = 0;
   private ready = false;
+  private dead = false;
+  private stop3d: (() => void) | null = null;
 
   constructor(root: HTMLElement, conn: Connection, race: Race, lobby: LobbyState, onReplay?: () => void) {
     const top = race.ordered().filter((c) => !c.retired).slice(0, 3);
@@ -27,7 +30,7 @@ export class PodiumScreen {
       <div class="screen"><div class="wrap">
         <div class="podium-wrap">
           <h1 class="title">${youWon ? "VITÓRIA <span>DA SUA EQUIPE!</span>" : "PÓDIO"}</h1>
-          <canvas width="${W}" height="${H}"></canvas>
+          <canvas class="podium3d"></canvas>
           <div style="width:min(100%,900px);text-align:center;display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
             ${[top[1], top[0], top[2]]
               .map((c, i) =>
@@ -66,143 +69,217 @@ export class PodiumScreen {
       conn.send({ t: "ready", ready: this.ready });
       go.textContent = this.ready ? "PRONTO ✓" : goLabel(lobby);
     });
-    this.animate(root.querySelector("canvas")!, top);
+    const cv = root.querySelector("canvas")!;
+    const title = `GRANDE PRÊMIO · ${race.track.name.toUpperCase()}`;
+    // 3D (Three.js, carregado só aqui); sem WebGL, o pódio desenhado em 2D
+    void import("../render/podium3d")
+      .then((m) =>
+        m.mountPodium3d(
+          cv,
+          [top[0], top[1], top[2]].map((c) => (c ? { name: c.driver.name, team: c.team.name, teamColor: c.team.color, ...uniformOf(c.team) } : null)),
+          title,
+        ),
+      )
+      .then((stop) => {
+        if (this.dead) stop();
+        else this.stop3d = stop;
+      })
+      .catch(() => {
+        if (this.dead) return;
+        // canvas novo (o antigo pode ter ficado preso no WebGL)
+        const c2 = cv.cloneNode() as HTMLCanvasElement;
+        cv.replaceWith(c2);
+        this.animate(c2, top, title);
+      });
   }
 
-  private animate(cv: HTMLCanvasElement, top: CarState[]) {
+  private animate(cv: HTMLCanvasElement, top: CarState[], title: string) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = W * dpr;
+    cv.height = H * dpr;
     const g = cv.getContext("2d")!;
-    g.imageSmoothingEnabled = false;
-    const confetti = Array.from({ length: 90 }, () => ({
+    void loadDriver3d();
+    const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+    const teamCols = top.flatMap((c) => (c ? [c.team.color, c.team.accent] : []));
+    const confetti = Array.from({ length: 140 }, () => ({
       x: Math.random() * W,
       y: Math.random() * -H,
-      v: 20 + Math.random() * 30,
-      c: ["#e8202a", "#ffcc00", "#16c2b0", "#ffffff", "#7b3fe4", "#1f9d3a"][Math.floor(Math.random() * 6)],
+      v: 40 + Math.random() * 60,
+      r: Math.random() * 6,
+      vr: (Math.random() - 0.5) * 8,
+      c: pick([...teamCols, "#ffd23b", "#ffffff", "#ffd23b"]),
     }));
-    const crowd = Array.from({ length: 260 }, () => ({
-      x: Math.floor(Math.random() * W),
-      y: 18 + Math.floor(Math.random() * 40),
-      c: ["#e8202a", "#f2f2f2", "#1c6ed4", "#f2c230", "#ff8a1c", "#16c2b0", "#d8b48a", "#222"][Math.floor(Math.random() * 8)],
-      p: Math.random() * 6,
-    }));
-    // ordem visual: 2º, 1º, 3º
+    const flashes = Array.from({ length: 50 }, () => ({ x: Math.random() * W, y: 40 + Math.random() * 120, t: Math.random() * 4 }));
+    const spray: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
+    // ordem visual: 2º, 1º, 3º (altura do degrau, cor do metal)
+    const FLOOR = H - 92;
     const slots = [
-      { car: top[1], x: 98, h: 34, n: "2" },
-      { car: top[0], x: 160, h: 50, n: "1" },
-      { car: top[2], x: 222, h: 24, n: "3" },
+      { car: top[1], x: W / 2 - 190, h: 78, n: "2", pose: "p2" as const, metal: ["#e9edf3", "#aab3c2"] },
+      { car: top[0], x: W / 2, h: 118, n: "1", pose: "win" as const, metal: ["#ffe9a3", "#d4a937"] },
+      { car: top[2], x: W / 2 + 190, h: 56, n: "3", pose: "p3" as const, metal: ["#f1c9a3", "#b57a46"] },
     ];
+    const BW = 150, TOPD = 18; // largura do degrau e profundidade do tampo
+    const DRIVER_H = 220; // px da imagem do piloto
     let last = performance.now();
     const frame = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const t = now / 1000;
-      // fundo
-      g.fillStyle = "#121726";
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // ---- fundo: palco à noite, holofotes e flashes da torcida ----
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, "#070a12");
+      bg.addColorStop(0.55, "#101626");
+      bg.addColorStop(1, "#05070c");
+      g.fillStyle = bg;
       g.fillRect(0, 0, W, H);
-      g.fillStyle = "#1b2233";
-      g.fillRect(0, 14, W, 48);
-      for (const p of crowd) {
-        g.fillStyle = p.c;
-        g.fillRect(p.x, p.y - (Math.sin(t * 6 + p.p) > 0.6 ? 1 : 0), 1, 2);
+      for (const f of flashes) {
+        f.t -= dt;
+        if (f.t < 0) {
+          f.t = 1 + Math.random() * 4;
+          f.x = Math.random() * W;
+        }
+        if (f.t < 0.08) {
+          g.fillStyle = `rgba(255,255,255,${(1 - f.t / 0.08) * 0.9})`;
+          g.beginPath();
+          g.arc(f.x, f.y, 1.6, 0, Math.PI * 2);
+          g.fill();
+        }
       }
-      g.fillStyle = "#2b3242";
-      g.fillRect(0, 62, W, 4);
+      // torcida: silhuetas no escuro
+      g.fillStyle = "#0b0f19";
+      for (let x = 0; x < W; x += 9) g.fillRect(x, 150 + Math.sin(x * 0.7 + Math.sin(t * 3 + x) * 0.6) * 4, 7, 40);
+      // painel do fundo com o nome do GP
+      g.fillStyle = "#141b2c";
+      g.fillRect(60, 34, W - 120, 58);
       g.fillStyle = "#e8202a";
-      g.font = "600 9px Oswald, sans-serif";
+      g.fillRect(60, 88, W - 120, 4);
+      g.fillStyle = "#f2f4f8";
+      g.font = "700 26px Oswald, sans-serif";
       g.textAlign = "center";
-      g.fillText("PIT WALL MANAGER · GRANDE PRÊMIO", W / 2, 10);
-      // chão
-      g.fillStyle = "#30384a";
-      g.fillRect(0, H - 34, W, 34);
+      g.textBaseline = "middle";
+      g.fillText(title, W / 2, 62);
+      // holofotes balançando
+      g.save();
+      g.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 3; i++) {
+        const sx = W * (0.2 + i * 0.3), a = Math.sin(t * 0.6 + i * 2) * 0.35;
+        const tx = W / 2 + Math.sin(a) * 420;
+        const gr = g.createLinearGradient(sx, 0, tx, FLOOR);
+        gr.addColorStop(0, "rgba(255,240,200,.16)");
+        gr.addColorStop(1, "rgba(255,240,200,0)");
+        g.fillStyle = gr;
+        g.beginPath();
+        g.moveTo(sx - 6, 0);
+        g.lineTo(sx + 6, 0);
+        g.lineTo(tx + 110, FLOOR);
+        g.lineTo(tx - 110, FLOOR);
+        g.closePath();
+        g.fill();
+      }
+      g.restore();
+      // chão e a luz embaixo do 1º
+      const fl = g.createLinearGradient(0, FLOOR, 0, H);
+      fl.addColorStop(0, "#1d2434");
+      fl.addColorStop(1, "#0b0e15");
+      g.fillStyle = fl;
+      g.fillRect(0, FLOOR, W, H - FLOOR);
+      const glow = g.createRadialGradient(W / 2, FLOOR, 10, W / 2, FLOOR, 360);
+      glow.addColorStop(0, "rgba(255,210,90,.22)");
+      glow.addColorStop(1, "rgba(255,210,90,0)");
+      g.fillStyle = glow;
+      g.fillRect(0, FLOOR - 200, W, 300);
 
       for (const s of slots) {
         if (!s.car) continue;
-        const baseY = H - 34;
-        // bloco
-        g.fillStyle = "#d9dde3";
-        g.fillRect(s.x - 26, baseY - s.h, 52, s.h);
-        g.fillStyle = "#aeb4bf";
-        g.fillRect(s.x - 26, baseY - s.h, 52, 3);
-        g.fillStyle = "#1b2233";
-        g.font = "700 17px Oswald, sans-serif";
-        g.fillText(s.n, s.x, baseY - s.h + 22);
-        // boneco
-        const jump = s.n === "1" ? Math.abs(Math.sin(t * 4)) * 4 : s.n === "2" ? Math.abs(Math.sin(t * 3 + 1)) * 2 : 0;
-        this.person(g, s.x, baseY - s.h - Math.round(jump), s.car, s.n === "1", t);
-        // nome
-        g.fillStyle = "#fff";
-        g.font = "600 9px Oswald, sans-serif";
-        g.fillText(s.car.driver.short, s.x, baseY + 12);
+        const x0 = s.x - BW / 2, top0 = FLOOR - s.h;
+        // tampo (em perspectiva) e frente do degrau
+        g.fillStyle = s.metal[0];
+        g.beginPath();
+        g.moveTo(x0 + 10, top0 - TOPD);
+        g.lineTo(x0 + BW - 10, top0 - TOPD);
+        g.lineTo(x0 + BW, top0);
+        g.lineTo(x0, top0);
+        g.closePath();
+        g.fill();
+        const fr = g.createLinearGradient(0, top0, 0, FLOOR);
+        fr.addColorStop(0, s.metal[1]);
+        fr.addColorStop(1, "#2a2f3a");
+        g.fillStyle = fr;
+        g.fillRect(x0, top0, BW, s.h);
         g.fillStyle = s.car.team.color;
-        g.fillRect(s.x - 12, baseY + 15, 24, 2);
+        g.fillRect(x0, top0, BW, 5);
+        g.fillStyle = "rgba(10,12,18,.82)";
+        g.font = `700 ${Math.round(Math.min(64, s.h * 0.7))}px Oswald, sans-serif`;
+        g.fillText(s.n, s.x, top0 + s.h / 2 + 4);
+        // piloto 3D com o uniforme da equipe (o 1º pula de alegria)
+        const d = driverCanvas(s.pose, uniformOf(s.car.team));
+        const jump = s.n === "1" ? Math.abs(Math.sin(t * 3.2)) * 10 : s.n === "2" ? Math.abs(Math.sin(t * 2.4 + 1)) * 4 : 0;
+        const footY = top0 - TOPD / 2;
+        g.fillStyle = "rgba(0,0,0,.35)";
+        g.beginPath();
+        g.ellipse(s.x, footY, 34 - jump, 6, 0, 0, Math.PI * 2);
+        g.fill();
+        if (d) {
+          const k = DRIVER_H / d.height;
+          g.drawImage(d, s.x - (d.width * k) / 2, footY - jump - driverGround() * d.height * k, d.width * k, d.height * k);
+          // champanhe saindo das mãos do vencedor
+          if (s.n === "1" && Math.random() < dt * 70) {
+            const hx = s.x + (Math.random() < 0.5 ? -1 : 1) * 14, hy = footY - jump - DRIVER_H * 0.93;
+            spray.push({ x: hx, y: hy, vx: (Math.random() - 0.5) * 220, vy: -60 - Math.random() * 140, life: 1 });
+          }
+        }
+        // placa com o nome
+        g.fillStyle = "#f2f4f8";
+        g.font = "600 17px Oswald, sans-serif";
+        g.fillText(s.car.driver.name.toUpperCase(), s.x, FLOOR + 22);
+        g.fillStyle = "#8e98aa";
+        g.font = "500 13px Oswald, sans-serif";
+        g.fillText(s.car.team.name, s.x, FLOOR + 42);
+        g.fillStyle = s.car.team.color;
+        g.fillRect(s.x - 30, FLOOR + 54, 60, 3);
       }
-
-      // champanhe do vencedor
-      for (let i = 0; i < 14; i++) {
-        const k = (t * 1.3 + i / 14) % 1;
-        const dir = i % 2 ? 1 : -1;
-        const x = 160 + dir * (6 + k * 34);
-        const y = H - 34 - 50 - 26 - k * 18 + k * k * 40;
-        g.fillStyle = `rgba(255,240,170,${(1 - k).toFixed(2)})`;
-        g.fillRect(Math.round(x), Math.round(y), 1, 1);
+      // champanhe
+      for (const p of spray) {
+        p.life -= dt * 0.9;
+        p.vy += 260 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        g.fillStyle = `rgba(255,236,160,${Math.max(0, p.life) * 0.8})`;
+        g.beginPath();
+        g.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+        g.fill();
       }
-
+      for (let i = spray.length - 1; i >= 0; i--) if (spray[i].life <= 0) spray.splice(i, 1);
+      // confete girando
       for (const c of confetti) {
         c.y += c.v * dt;
-        c.x += Math.sin(t * 2 + c.v) * 10 * dt;
+        c.x += Math.sin(t * 2 + c.v) * 20 * dt;
+        c.r += c.vr * dt;
         if (c.y > H) {
-          c.y = -4;
+          c.y = -6;
           c.x = Math.random() * W;
         }
+        g.save();
+        g.translate(c.x, c.y);
+        g.rotate(c.r);
         g.fillStyle = c.c;
-        g.fillRect(Math.round(c.x), Math.round(c.y), 2, 1);
+        const sq = Math.abs(Math.cos(c.r * 1.7));
+        g.fillRect(-3, -1.5 * sq, 6, 3 * sq + 0.5);
+        g.restore();
       }
       this.raf = requestAnimationFrame(frame);
     };
     this.raf = requestAnimationFrame(frame);
   }
 
-  /** piloto em pixel art (macacão na cor da equipe, capacete, braços pra cima) */
-  private person(g: CanvasRenderingContext2D, cx: number, feetY: number, car: CarState, winner: boolean, t: number) {
-    const x = cx - 4;
-    const y = feetY - 22;
-    const px = (dx: number, dy: number, w: number, h: number, col: string) => {
-      g.fillStyle = col;
-      g.fillRect(x + dx, y + dy, w, h);
-    };
-    const suit = car.team.color, acc = car.team.accent;
-    // capacete
-    px(1, 0, 6, 5, suit);
-    px(2, 2, 5, 2, "#1b2233"); // viseira
-    px(1, 0, 6, 1, acc);
-    // corpo
-    px(1, 6, 6, 8, suit);
-    px(1, 9, 6, 1, acc);
-    // braços (pra cima, balançando)
-    const wave = Math.round(Math.sin(t * 5) * 1);
-    px(-1, 1 + wave, 2, 6, suit);
-    px(7, 1 - wave, 2, 6, suit);
-    px(-1, 0 + wave, 2, 1, "#e9c39b");
-    px(7, 0 - wave, 2, 1, "#e9c39b");
-    // pernas
-    px(1, 14, 2, 8, suit);
-    px(5, 14, 2, 8, suit);
-    px(1, 21, 3, 1, "#111");
-    px(5, 21, 3, 1, "#111");
-    if (winner) {
-      // troféu
-      px(8, -7 - wave, 4, 3, "#ffcc00");
-      px(9, -4 - wave, 2, 3, "#ffcc00");
-      px(8, -2 - wave, 4, 1, "#b88a00");
-    }
-  }
-
-
-
   update(lobby: LobbyState) {
     updateWaitBar(lobby);
   }
 
   destroy() {
+    this.dead = true;
+    this.stop3d?.();
     cancelAnimationFrame(this.raf);
     updateWaitBar(null);
   }

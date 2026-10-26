@@ -219,7 +219,7 @@ label.fld span { display: block; margin-bottom: 4px; }
 
 /* pódio */
 .podium-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.podium-wrap canvas { image-rendering: pixelated; width: min(100%, 900px); border: 2px solid var(--line); background: #0d1119; }
+.podium-wrap canvas { width: min(100%, 960px); aspect-ratio: 960 / 520; border: 2px solid var(--line); background: #0d1119; }
 .engcard { text-align: center; background: var(--panel-solid); border: 2px solid var(--sc); padding: 12px 24px; }
 .engcard .lbl { font-family: var(--pix); font-size: 12px; color: var(--sc); }
 .engcard .nm { font-size: 24px; font-weight: 700; margin: 4px 0; }

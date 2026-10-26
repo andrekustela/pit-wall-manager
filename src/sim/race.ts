@@ -78,6 +78,14 @@ const MANDATORY_PENALTY = 30;
 const CRASH_RATE = 1.4e-5; // por carro por segundo, no seco
 /** chance de passar reto (por segundo, numa curva), com ritmo normal */
 const OFF_RATE = 1.1e-4;
+/** área de escape do autódromo até o muro (m além da borda da pista); na rua o muro é logo ali */
+const RUNOFF = 13;
+const STREET_RUNOFF = 2.5;
+/** teste (?caos): multiplica as chances de rodar, passar reto e bater */
+let CHAOS = 1;
+export function setChaos(k: number) {
+  CHAOS = k;
+}
 /** chance de um problema mecânico aparecer (por carro por segundo): ~4% por corrida */
 const FAULT_RATE = 2.8e-5;
 
@@ -123,7 +131,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "restYaw", "recover", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -542,13 +550,25 @@ export class Race {
 
     for (const c of this.cars) {
       if (c.pit === "parked") continue;
+      if (c.slide) {
+        // solto: segue reto pela inércia, freia, gira, pode bater ou atolar
+        this.stepSlide(c, dt);
+        if (c.s >= L) {
+          c.s -= L;
+          if (!c.retired) this.crossLine(c);
+        }
+        continue;
+      }
       if (c.retired) {
-        // encosta fora da pista e para (batida para na hora; quebra só desacelera)
-        const hit = c.retireReason === "Acidente" || c.retireReason === "Bateu no muro";
-        c.v = Math.max(0, c.v - (hit ? 45 : 12) * dt);
-        c.lateral += Math.max(-4 * dt, Math.min(4 * dt, -13 - c.lateral));
-        c.s += c.v * dt;
-        if (c.s >= L) c.s -= L;
+        // quebra: encosta pro lado mais perto, fora da pista, e para (batida já parou onde bateu)
+        if (c.restYaw == null) {
+          c.v = Math.max(0, c.v - 12 * dt);
+          const side = c.lateral >= 0 ? 1 : -1, to = side * (TRACK_WIDTH / 2 + 5);
+          c.lateral += Math.max(-4 * dt, Math.min(4 * dt, to - c.lateral));
+          c.s += c.v * dt;
+          if (c.s >= L) c.s -= L;
+        }
+        if (c.v <= 0) this.stepRecovery(c, dt);
         continue;
       }
       const target = targets.get(c.id)!;
@@ -605,21 +625,8 @@ export class Race {
           this.radio(c);
         }
       }
-      if (c.spin > 0) c.spin = Math.max(0, c.spin - dt);
-      if (c.offTrack > 0) {
-        c.offTrack -= dt;
-        if (c.offTrack <= 0) {
-          c.offTrack = 0;
-          const team = c.isHuman ? c.team.id : undefined;
-          if (c.offFate === "stuck") {
-            this.retire(c, this.track.def.street ? "Bateu no muro" : "Preso na brita");
-            if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.5)) this.deploySafetyCar();
-          } else {
-            c.lateralTarget = c.offSide * (TRACK_WIDTH / 2 - 2);
-            this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off", c.id);
-          }
-        }
-      }
+      // voltando pra pista depois de rodar/escapar: devagar até chegar na borda
+      if (c.offTrack > 0 && Math.abs(c.lateral) <= TRACK_WIDTH / 2) c.offTrack = Math.max(0, c.offTrack - dt);
 
       this.updatePit(c, prevS, ds);
 
@@ -670,19 +677,131 @@ export class Race {
     if (Math.abs(c.tuning.fw - c.tuning.rw - this.track.def.balance) >= 2) rate *= 1.5;
     if (c.lap <= 0) rate *= 4;
     if (this.sc.active) rate *= 0.1;
-    rate *= 1 + c.driver.skill;
+    rate *= (1 + c.driver.skill) * CHAOS;
     if (!this.rng.chance(rate * dt)) return;
 
     if (this.rng.chance(0.55)) {
-      c.spin = this.rng.range(3.5, 8);
       this.stats.spins++;
-      c.wear = Math.min(1.2, c.wear + 0.08);
-      c.overtaking = null;
+      this.startSlide(c, "spin");
       this.log(`${c.driver.name} rodou!`, c.isHuman, c.isHuman ? c.team.id : undefined, "spin", c.id);
     } else {
-      this.retire(c, "Acidente");
-      if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
-      else this.log("Bandeira amarela no local do acidente.", false, undefined, "yellow");
+      // perdeu o carro em alta: escapa rodando pro muro
+      this.startSlide(c, "crash");
+      this.log(`${c.driver.name} perdeu o controle!`, c.isHuman, c.isHuman ? c.team.id : undefined, "spin", c.id);
+    }
+  }
+
+  /** o carro fica solto: rodada, passada reta ou batida (a física é do stepSlide) */
+  private startSlide(c: CarState, mode: "spin" | "off" | "crash") {
+    const t = this.track;
+    const k = t.curvature[Math.floor(t.wrap(c.s + 10)) % t.L] ?? 0;
+    const out = k > 0 ? -1 : 1; // lado de fora da curva
+    const r = (a: number, b: number) => this.rng.range(a, b);
+    c.slide = {
+      mode,
+      psi: out * (mode === "off" ? r(0.03, 0.1) : mode === "crash" ? r(0.12, 0.3) : r(0.01, 0.06)),
+      yaw: 0,
+      // a traseira escapa pro lado de fora: o bico vira pra dentro
+      yawRate: mode === "off" ? 0 : -out * (mode === "crash" ? r(4, 7) : r(3, 5.5)),
+      stop: 0,
+    };
+    c.spin = mode === "off" ? 0 : 1;
+    c.offTrack = mode === "off" ? 1 : 0;
+    c.offSide = out;
+    c.overtaking = null;
+    // pneu arrastando de lado: desgaste extra
+    c.wear = Math.min(1.2, c.wear + (mode === "off" ? 0.03 : 0.07));
+  }
+
+  /** um passo do carro solto */
+  private stepSlide(c: CarState, dt: number) {
+    const t = this.track, sl = c.slide!;
+    const street = !!t.def.street, edge = TRACK_WIDTH / 2;
+    const wall = edge + (street ? STREET_RUNOFF : RUNOFF);
+    const team = c.isHuman ? c.team.id : undefined;
+    const off = Math.abs(c.lateral) > edge + 0.5;
+    if (c.v > 0.3) {
+      // atrito: freando reto segura muito; de lado no asfalto escorrega; grama escorrega; brita segura
+      let dec = sl.mode === "off" ? (off ? (street ? 14 : 18) : 28) : off ? 13 : 9;
+      if (sl.mode === "crash") dec *= 0.55;
+      dec *= 1 - this.wet * 0.4;
+      c.v = Math.max(0, c.v - dec * dt);
+      const k = t.curvature[Math.floor(t.wrap(c.s)) % t.L] ?? 0;
+      const ds = Math.max(0, c.v * Math.cos(sl.psi) * dt);
+      c.s += ds;
+      c.lateral += c.v * Math.sin(sl.psi) * dt;
+      // a pista curva por baixo e o carro segue reto
+      sl.psi = Math.max(-1.3, Math.min(1.3, sl.psi - k * ds));
+      sl.yawRate *= Math.exp(-(off ? 2.4 : 1.2) * dt);
+      sl.yaw += sl.yawRate * dt - k * ds;
+      // passando reto: o carro aponta pra onde vai (o piloto tenta virar, sem aderência)
+      if (sl.mode === "off") sl.yaw += (sl.psi * 0.8 - sl.yaw) * Math.min(1, dt * 3);
+      if (Math.abs(c.lateral) >= wall) {
+        // muro
+        c.lateral = Math.sign(c.lateral) * wall;
+        const hit = c.v * Math.max(0.35, Math.abs(Math.sin(sl.psi)));
+        this.stats.touches++;
+        if (sl.mode === "crash" || hit > 14) {
+          c.v = 0;
+          this.crashOut(c, street ? "Bateu no muro" : "Acidente");
+          return;
+        }
+        // raspou: perde a asa e segue de lado no muro
+        const dmg = this.rng.range(0.4, 1.4);
+        c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
+        this.hitSide(c, "fw", c.lateral > 0 ? "l" : "r");
+        c.damage += dmg;
+        c.v *= 0.55;
+        sl.psi = 0;
+        this.log(`${c.driver.name} raspou no muro e quebrou a asa dianteira! (~${this.partLossSec("fw", dmg).toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
+      }
+      return;
+    }
+    // parou
+    c.v = 0;
+    if (sl.mode === "crash") {
+      this.crashOut(c, "Acidente");
+      return;
+    }
+    if (sl.stop === 0 && off && !street && Math.abs(c.lateral) > edge + 3 && this.rng.chance(sl.mode === "off" ? 0.35 : 0.25)) {
+      this.crashOut(c, "Preso na brita");
+      return;
+    }
+    // o piloto dá a volta com o carro parado (até ficar de frente pra pista) e volta
+    sl.stop += dt;
+    const turns = Math.round(sl.yaw / (2 * Math.PI)) * 2 * Math.PI;
+    const left = turns - sl.yaw;
+    sl.yaw += Math.sign(left) * Math.min(Math.abs(left), 1.4 * dt);
+    if (sl.stop > 1.2 && Math.abs(left) < 0.02) {
+      c.slide = null;
+      c.spin = 0;
+      c.offTrack = 2;
+      c.lateralTarget = Math.sign(c.lateral || 1) * (edge - 2);
+      this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off", c.id);
+    }
+  }
+
+  /** bateu ou atolou: fica parado onde está (o guindaste vem buscar) */
+  private crashOut(c: CarState, reason: string) {
+    c.restYaw = c.slide?.yaw ?? 0;
+    c.slide = null;
+    c.v = 0;
+    this.retire(c, reason);
+    if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(Math.abs(c.lateral) < TRACK_WIDTH / 2 + 4 ? 0.9 : 0.5)) this.deploySafetyCar();
+    else if (!this.sc.active) this.log("Bandeira amarela no local do acidente.", false, undefined, "yellow");
+  }
+
+  /** guindaste: chega, levanta o carro e leva embora; parado em cima da pista, segura o safety car */
+  private stepRecovery(c: CarState, dt: number) {
+    if (!c.recover) {
+      const onTrack = Math.abs(c.lateral) < TRACK_WIDTH / 2 + 4;
+      c.recover = { t: 0, dur: this.rng.range(onTrack ? 40 : 30, onTrack ? 75 : 55), onTrack };
+    }
+    c.recover.t += dt;
+    if (c.recover.t >= c.recover.dur) {
+      c.pit = "parked";
+      c.recover = null;
+      this.log(`O carro de ${c.driver.short} foi retirado pelo guindaste.`, false, undefined, "info");
     }
   }
 
@@ -707,27 +826,13 @@ export class Race {
     if (c.tyreTemp < 0.45) rate *= 1 + (0.45 - c.tyreTemp) * 8; // pneu frio escorrega
     if (c.lap <= 0) rate *= 2;
     if (c.overtaking) rate *= 1.6; // mergulhando na briga
+    rate *= CHAOS;
     if (!this.rng.chance(rate * dt)) return;
 
-    const team = c.isHuman ? c.team.id : undefined;
-    c.offTrack = this.rng.range(2.5, 5.5);
-    c.offSide = ahead > 0 ? -1 : 1; // pra fora da curva
-    c.overtaking = null;
-    c.wear = Math.min(1.2, c.wear + 0.04);
+    // freou tarde: trava as rodas e segue reto (a física decide se volta, atola ou bate)
     this.stats.offs++;
-    const street = !!t.def.street;
-    const r = this.rng.next();
-    // rua: muro; autódromo: brita (às vezes atola)
-    c.offFate = r < (street ? 0.3 : 0.14) ? "stuck" : "rejoin";
-    if (c.offFate === "rejoin" && this.rng.chance(street ? 0.45 : 0.15)) {
-      const dmg = this.rng.range(0.4, 1.4);
-      c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
-      this.hitSide(c, "fw", c.offSide > 0 ? "r" : "l");
-      c.damage += dmg;
-      this.log(`${c.driver.name} passou reto e ${street ? "raspou no muro" : "danificou a asa dianteira"}! (~${this.partLossSec("fw", dmg).toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
-    } else {
-      this.log(`${c.driver.name} passou reto na curva${street ? " e foi pro muro" : " e foi pra brita"}!`, c.isHuman, team, "off", c.id);
-    }
+    this.startSlide(c, "off");
+    this.log(`${c.driver.name} passou reto na curva!`, c.isHuman, c.isHuman ? c.team.id : undefined, "off", c.id);
   }
 
   /** problema mecânico do nada (motor gasto e zebra ajudam) */
@@ -812,6 +917,11 @@ export class Race {
     if (!sc.onTrack) {
       sc.active = false;
       this.log("Bandeira verde! Valendo de novo!", true, undefined, "green");
+      return;
+    }
+    // carro parado em cima da pista: o safety car só sai depois que o guindaste tirar
+    if (sc.lapsLeft <= 2 && this.cars.some((c) => c.recover?.onTrack)) {
+      this.log("Safety car continua: o guindaste ainda está retirando o carro.", true, undefined, "info");
       return;
     }
     sc.lapsLeft--;
@@ -1115,7 +1225,9 @@ export class Race {
         if (o === c || o.pit === "parked" || this.zone(o) !== zone) continue;
         const d = this.rel(c, o);
         // (em relação ao traçado ideal: ele cruza a pista, e 30 m na frente a mesma fila fica em outra lateral)
-        if (d <= 0 || d > 40 || Math.abs(d < 8 ? o.lateral - c.lateral : this.relLat(o) - this.relLat(c)) >= CAR_W + 0.3) continue;
+        // safety car: fila indiana na pista toda, ninguém passa por fora (nem quem vai pro box)
+        const single = sc.active && zone === "track" && !c.finished && !o.finished;
+        if (d <= 0 || d > 40 || (!single && Math.abs(d < 8 ? o.lateral - c.lateral : this.relLat(o) - this.relLat(c)) >= CAR_W + 0.3)) continue;
         const net = d - CAR_L;
         const desired = net < 0.5 ? o.v * 0.85 : o.v + 0.9 * (net - 2.5);
         myT = Math.min(myT, Math.max(0, desired));
@@ -1137,10 +1249,10 @@ export class Race {
       return;
     }
     if (c.offTrack > 0) {
-      // escapando pra fora da curva
+      // voltando da área de escape: entra na pista com cuidado, pela borda
       c.latV = 0;
-      const out = c.offSide * (TRACK_WIDTH / 2 + 6);
-      c.lateral += Math.max(-5 * dt, Math.min(5 * dt, out - c.lateral));
+      const to = Math.sign(c.lateral || 1) * (TRACK_WIDTH / 2 - 2);
+      c.lateral += Math.max(-2.5 * dt, Math.min(2.5 * dt, to - c.lateral));
       return;
     }
     // acompanha o traçado ideal mesmo quando ele cruza a pista rápido (na reta, a 80 m/s)
@@ -1183,6 +1295,7 @@ export class Race {
         const dl = b.lateral - a.lateral;
         const overlap = Math.abs(d) < CAR_L * 0.92 && Math.abs(dl) < CAR_W * 0.88;
         const sideBySide = !overlap && Math.abs(d) < CAR_L && Math.abs(dl) < CAR_W + 1.2;
+        // (o toque em si só acontece se encostarem: ver maybeContact)
         const front = d > 0 ? b : a;
         const rear = front === a ? b : a;
         if (overlap) {
@@ -1224,6 +1337,8 @@ export class Race {
 
   private maybeContact(a: CarState, b: CarState, rear: CarState, p: number) {
     if (this.checkered || a.retired || b.retired) return;
+    // só encostando de verdade (antes valia até 1,2 m de lado e parecia que nem tinham se tocado)
+    if (Math.abs(this.rel(a, b)) > CAR_L + 0.3 || Math.abs(a.lateral - b.lateral) > CAR_W + 0.2) return;
     const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
     if ((this.contactCooldown.get(key) ?? -1) > this.time) return;
     this.contactCooldown.set(key, this.time + 4);
@@ -1260,12 +1375,11 @@ export class Race {
       const name = PARTS.find((x) => x.id === part)!.label.toLowerCase();
       this.log(`${victim.driver.name} danificou a ${name} no toque com ${other.driver.short}! (~${this.partLossSec(part, dmg).toFixed(1)}s por volta)`, !!team, team, "damage", victim.id);
     } else if (r < 0.94) {
-      victim.spin = this.rng.range(3, 6);
       this.stats.spins++;
+      this.startSlide(victim, "spin");
       this.log(`${victim.driver.name} rodou depois de um toque com ${other.driver.short}!`, !!team, team, "spin", victim.id);
     } else {
-      this.retire(victim, "Acidente");
-      if (!this.sc.active && this.lapsLeft(this.leader()) > 2 && this.rng.chance(0.75)) this.deploySafetyCar();
+      this.startSlide(victim, "crash");
     }
   }
 

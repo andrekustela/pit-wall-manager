@@ -1,5 +1,6 @@
-// Editor de pintura do carro e do emblema da equipe, com prévia ao vivo.
+// Editor de pintura do carro, do emblema e do uniforme do piloto da equipe, com prévia ao vivo.
 import { carImage } from "../render/carArt";
+import { driverCanvas, driverGround, loadDriver3d, uniformOf } from "../render/driver3d";
 import { previewCanvas } from "../render/car3d";
 import { emblemSvg } from "../render/emblem";
 import { TEAMS } from "../sim/data";
@@ -29,12 +30,12 @@ const PALETTES: [string, string, string][] = [
 export function showLiveryEditor(current: Livery | null, teamId: string, teamName: string, onSave: (l: Livery | null) => void) {
   const t0 = TEAMS.find((t) => t.id === teamId) ?? TEAMS[0];
   let lv: Livery = current ? { ...current, emblem: { ...current.emblem } } : defaultLivery(t0.color, t0.accent, teamName || t0.name);
-  let tab: "carro" | "emblema" = "carro";
+  let tab: "carro" | "emblema" | "piloto" = "carro";
 
   const m = document.createElement("div");
   m.className = "helpmodal";
   m.innerHTML = `<div class="helpbox panel livbox">
-    <div class="helphead"><b>🎨 PINTURA E EMBLEMA DA EQUIPE</b><button class="btn small" data-x>✕</button></div>
+    <div class="helphead"><b>🎨 PINTURA, EMBLEMA E UNIFORME DA EQUIPE</b><button class="btn small" data-x>✕</button></div>
     <div class="livgrid">
       <div class="livprev">
         <canvas class="livcar"></canvas>
@@ -79,6 +80,22 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
     g.fillRect(0, 0, W, H);
     g.fillStyle = "rgba(255,255,255,.12)";
     for (let y = 12; y < H; y += 36) g.fillRect(W / 2 - 1, y, 2, 18);
+    if (tab === "piloto") {
+      // piloto em pé com o uniforme (sobre um chão de box)
+      const d = driverCanvas("stand", uniformOf(previewTeam(lv)));
+      if (!d) {
+        void loadDriver3d().then(renderPreview);
+        return;
+      }
+      const k = (H * 0.92) / d.height;
+      const gy = H * 0.94;
+      g.fillStyle = "rgba(0,0,0,.35)";
+      g.beginPath();
+      g.ellipse(W / 2, gy, d.width * k * 0.22, 6, 0, 0, Math.PI * 2);
+      g.fill();
+      g.drawImage(d, W / 2 - (d.width * k) / 2, gy - driverGround() * d.height * k, d.width * k, d.height * k);
+      return;
+    }
     const img = previewCanvas(previewTeam(lv), () => carImage(previewTeam(lv)).canvas);
     const scale = Math.min((H * 0.9) / img.width, (W * 0.9) / img.height);
     g.save();
@@ -98,7 +115,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
 
   const renderCtrl = () => {
     const box = m.querySelector<HTMLElement>(".livctrl")!;
-    const tabs = `<div class="seg" style="margin-bottom:10px"><button data-tab="carro" class="${tab === "carro" ? "on" : ""}">CARRO</button><button data-tab="emblema" class="${tab === "emblema" ? "on" : ""}">EMBLEMA</button></div>`;
+    const tabs = `<div class="seg" style="margin-bottom:10px"><button data-tab="carro" class="${tab === "carro" ? "on" : ""}">CARRO</button><button data-tab="emblema" class="${tab === "emblema" ? "on" : ""}">EMBLEMA</button><button data-tab="piloto" class="${tab === "piloto" ? "on" : ""}">PILOTO</button></div>`;
     if (tab === "carro") {
       box.innerHTML = `${tabs}
         <div class="livsec"><b>CORES</b><div class="livcols">
@@ -117,6 +134,13 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
         const k = Math.min(96 / img.width, 40 / img.height);
         g.drawImage(img, (96 - img.width * k) / 2, (40 - img.height * k) / 2, img.width * k, img.height * k);
       });
+    } else if (tab === "piloto") {
+      box.innerHTML = `${tabs}
+        <div class="livsec"><b>UNIFORME</b><div class="livcols">
+          ${colorField("suit", "Macacão", lv.suit)}${colorField("suitDetail", "Faixas do macacão", lv.suitDetail)}${colorField("helmet", "Capacete", lv.helmet)}${colorField("helmetDetail", "Faixa do capacete", lv.helmetDetail)}
+        </div>
+          <button class="btn small" data-suitcar style="margin-top:8px">USAR AS CORES DO CARRO</button></div>
+        <p class="hint">É o piloto que sobe no pódio. Os dois pilotos da equipe usam o mesmo uniforme.</p>`;
     } else {
       const e = lv.emblem;
       box.innerHTML = `${tabs}
@@ -163,6 +187,15 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
     const tb = t.closest<HTMLElement>("[data-tab]");
     if (tb) {
       tab = tb.dataset.tab as typeof tab;
+      renderCtrl();
+      renderPreview();
+      return;
+    }
+    if (t.closest("[data-suitcar]")) {
+      lv.suit = lv.base;
+      lv.suitDetail = lv.accent;
+      lv.helmet = lv.accent;
+      update();
       renderCtrl();
       return;
     }

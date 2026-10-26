@@ -4,7 +4,7 @@
 // nas pistas onduladas. Por cima, o cockpit: halo, bico, pneus da frente,
 // retrovisores e o volante com marcha, velocidade e luzes de giro.
 import type { Race } from "../sim/race";
-import { TRACK_WIDTH, type Track } from "../sim/track";
+import { TRACK_WIDTH, angDiff, type Track } from "../sim/track";
 import { drawCockpit3d, drawRearCar } from "./onboard3d";
 import type { CarState } from "../sim/types";
 
@@ -267,7 +267,7 @@ export class OnboardCam {
     }
 
     // ---- outros carros (de longe pra perto) ----
-    const others: { c: CarState; d: number; p: Pt; lat: number; s: number }[] = [];
+    const others: { c: CarState; d: number; p: Pt; lat: number; s: number; yaw: number }[] = [];
     for (const o of race.cars) {
       if (o === car || o.pit === "parked") continue;
       const os = interp?.get(o.id)?.s ?? o.s;
@@ -277,10 +277,13 @@ export class OnboardCam {
       const ol = interp?.get(o.id)?.lat ?? o.lateral;
       const pp = t.pose(s0 + d, ol);
       const p = proj(pp.x, pp.y, this.elev(s0 + d), false);
-      if (p) others.push({ c: o, d, p, lat: ol, s: s0 + d });
+      // pra onde o bico dele aponta em relação à linha de visão (na curva aparece a lateral)
+      // (um pouco menos que o real: o render ortogonal já mostra bastante a lateral)
+      const yaw = ((angDiff(Math.atan2(pp.y - cam.y, pp.x - cam.x), pp.h) * 180) / Math.PI) * 0.7;
+      if (p) others.push({ c: o, d, p, lat: ol, s: s0 + d, yaw });
     }
     others.sort((a, b) => b.d - a.d);
-    for (const o of others) this.drawCar(g, o.p, o.c, wet);
+    for (const o of others) this.drawCar(g, o.p, o.c, wet, o.yaw);
 
     // noite: escurece o mundo (a pista fica iluminada pelos refletores) e acende as estrelas
     if (night) {
@@ -334,11 +337,11 @@ export class OnboardCam {
   }
 
   /** carro visto de trás (vetor) */
-  private drawCar(g: CanvasRenderingContext2D, p: Pt, c: CarState, wet: number) {
+  private drawCar(g: CanvasRenderingContext2D, p: Pt, c: CarState, wet: number, yaw = 0) {
     const k = p.k; // px por metro
     if (k < 0.6) return;
     // carro 3D visto de trás (com a luz de chuva piscando)
-    if (drawRearCar(g, c.team, p.x, p.y, k, wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0)) return;
+    if (drawRearCar(g, c.team, p.x, p.y, k, wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0, yaw)) return;
     const x = p.x, y = p.y;
     const col = c.team.color, acc = c.team.accent;
     const r = (dx: number, dy: number, w: number, h: number, fill: string, rad = 0) => {

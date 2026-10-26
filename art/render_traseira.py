@@ -1,10 +1,12 @@
-# Carro visto de trás (pros carros à frente na câmera onboard), pintável: public/onboard/base_tras.png + mask_tras.png.
+# Carro visto de trás (pros carros à frente na câmera onboard), pintável: public/onboard/base_tras<i>.png + mask_tras<i>.png,
+# em YAWS ângulos (yaw > 0 = o bico aponta pra direita da tela: na curva dá pra ver a lateral dele).
 # uso: blender -b --factory-startup --disable-autoexec <fp04rb_new_rig.blend> --python art/render_traseira.py
 import bpy, math, json
 from mathutils import Vector
 
 OUT = r"C:\Users\Kustela\f1-manager\public\onboard"
 PXM = 140
+YAWS = [-60, -40, -25, -15, -8, 0, 8, 15, 25, 40, 60]
 sc = bpy.context.scene
 for n in ("ground", "light_half_sphere", "ferrari_dashboard_screen", "bee+_logo_grey-01"):
     o = bpy.data.objects.get(n)
@@ -36,10 +38,22 @@ cam.ortho_scale = W + 2 * pad
 co = bpy.data.objects.new("tras", cam)
 sc.collection.objects.link(co)
 # atrás do carro (+Y), na altura dele, olhando reto pra frente (-Y): sem ver o "teto" (inclinado parecia empinando)
-co.location = ((mn.x + mx.x) / 2, mx.y + 12, (mn.z + mx.z) / 2 + 0.05)
-co.rotation_euler = (math.radians(90), 0, math.radians(180))
+Lc = mx.y - mn.y
+ctr = Vector(((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2 + 0.05))
 sc.camera = co
-sc.render.resolution_x = round((W + 2 * pad) * PXM)
+
+
+def aim(yaw):
+    """câmera girando em volta do carro; devolve a largura da imagem (m)"""
+    a = math.radians(yaw)
+    co.location = ctr + Vector((-12 * math.sin(a), 12 * math.cos(a), 0))
+    co.rotation_euler = (math.radians(90), 0, math.radians(180) + a)
+    wid = W * abs(math.cos(a)) + Lc * abs(math.sin(a)) + 2 * pad
+    cam.ortho_scale = wid
+    sc.render.resolution_x = round(wid * PXM)
+    return wid
+
+
 sc.render.resolution_y = round((Hh + 2 * pad + 0.5) * PXM)
 sc.render.resolution_percentage = 100
 sc.render.film_transparent = True
@@ -93,8 +107,11 @@ for o in vis:
             o.data.materials[i] = DARK
     if o.name in BODY | WING | HELM:
         setall(o, PAINT)
-sc.render.filepath = OUT + "\\base_tras.png"
-bpy.ops.render.render(write_still=True)
+wids = []
+for i, y in enumerate(YAWS):
+    wids.append(aim(y))
+    sc.render.filepath = OUT + f"\\base_tras{i}.png"
+    bpy.ops.render.render(write_still=True)
 
 vt = [i.identifier for i in bpy.types.ColorManagedViewSettings.bl_rna.properties["view_transform"].enum_items]
 if "Standard" in vt:
@@ -118,7 +135,9 @@ def emis(name, col):
 E0, ER, EG, EB = emis("m0", (0, 0, 0)), emis("mr", (1, 0, 0)), emis("mg", (0, 1, 0)), emis("mb", (0, 0, 1))
 for o in vis:
     setall(o, ER if o.name in BODY else EG if o.name in WING else EB if o.name in HELM else E0)
-sc.render.filepath = OUT + "\\mask_tras.png"
-bpy.ops.render.render(write_still=True)
-json.dump({"widM": W + 2 * pad, "carWid": W}, open(OUT + "\\tras.json", "w"))
+for i, y in enumerate(YAWS):
+    aim(y)
+    sc.render.filepath = OUT + f"\\mask_tras{i}.png"
+    bpy.ops.render.render(write_still=True)
+json.dump({"widM": W + 2 * pad, "carWid": W, "yaws": YAWS, "widsM": wids}, open(OUT + "\\tras.json", "w"))
 print("traseira ok", sc.render.resolution_x, sc.render.resolution_y)
