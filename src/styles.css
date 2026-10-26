@@ -1306,7 +1306,7 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
 .practice2 .tune { grid-template-columns: 150px 1fr 30px; margin-bottom: 6px; }
 .practice2 .pside { display: flex; flex-direction: column; gap: 8px; }
 .practice2 .lapcanvas { height: clamp(110px, 22vh, 210px); }
-.practice2 .radio { margin-top: 0; min-height: 66px; }
+.practice2 .radio { margin-top: 0; height: 86px; overflow-y: auto; line-height: 1.4; } /* tamanho fixo: fala longa rola dentro, o quadro não cresce */
 .practice2 .pplay { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 12px; font-family: var(--pix); font-size: 15px; letter-spacing: .06em; }
 .practice2 .pplay small { font-family: var(--font); font-size: 12px; opacity: .75; letter-spacing: 0; }
 .practice2 .pplay kbd { padding: 0 6px; border: 1px solid currentColor; border-radius: 3px; font: 11px var(--pix, monospace); opacity: .6; }
