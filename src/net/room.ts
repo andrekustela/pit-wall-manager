@@ -70,7 +70,7 @@ export class Room {
   readonly players = new Map<string, Player>();
   hostId = "";
   phase: Phase = "lobby";
-  laps = 20;
+  laps = -25; // 25% das voltas oficiais
   trackIndex = randomTrack();
   equalCars = false;
   champMode = false;

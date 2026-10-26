@@ -71,7 +71,7 @@ interface SoloPrefs {
   champPct: number;
 }
 function soloPrefs(): SoloPrefs {
-  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[1] ?? LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30 };
+  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30 };
   const x = loadJson<Partial<SoloPrefs>>("pwm.soloCfg") ?? {};
   return {
     track: typeof x.track === "number" && (x.track === -1 || (CIRCUITS[x.track] && !CIRCUITS[x.track].standby)) ? x.track : d.track,

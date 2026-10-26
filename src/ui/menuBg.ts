@@ -175,7 +175,7 @@ export function mountMenuBackdrop(
     grid.height = cv.height;
     const l = grid.getContext("2d")!;
     l.setTransform(dpr, 0, 0, dpr, 0, 0);
-    l.strokeStyle = "rgba(120,140,180,0.06)";
+    l.strokeStyle = "rgba(120,140,180,0.025)";
     l.lineWidth = 1;
     for (let x = 0; x < W; x += 48) { l.beginPath(); l.moveTo(x, 0); l.lineTo(x, H); l.stroke(); }
     for (let y = 0; y < H; y += 48) { l.beginPath(); l.moveTo(0, y); l.lineTo(W, y); l.stroke(); }
@@ -267,6 +267,82 @@ export function mountMenuBackdrop(
     g.restore();
   };
 
+  /**
+   * Bandeira quadriculada no fundo, bem apagada (só a impressão dela): as casas claras deslizam
+   * devagar na diagonal e uma ondulação de tecido passa por elas (brilho e um balanço leve).
+   * Mais fraca perto do menu (à esquerda) e nas bordas.
+   */
+  const FLAG_S = 54;
+  /** conceito: ?bandeira=vento = a bandeira tremulando no vento (em vez de deslizar) */
+  const WIND = new URLSearchParams(location.search).get("bandeira") === "vento";
+  /**
+   * Bandeira no vento: presa do lado do menu e solta na ponta direita. Ondas atravessam o tecido
+   * (mais fortes na ponta), as casas se deformam com a onda e as dobras ganham luz e sombra.
+   */
+  const drawWindFlag = (now: number) => {
+    const t = reduce ? 0 : now / 1000;
+    const x0 = W * 0.3; // onde o tecido "prende" (perto da faixa do menu)
+    // deslocamento do tecido num ponto e a inclinação da onda ali (pra luz das dobras)
+    const field = (x: number, y: number) => {
+      const u = Math.max(0, Math.min(1, (x - x0) / (W - x0)));
+      const ph = x * 0.011 + y * 0.0022 - t * 2.1;
+      const ph2 = x * 0.019 - y * 0.004 - t * 3.3 + 1.3;
+      const amp = 4 + 22 * u * u;
+      return {
+        x: x - Math.cos(ph) * 5 * u,
+        y: y + Math.sin(ph) * amp + Math.sin(ph2) * 5 * u,
+        light: Math.cos(ph) * (0.35 + 0.65 * u) + Math.cos(ph2) * 0.25 * u,
+      };
+    };
+    g.save();
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (let iy = -1; iy * FLAG_S < H + FLAG_S; iy++)
+      for (let ix = 0; ix * FLAG_S < W + FLAG_S; ix++) {
+        if ((ix + iy) & 1) continue;
+        const x = ix * FLAG_S, y = iy * FLAG_S;
+        const cx = x / W, cy = y / H;
+        const fade = Math.min(1, Math.max(0, (cx - 0.12) * 2.2)) * Math.min(1, cy * 4 + 0.2, (1 - cy) * 4, (1 - cx) * 5 + 0.15);
+        if (fade <= 0) continue;
+        const a = field(x, y), b = field(x + FLAG_S, y), c = field(x + FLAG_S, y + FLAG_S), d = field(x, y + FLAG_S);
+        const light = (a.light + b.light + c.light + d.light) / 4;
+        // dobra virada pra luz = mais clara; virada pro outro lado = quase some
+        const alpha = Math.max(0, (0.016 + 0.03 * (0.5 + 0.5 * light)) * fade);
+        if (alpha < 0.003) continue;
+        g.fillStyle = `rgba(205,215,240,${alpha.toFixed(4)})`;
+        g.beginPath();
+        g.moveTo(a.x, a.y);
+        g.lineTo(b.x, b.y);
+        g.lineTo(c.x, c.y);
+        g.lineTo(d.x, d.y);
+        g.closePath();
+        g.fill();
+      }
+    g.restore();
+  };
+  const drawFlag = (now: number) => {
+    if (WIND) return drawWindFlag(now);
+    const t = reduce ? 0 : now / 1000;
+    const ox = (t * 6) % (FLAG_S * 2), oy = (t * 3) % (FLAG_S * 2);
+    g.save();
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (let iy = -2; iy * FLAG_S < H + FLAG_S; iy++)
+      for (let ix = -2; ix * FLAG_S < W + FLAG_S; ix++) {
+        if ((ix + iy) & 1) continue;
+        const x = ix * FLAG_S + ox, y = iy * FLAG_S + oy;
+        // onda de tecido atravessando a bandeira
+        const wave = 0.5 + 0.5 * Math.sin(x * 0.0055 + y * 0.0025 - t * 0.85);
+        const sway = Math.sin(x * 0.009 - t * 1.1) * 4;
+        // some nas bordas e do lado do menu
+        const cx = x / W, cy = y / H;
+        const fade = Math.min(1, Math.max(0, (cx - 0.12) * 2.2)) * Math.min(1, cy * 4, (1 - cy) * 4, (1 - cx) * 5);
+        const a = (0.01 + 0.032 * wave) * fade;
+        if (a < 0.003) continue;
+        g.fillStyle = `rgba(205,215,240,${a.toFixed(4)})`;
+        g.fillRect(x, y + sway, FLAG_S, FLAG_S);
+      }
+    g.restore();
+  };
+
   /** região à direita do centro da faixa (deslocada `tx` px da posição de descanso) */
   const rightOfStripe = (tx: number) => {
     const xc = (y: number) => W * (STRIPE_LEFT + STRIPE_W / 2) + tx - SKEW * (y - H * STRIPE_CY);
@@ -306,6 +382,7 @@ export function mountMenuBackdrop(
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, cv.width, cv.height);
     if (grid) g.drawImage(grid, 0, 0);
+    drawFlag(now);
 
     if (phase === "intro") {
       setStripe(0); // só a grade: a pista aparece quando a faixa passar

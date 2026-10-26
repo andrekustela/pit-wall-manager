@@ -117,6 +117,7 @@ export type ServerMsg =
   | { t: "end"; tele: Record<string, LapRec[]> };
 
 export const MAX_PLAYERS = 10;
-/** voltas fixas, ou percentual das voltas oficiais da pista (negativo: -25 = 25%, arredonda pra cima) */
-export const LAP_OPTIONS = [10, 20, 30, -25, -50, -75, -100];
+/** percentual das voltas oficiais da pista (guardado negativo: -25 = 25%, arredonda pra cima).
+ * Campeonato antigo salvo com voltas fixas (10/20/30) continua valendo */
+export const LAP_OPTIONS = [-25, -50, -75, -100];
 export const SPEEDS = [0, 1, 2, 4, 8, 16];
