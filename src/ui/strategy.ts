@@ -6,6 +6,7 @@ import { CIRCUITS } from "../sim/track";
 import { ALL_COMPOUNDS, COMPOUNDS, DRY, FUEL_MAX, bestForWet, isWetTyre, type CarSetup, type Compound } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import type { QualiResult } from "../sim/weekend";
+import { conditionsBar } from "./practice";
 import { backButtonHtml, bindBackButton, champLabel, esc, teamDrivers, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
 /**
@@ -48,8 +49,16 @@ export class StrategyScreen {
         <header class="shead">
           <div><h1 class="title">ESTRA<span>TÉGIA</span></h1>
             <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · ${w.laps} voltas · o tanque cabe combustível pra ${Math.min(this.maxLaps, w.laps)} voltas</p></div>
-          <div class="sfore" title="Previsão do tempo pra corrida">${w.startWet > 0.15 ? "🌧" : "☀"} Largada: <b>${wetLabel(w.startWet)}</b> · ${esc(forecastText(w))}</div>
-          <span class="sinfo" title="Escolha um plano pronto ou monte o seu. Combustível é escolhido em voltas: mais voltas = carro mais pesado (mais lento), menos voltas = vai ter que parar pra reabastecer. O plano é um lembrete: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você (e dá pra mudar as paradas na corrida).">ⓘ como funciona</span>
+          ${conditionsBar(w, {
+            sub: "estratégia",
+            tip: `Largada: ${wetLabel(w.startWet)}. ${forecastText(w)}
+
+Escolha um plano pronto ou monte o seu. Combustível é escolhido em voltas: mais voltas = carro mais pesado (mais lento), menos voltas = vai ter que parar pra reabastecer.
+
+O plano é um lembrete: na volta marcada o engenheiro avisa e sugere o box, mas quem decide se para é você (e dá pra mudar as paradas na corrida).
+
+No seco é obrigatório usar 2 tipos de pneu diferentes.`,
+          })}
         </header>
         <div class="cols scols" id="s-cars"></div>
         <footer class="sbtns">

@@ -61,7 +61,7 @@ export class PracticeScreen {
         <header class="phead">
           <div class="ptitle"><h1 class="title">TREINO <span>LIVRE</span></h1>
             <p class="sub">${esc(champLabel(lobby))}${esc(track.name)} · ${esc(teamName(lobby, me.teamId!))} · ${PRACTICE_LAPS} voltas de teste por piloto · ninguém mais vê seus tempos</p></div>
-          ${this.conditionsHtml(w)}
+          ${conditionsBar(w)}
         </header>
         <div class="pcols" id="p-cars"></div>
         <footer class="pbtns">
@@ -150,27 +150,6 @@ export class PracticeScreen {
 
   private onKey: ((e: KeyboardEvent) => void) | null = null;
   private keyRef: (e: KeyboardEvent) => void = () => {};
-
-  /** faixa de condições: ícone + % de chuva; clique mostra os detalhes */
-  private conditionsHtml(w: NonNullable<LobbyState["weekend"]>): string {
-    const f = w.forecast;
-    const chance = f ? f.chance : 0;
-    const raceIcon = !f ? "☀" : chance >= 70 ? "🌧" : "🌦";
-    const notes = weekendConditions(w).notes;
-    const NL = "\n";
-    const trackTip = notes.length
-      ? "Neste fim de semana:" + NL + NL + notes.map((n) => `${n.icon} ${n.title}`).join(NL)
-      : "Condições normais de pista neste fim de semana.";
-    const item = (icon: string, title: string, sub: string, tip: string) =>
-      `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
-    return `<div class="conds">
-      ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
-      ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
-      ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
-      ${item("🏁", "Pista", notes.length ? notes.map((n) => n.icon).join(" ") + ` ${notes.length === 1 ? "1 aviso" : `${notes.length} avisos`}` : "normal", trackTip)}
-      ${item("?", "Como funciona", "acerto", "Ajuste o carro e dê voltas de teste. Depois de cada volta o piloto diz no rádio o que está errado (piloto com bom feedback é mais preciso). O acerto ideal muda com a pista, as condições do fim de semana e o gosto de cada piloto. A volta marcada em USAR é a que vai pra classificação e pra corrida.")}
-    </div>`;
-  }
 
   private renderReady() {
     const b = this.root.querySelector<HTMLButtonElement>("#p-ready")!;
@@ -322,4 +301,31 @@ export class PracticeScreen {
     window.removeEventListener("keydown", this.keyRef);
     updateWaitBar(null);
   }
+}
+
+/** ajuda do treino (o "Como funciona" da faixa de condições) */
+export const PRACTICE_HELP = {
+  sub: "acerto",
+  tip: "Ajuste o carro e dê voltas de teste. Depois de cada volta o piloto diz no rádio o que está errado (piloto com bom feedback é mais preciso). O acerto ideal muda com a pista, as condições do fim de semana e o gosto de cada piloto. A volta marcada em USAR é a que vai pra classificação e pra corrida.",
+};
+
+/** faixa de condições do fim de semana (treino, classificação, corrida, pista e a ajuda da tela): clique mostra os detalhes */
+export function conditionsBar(w: NonNullable<LobbyState["weekend"]>, help = PRACTICE_HELP): string {
+  const f = w.forecast;
+  const chance = f ? f.chance : 0;
+  const raceIcon = !f ? "☀" : chance >= 70 ? "🌧" : "🌦";
+  const notes = weekendConditions(w).notes;
+  const NL = "\n";
+  const trackTip = notes.length
+    ? "Neste fim de semana:" + NL + NL + notes.map((n) => `${n.icon} ${n.title}`).join(NL)
+    : "Condições normais de pista neste fim de semana.";
+  const item = (icon: string, title: string, sub: string, tip: string) =>
+    `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
+  return `<div class="conds">
+    ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
+    ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
+    ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
+    ${item("🏁", "Pista", notes.length ? notes.map((n) => n.icon).join(" ") + ` ${notes.length === 1 ? "1 aviso" : `${notes.length} avisos`}` : "normal", trackTip)}
+    ${item("?", "Como funciona", help.sub, help.tip)}
+  </div>`;
 }
