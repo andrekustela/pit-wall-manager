@@ -71,7 +71,7 @@ const app = document.getElementById("app")!;
 const params = new URLSearchParams(location.search);
 /** modo de teste: ?auto passa sozinho pelas fases (solo) */
 const AUTO = params.has("auto");
-/** teste: ?auto&hold=practice|strategy para nessa tela (pra ver/capturar) */
+/** teste: ?auto&hold=practice|quali|strategy para nessa tela (pra ver/capturar) */
 const HOLD = params.get("hold");
 
 class App {
@@ -359,7 +359,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         break;
       case "quali":
         this.screen = new QualiScreen(app, conn, l, this.quali!.results, this.quali!.wet);
-        if (AUTO) setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
+        if (AUTO && HOLD !== "quali") setTimeout(() => conn.send({ t: "ready", ready: true }), 300);
         break;
       case "strategy":
         this.screen = new StrategyScreen(app, conn, l, this.quali!.results);

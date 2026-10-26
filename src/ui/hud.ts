@@ -722,7 +722,8 @@ export class Hud {
         el.dataset.car = c.id;
         this.rowEls.set(c.id, el);
       }
-      const rowCls = `row ${c.team.id === my ? "player" : ""} ${c.id === follow ? "follow" : ""}`;
+      const rowCls = `row ${c.team.id === my ? "player mine" : c.isHuman ? "player human" : ""} ${c.id === follow ? "follow" : ""}`;
+      if (!el.style.getPropertyValue("--tc")) el.style.setProperty("--tc", c.team.color);
       if (el.className !== rowCls) el.className = rowCls;
       if (el.title !== c.team.name) el.title = c.team.name;
       if (el._h !== html) {

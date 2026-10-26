@@ -21,7 +21,9 @@ export class QualiScreen {
 
   constructor(root: HTMLElement, conn: Connection, lobby: LobbyState, results: QualiResult[], wet: number) {
     const w = lobby.weekend!;
-    const humans = new Set(lobby.players.map((p) => p.teamId));
+    // a sua equipe e as dos outros jogadores (online), com o nome de quem joga
+    const myTeam = lobby.players.find((p) => p.id === lobby.you)?.teamId;
+    const others = new Map(lobby.players.filter((p) => p.id !== lobby.you && p.teamId).map((p) => [p.teamId!, p.name]));
     const n = results.length;
     const [c1, c2] = qualiCuts(n);
     root.innerHTML = `
@@ -40,9 +42,10 @@ export class QualiScreen {
             .map((r) => {
               const d = profileOf(r.carId)!;
               const t = TEAMS.find((x) => x.id === teamOfDriver(lobby, r.carId))!;
-              return `<div class="qb-row ${humans.has(t.id) ? "player" : ""}" data-car="${r.carId}">
+              const mine = t.id === myTeam, who = others.get(t.id);
+              return `<div class="qb-row ${mine ? "player mine" : who ? "player human" : ""}" data-car="${r.carId}" style="--tc:${t.color}">
                 <span class="p"></span><span style="height:16px;background:${t.color}"></span>
-                <span class="nm"><b>${esc(d.name)}</b> <span style="color:var(--muted)">${esc(teamName(lobby, t.id))}</span><i class="tag"></i></span>
+                <span class="nm"><b>${esc(d.name)}</b> <span class="tm">${esc(teamName(lobby, t.id))}</span>${mine ? `<em class="who me">VOCÊ</em>` : who ? `<em class="who on" title="Equipe de outro jogador">👤 ${esc(who)}</em>` : ""}<i class="tag"></i></span>
                 ${[0, 1, 2].map((k) => `<span class="t q${k}"></span>`).join("")}
                 <span class="t gap"></span>
               </div>`;

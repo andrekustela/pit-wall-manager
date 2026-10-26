@@ -17,9 +17,10 @@ export function resultsTable(race: Race, myTeamId: string): string {
           : g.laps > 0
             ? `+${g.laps} volta${g.laps > 1 ? "s" : ""}`
             : `+${g.seconds.toFixed(3)}s`;
-      return `<tr class="${c.team.id === myTeamId ? "player" : ""}">
+      const mine = c.team.id === myTeamId, human = !mine && c.isHuman;
+      return `<tr class="${mine ? "player mine" : human ? "player human" : ""}" style="--tc:${c.team.color}">
         <td>${c.retired ? "—" : c.position}</td>
-        <td><span style="display:inline-block;width:4px;height:14px;background:${c.team.color};vertical-align:middle;margin-right:8px"></span>${esc(c.driver.name)}</td>
+        <td><span style="display:inline-block;width:4px;height:14px;background:${c.team.color};vertical-align:middle;margin-right:8px"></span>${esc(c.driver.name)}${mine ? ` <em class="who me">VOCÊ</em>` : human ? ` <em class="who on">👤 ${esc(eng?.name ?? "")}</em>` : ""}</td>
         <td>${esc(c.team.name)}<div style="color:var(--muted);font-size:12px">${esc(eng?.name ?? "")} · ${engineerLabel(eng?.quality ?? null)}</div></td>
         <td class="num">${gap}${c.penalty ? ` <span style="color:var(--warn)">(+${c.penalty}s)</span>` : ""}</td>
         <td>${c.pitStops}</td>

@@ -1325,3 +1325,17 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
   .practice2 .pcols, .practice2 .pbody { grid-template-columns: 1fr; }
   .practice2 .phead { padding-right: 0; }
 }
+
+/* seus pilotos (cor da sua equipe + VOCÊ) e os dos outros jogadores no online (azul + nome de quem joga) */
+.qb-row.mine, .results tr.mine td, .board .row.mine { background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 34%, transparent), color-mix(in srgb, var(--tc) 8%, var(--panel-solid, #141925)) 60%, var(--panel-solid, #141925)); }
+.qb-row.mine, .board .row.mine { box-shadow: inset 5px 0 0 var(--tc), inset 0 0 0 1px rgba(255,255,255,.28); }
+.results tr.mine td:first-child { box-shadow: inset 5px 0 0 var(--tc); }
+.qb-row.human, .results tr.human td, .board .row.human { background: linear-gradient(90deg, rgba(110,168,255,.24), rgba(110,168,255,.05) 60%, var(--panel-solid, #141925)); }
+.qb-row.human, .board .row.human { box-shadow: inset 5px 0 0 #6ea8ff, inset 0 0 0 1px rgba(110,168,255,.35); }
+.results tr.human td:first-child { box-shadow: inset 5px 0 0 #6ea8ff; }
+.qb-row.mine .nm b, .qb-row.human .nm b, .board .row.mine .name, .board .row.human .name { color: #fff; font-weight: 700; }
+.qb-row .tm { color: var(--muted); }
+.qb-row.mine.out, .qb-row.human.out { opacity: .85; }
+.who { font-style: normal; font: 700 10px var(--pix, monospace); letter-spacing: .08em; padding: 1px 6px; margin-left: 8px; vertical-align: 1px; border-radius: 2px; white-space: nowrap; }
+.who.me { background: var(--accent, #e8202a); color: #fff; }
+.who.on { background: #1f3a63; color: #cfe2ff; border: 1px solid #6ea8ff; letter-spacing: .02em; }
