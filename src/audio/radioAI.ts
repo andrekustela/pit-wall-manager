@@ -35,6 +35,9 @@ export interface AIReply {
 
 type State = "off" | "loading" | "ready" | "thinking" | "error";
 
+/** em pausa: entendia errado e ainda engasgava o jogo. Só aparece com ?ia no endereço (pra testar) */
+export const RADIO_AI_ON = typeof location !== "undefined" && new URLSearchParams(location.search).has("ia");
+
 /** tira acento e caixa: "Sênna" -> "senna" */
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -101,7 +104,7 @@ class RadioAI {
 
   /** precisa de WebGPU (Chrome, Edge, Opera e o programa de PC atualizados) */
   get supported() {
-    return typeof navigator !== "undefined" && "gpu" in navigator;
+    return RADIO_AI_ON && typeof navigator !== "undefined" && "gpu" in navigator;
   }
 
   get ready() {
