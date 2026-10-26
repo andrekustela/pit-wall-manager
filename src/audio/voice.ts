@@ -142,7 +142,7 @@ class TeamVoice {
     storeSet("pwm.voice", this.enabled ? "1" : "0");
     if (!this.enabled) this.stop();
     // ligou: fala na hora, pra conferir se o som chega
-    else this.say("Rádio ligado. Tá me ouvindo bem?", "engineer");
+    else this.say("Rádio ligado, tô te ouvindo bem!", "driver", 0);
     this.listeners.forEach((f) => f());
   }
 
@@ -215,6 +215,13 @@ class TeamVoice {
     const rec = line.rec ?? radioLineFor(line.text);
     // quem fala de verdade é o da fala gravada (ex.: ordem sua -> o piloto responde)
     if (rec) line.who = rec.who;
+    // o engenheiro é você: mensagem do engenheiro sem resposta gravada do piloto não vira voz
+    // (era a voz do navegador lendo a sua própria ordem, parecendo outro engenheiro)
+    else if (line.who === "engineer") {
+      this.busy = false;
+      setTimeout(() => this.next(), 0);
+      return;
+    }
     this.talk(line.who === "driver" ? (this.drivers()[line.slot]?.id ?? null) : null);
     if (rec) {
       // fala gravada: sorteia uma versão (sem repetir a última)

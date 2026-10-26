@@ -6,14 +6,10 @@
 // Baixa ~1,1 GB na primeira vez (modelo + vozes); o navegador guarda. É opcional: desligada, o
 // rádio continua com as falas prontas.
 import type { MLCEngineInterface } from "@mlc-ai/web-llm";
-import type { TtsSession } from "@mintplex-labs/piper-tts-web";
 import { storeGet, storeSet } from "../ui/common";
 import { getEditor, type VoiceId } from "../ui/editorData";
 
 const MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
-/** vozes do rádio -> modelo Piper; Jeff e Cadu vêm do repositório oficial (o espelho da biblioteca só tem o Faber) */
-const PIPER: Record<VoiceId, string> = { faber: "pt_BR-faber-medium", jeff: "pt_BR-jeff-medium", cadu: "pt_BR-cadu-medium" };
-const OFFICIAL = "../../../../rhasspy/piper-voices/resolve/main/pt/pt_BR";
 
 /** o que a IA pode mandar o jogo fazer (o piloto confirma do jeito dele) */
 export type AIAction =
@@ -83,7 +79,11 @@ class RadioAI {
   /** o jogador ligou (fica lembrado; religa sozinho na próxima vez) */
   wanted = storeGet("pwm.radioai") === "1";
   private engine: MLCEngineInterface | null = null;
-  private tts = new Map<string, Promise<TtsSession>>();
+  /** a IA e a voz rodam em processos separados (workers): a corrida não trava enquanto elas trabalham */
+  private llmWorker: Worker | null = null;
+  private ttsWorker: Worker | null = null;
+  private ttsSeq = 0;
+  private ttsWait = new Map<number, { ok: (wav: Blob | null) => void; fail: (e: Error) => void }>();
   /** conversa recente com cada piloto (pra ele lembrar do que você perguntou) */
   private hist = new Map<string, { q: string; a: string }[]>();
   private listeners: (() => void)[] = [];
@@ -114,7 +114,8 @@ class RadioAI {
     this.set("loading");
     try {
       const webllm = await import("@mlc-ai/web-llm");
-      this.engine = await webllm.CreateMLCEngine(MODEL, {
+      this.llmWorker = new Worker(new URL("./llmWorker.ts", import.meta.url), { type: "module" });
+      this.engine = await webllm.CreateWebWorkerMLCEngine(this.llmWorker, MODEL, {
         initProgressCallback: (p) => {
           this.progress = `IA: ${Math.round((p.progress ?? 0) * 100)}%`;
           this.listeners.forEach((f) => f());
@@ -124,7 +125,7 @@ class RadioAI {
       const v = getEditor().voices;
       this.progress = "Vozes do rádio...";
       this.listeners.forEach((f) => f());
-      await Promise.all([this.session(v.p1), this.session(v.p2)]);
+      await Promise.all([this.tts(v.p1, null), this.tts(v.p2, null)]);
       this.progress = "";
       this.set("ready");
     } catch (e) {
@@ -139,26 +140,33 @@ class RadioAI {
     storeSet("pwm.radioai", "0");
     void this.engine?.unload();
     this.engine = null;
+    this.llmWorker?.terminate();
+    this.llmWorker = null;
+    this.ttsWorker?.terminate();
+    this.ttsWorker = null;
+    this.ttsWait.forEach((w) => w.fail(new Error("IA desligada")));
+    this.ttsWait.clear();
     this.progress = "";
     this.set("off");
   }
 
-  /** sessão da voz (uma por voz: a biblioteca só guarda uma de cada vez, então cria separado) */
-  private session(voice: VoiceId): Promise<TtsSession> {
-    let s = this.tts.get(voice);
-    if (!s) {
-      s = (async () => {
-        const piper = await import("@mintplex-labs/piper-tts-web");
-        const id = PIPER[voice];
-        const map = piper.PATH_MAP as Record<string, string>;
-        if (!map[id]) map[id] = `${OFFICIAL}/${voice}/medium/${id}.onnx`;
-        piper.TtsSession._instance = null;
-        return piper.TtsSession.create({ voiceId: id });
-      })();
-      s.catch(() => this.tts.delete(voice));
-      this.tts.set(voice, s);
+  /** voz no processo separado: text = null só carrega a voz (pra 1ª fala não esperar o download) */
+  private tts(voice: VoiceId, text: string | null): Promise<Blob | null> {
+    if (!this.ttsWorker) {
+      this.ttsWorker = new Worker(new URL("./ttsWorker.ts", import.meta.url), { type: "module" });
+      this.ttsWorker.onmessage = (e: MessageEvent<{ id: number; wav?: Blob; error?: string }>) => {
+        const w = this.ttsWait.get(e.data.id);
+        if (!w) return;
+        this.ttsWait.delete(e.data.id);
+        if (e.data.error) w.fail(new Error(e.data.error));
+        else w.ok(e.data.wav ?? null);
+      };
     }
-    return s;
+    const id = ++this.ttsSeq;
+    return new Promise((ok, fail) => {
+      this.ttsWait.set(id, { ok, fail });
+      this.ttsWorker!.postMessage(text === null ? { id, voice, warm: true } : { id, voice, text });
+    });
   }
 
   /**
@@ -171,8 +179,10 @@ class RadioAI {
     const mate = drivers[1 - slot];
     const past = this.hist.get(d.id) ?? [];
     const sys = [
-      `Você é ${d.name}, piloto de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}, falando no rádio com o seu engenheiro durante a corrida.`,
+      `Você é ${d.name}, PILOTO de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}. Você está DENTRO do carro, correndo agora.`,
+      "Quem fala com você no rádio é o SEU ENGENHEIRO (o jogador). Você NÃO é o engenheiro: nunca dê ordens, nunca diga \"vamos te chamar\", \"você precisa\", \"piloto\". Fale em primeira pessoa, sobre o que VOCÊ sente no carro e o que VOCÊ vai fazer (\"tô sentindo\", \"vou atacar\", \"entendido, entro no box\").",
       "Responda SEMPRE em português do Brasil, como piloto no rádio: curto (no máximo 2 frases, até 25 palavras), natural, com a emoção da situação (tranquilo, irritado, empolgado, preocupado).",
+      'Exemplos: engenheiro "como tá o carro?" -> {"fala": "Tá bom na reta, mas a traseira escorrega na saída das curvas lentas.", "acao": "nenhuma"}; engenheiro "pode atacar" -> {"fala": "Entendido, vou pra cima dele agora!", "acao": "atacar"}.',
       "Use só os dados da situação abaixo. Não invente números, tempos nem nomes que não estão lá. Se não souber, diga o que sente no carro.",
       "Se o engenheiro mandar uma ordem (box, atacar, poupar, motor, deixar o companheiro passar), confirme do seu jeito e coloque a ação. Se for só uma pergunta, a ação é nenhuma.",
       `Responda só em JSON: {"fala": "o que você diz no rádio", "acao": um de ${ACTIONS.map((a) => `"${a}"`).join(", ")}}`,
@@ -217,7 +227,7 @@ class RadioAI {
     if (!this.engine || this.state !== "ready") return null;
     const d = drivers[slot];
     const sys = [
-      `Você é ${d.name}, piloto de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}, falando no rádio com o seu engenheiro durante a corrida.`,
+      `Você é ${d.name}, PILOTO de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}, dentro do carro, falando no rádio com o seu engenheiro. Você não é o engenheiro: fale em primeira pessoa, sobre você.`,
       "Acabou de acontecer algo com você. Fale no rádio o que sente sobre isso, em português do Brasil: uma frase curta (até 15 palavras), natural, com a emoção certa (bravo se te fecharam, empolgado se passou, preocupado se quebrou).",
       "Use só os fatos dados. Não invente números nem nomes.",
       'Responda só em JSON: {"fala": "o que você diz no rádio"}',
@@ -253,8 +263,9 @@ class RadioAI {
   /** a fala na voz do piloto (P1/P2 do Editor): endereço de um áudio pronto pra tocar */
   async voice(text: string, slot: number): Promise<string> {
     const v = getEditor().voices[slot === 1 ? "p2" : "p1"];
-    const s = await this.session(v);
-    return URL.createObjectURL(await s.predict(text));
+    const wav = await this.tts(v, text);
+    if (!wav) throw new Error("sem áudio");
+    return URL.createObjectURL(wav);
   }
 }
 
