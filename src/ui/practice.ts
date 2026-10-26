@@ -310,7 +310,7 @@ export const PRACTICE_HELP = {
 };
 
 /** faixa de condições do fim de semana (treino, classificação, corrida, pista e a ajuda da tela): clique mostra os detalhes */
-export function conditionsBar(w: NonNullable<LobbyState["weekend"]>, help = PRACTICE_HELP): string {
+export function conditionsBar(w: NonNullable<LobbyState["weekend"]>, help = PRACTICE_HELP, at: "practice" | "strategy" = "practice"): string {
   const f = w.forecast;
   const chance = f ? f.chance : 0;
   const raceIcon = !f ? "☀" : chance >= 70 ? "🌧" : "🌦";
@@ -322,8 +322,11 @@ export function conditionsBar(w: NonNullable<LobbyState["weekend"]>, help = PRAC
   const item = (icon: string, title: string, sub: string, tip: string) =>
     `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
   return `<div class="conds">
-    ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
-    ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
+    ${at === "strategy"
+      ? // na estratégia o que importa é como a pista está na largada
+        item(wetIcon(w.startWet), "Largada", wetLabel(w.startWet), `Pista na largada: ${wetLabel(w.startWet).toLowerCase()}. ${w.startWet > 0.15 ? "Com a pista molhada, pneu de chuva na largada." : "Pista seca: pneu de seco na largada."}`)
+      : `${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
+    ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}`}
     ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
     ${item("🏁", "Pista", notes.length ? notes.map((n) => n.icon).join(" ") + ` ${notes.length === 1 ? "1 aviso" : `${notes.length} avisos`}` : "normal", trackTip)}
     ${item("?", "Como funciona", help.sub, help.tip)}
