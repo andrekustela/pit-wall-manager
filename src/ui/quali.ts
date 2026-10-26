@@ -8,7 +8,9 @@ import type { Compound } from "../sim/types";
 import { qualiCuts, type QualiResult } from "../sim/weekend";
 import { backButtonHtml, bindBackButton, champLabel, esc, teamOfDriver, teamName, tyreIcon, updateWaitBar, wetLabel } from "./common";
 
-const ROW_H = 34;
+/** altura da linha: cabe a tabela inteira na tela (sem rolar), entre 22 e 32 px */
+const rowHeight = (n: number) => Math.max(22, Math.min(32, Math.floor((window.innerHeight - 150) / (n + 1))));
+const HEAD_H = 28;
 
 /**
  * Classificação em 3 sessões: os tempos do Q1 aparecem, a tabela se reordena,
@@ -26,17 +28,24 @@ export class QualiScreen {
     const others = new Map(lobby.players.filter((p) => p.id !== lobby.you && p.teamId).map((p) => [p.teamId!, p.name]));
     const n = results.length;
     const [c1, c2] = qualiCuts(n);
+    const ROW_H = rowHeight(n);
+    const mineIds = results.filter((r) => teamOfDriver(lobby, r.carId) === myTeam).map((r) => r.carId);
     root.innerHTML = `
-      <div class="screen"><div class="wrap">
-        <h1 class="title">CLASSIFICA<span>ÇÃO</span></h1>
-        <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · Q1, Q2 e Q3 · ${wetLabel(wet)}</p>
-        <div class="qsessions">
-          <span data-s="0">Q1 <small>todos · caem ${n - c1}</small></span>
-          <span data-s="1">Q2 <small>${c1} carros · caem ${c1 - c2}</small></span>
-          <span data-s="2">Q3 <small>top ${c2} · briga pela pole</small></span>
-          <button class="btn small" id="q-skip">PULAR ▶▶</button>
-        </div>
-        <div class="box qboard" style="padding:0;height:${n * ROW_H + 30}px">
+      <div class="screen qscreen" style="--rh:${ROW_H}px"><div class="qwrap">
+        <header class="qtop">
+          <div><h1 class="title">CLASSIFICA<span>ÇÃO</span></h1>
+            <p class="sub">${esc(champLabel(lobby))}${esc(CIRCUITS[w.trackIndex].name)} · ${wetLabel(wet)}</p></div>
+          <div class="qsessions">
+            <span data-s="0">Q1 <small>todos · caem ${n - c1}</small></span>
+            <span data-s="1">Q2 <small>${c1} carros · caem ${c1 - c2}</small></span>
+            <span data-s="2">Q3 <small>top ${c2} · pole</small></span>
+            <button class="btn small" id="q-skip">PULAR ▶▶</button>
+          </div>
+        </header>
+        <div class="qmain">
+        <div class="box qboard" style="padding:0;height:${n * ROW_H + HEAD_H}px">
+          <div class="qcut" style="top:${HEAD_H + c1 * ROW_H}px"><span>CORTE DO Q1</span></div>
+          <div class="qcut" style="top:${HEAD_H + c2 * ROW_H}px"><span>CORTE DO Q2</span></div>
           <div class="qhead"><span>POS</span><span></span><span>PILOTO</span><span>Q1</span><span>Q2</span><span>Q3</span><span>DIF.</span></div>
           ${results
             .map((r) => {
@@ -52,8 +61,12 @@ export class QualiScreen {
             })
             .join("")}
         </div>
-        <div class="polebanner" id="q-pole"></div>
-        <div class="row-btns" style="align-items:center"><button class="go" id="q-go" style="margin:0">IR PARA A ESTRATÉGIA ▶</button>${backButtonHtml(lobby, "VOLTAR PRO TREINO")}</div>
+        <aside class="qside">
+          <div class="qmine" id="q-mine"></div>
+          <div class="polebanner" id="q-pole"></div>
+          <div class="qbtns"><button class="go" id="q-go">IR PARA A ESTRATÉGIA ▶</button>${backButtonHtml(lobby, "VOLTAR PRO TREINO")}</div>
+        </aside>
+        </div>
       </div></div>`;
 
     const rowOf = new Map([...root.querySelectorAll<HTMLElement>(".qb-row")].map((el) => [el.dataset.car!, el]));
@@ -61,9 +74,49 @@ export class QualiScreen {
     const place = (order: string[]) =>
       order.forEach((id, i) => {
         const el = rowOf.get(id)!;
-        el.style.top = `${30 + i * ROW_H}px`;
+        el.style.top = `${HEAD_H + i * ROW_H}px`;
         el.querySelector(".p")!.textContent = String(i + 1);
       });
+    // painel dos seus pilotos: posição agora, melhor tempo já mostrado e a distância pro corte
+    const shown = new Map<string, number[]>();
+    const renderMine = (order: string[], k: number) => {
+      const box = root.querySelector<HTMLElement>("#q-mine")!;
+      box.innerHTML = mineIds.length
+        ? `<h3>SUA EQUIPE</h3>` +
+          mineIds
+            .map((id) => {
+              const r = byId.get(id)!, d = profileOf(id)!, pos = order.indexOf(id) + 1;
+              const times = shown.get(id) ?? [], best = times.length ? times[times.length - 1] : null;
+              const out = this.done || (r.out && r.out <= k) ? r.out : 0;
+              // já caiu numa sessão anterior: fica "fora" mesmo antes do fim
+              const gone = r.out && r.out <= k;
+              let status = this.done || gone ? (r.out ? `Fora no Q${r.out}` : pos === 1 ? "POLE POSITION!" : `Larga em P${pos}`) : k >= 0 ? `Q${k + 1}` : "Esperando";
+              // na sessão: quanto falta pra passar do corte (ou a folga)
+              if (!this.done && !gone && k >= 0 && k < 2 && best !== null) {
+                const cut = k === 0 ? c1 : c2;
+                const ranked = results.filter((x) => (shown.get(x.carId)?.length ?? 0) > k).sort((a, b) => a.q[k] - b.q[k]);
+                const line = ranked[cut - 1];
+                if (line && ranked.length > cut) {
+                  const diff = r.q[k] - line.q[k];
+                  // passando: folga pro 1º que está caindo; caindo: quanto falta pro último que passa
+                  status = diff <= 0 ? `Q${k + 1} · passando, folga de ${(ranked[cut].q[k] - r.q[k]).toFixed(3)} s` : `Q${k + 1} · caindo: falta ${diff.toFixed(3)} s`;
+                }
+              }
+              return `<div class="qm ${out ? "out" : ""}" style="--tc:${TEAMS.find((t) => t.id === myTeam)?.color ?? "#e8202a"}">
+                <b class="pos">${pos ? `P${pos}` : "-"}</b>
+                <div><b>${esc(d.name)}</b><small>${esc(status)}</small></div>
+                <span class="tt">${best !== null ? fmtLap(best) : "--"}</span></div>`;
+            })
+            .join("")
+        : "";
+    };
+    let lastOrder: string[] = [];
+    let curK = -1;
+    const placeAll = (order: string[]) => {
+      lastOrder = order;
+      place(order);
+      renderMine(order, curK);
+    };
     // ordem de largada da sessão k: quem está nela (pelo tempo) e depois os que já caíram
     const orderAt = (k: number) => {
       const alive = results.filter((r) => r.q.length > k).sort((a, b) => a.q[k] - b.q[k]);
@@ -74,6 +127,10 @@ export class QualiScreen {
       const el = rowOf.get(r.carId)!.querySelector<HTMLElement>(`.q${k}`)!;
       el.textContent = fmtLap(r.q[k]);
       el.classList.add("in");
+      const arr = shown.get(r.carId) ?? [];
+      arr[k] = r.q[k];
+      shown.set(r.carId, arr);
+      if (mineIds.includes(r.carId) || k < 2) renderMine(lastOrder, curK);
     };
     const markOut = (k: number) => {
       for (const r of results)
@@ -83,7 +140,11 @@ export class QualiScreen {
           el.querySelector(".tag")!.textContent = `FORA NO Q${k + 1}`;
         }
     };
-    const setSession = (k: number) => root.querySelectorAll<HTMLElement>("[data-s]").forEach((s) => s.classList.toggle("on", Number(s.dataset.s) === k));
+    const setSession = (k: number) => {
+      curK = k;
+      root.querySelectorAll<HTMLElement>("[data-s]").forEach((s) => s.classList.toggle("on", Number(s.dataset.s) === k));
+      renderMine(lastOrder, k);
+    };
     const finish = () => {
       if (this.done) return;
       this.done = true;
@@ -92,7 +153,7 @@ export class QualiScreen {
       markOut(0);
       markOut(1);
       setSession(-1);
-      place(results.map((r) => r.carId));
+      placeAll(results.map((r) => r.carId));
       const pole = results[0];
       results.forEach((r, i) => {
         const el = rowOf.get(r.carId)!;
@@ -104,13 +165,14 @@ export class QualiScreen {
       });
       root.querySelector("#q-pole")!.textContent = `POLE POSITION: ${profileOf(pole.carId)!.name} · ${fmtLap(pole.time)}`;
       root.querySelector<HTMLElement>("#q-skip")!.hidden = true;
+      renderMine(lastOrder, -1);
     };
 
     // ---- animação ----
     // antes de começar: ordem das equipes
     const start = TEAMS.flatMap((t) => lobby.lineup[t.id] ?? []).filter((id) => byId.has(id));
     for (const r of results) if (!start.includes(r.carId)) start.push(r.carId);
-    place(start);
+    placeAll(start);
     let t = 300;
     const at = (ms: number, f: () => void) => this.timers.push(setTimeout(f, ms));
     for (let k = 0; k < 3; k++) {
@@ -120,7 +182,7 @@ export class QualiScreen {
       const seq = [...alive].sort((a, b) => ((hashId(a.carId) + k * 7) % 13) - ((hashId(b.carId) + k * 7) % 13));
       seq.forEach((r, i) => at(t + 250 + i * 110, () => showTime(r, k)));
       t += 250 + seq.length * 110 + 300;
-      at(t, () => place(orderAt(k)));
+      at(t, () => placeAll(orderAt(k)));
       t += 800;
       if (k < 2) at(t, () => markOut(k));
       t += 900;
