@@ -2,6 +2,7 @@
 // estratégia -> corrida -> pódio). Não sabe nada de rede: no solo roda no
 // navegador, no online roda no servidor Node. A corrida é autoritativa aqui.
 import { TEAMS } from "../sim/data";
+import { resolveLaps } from "../sim/officialLaps";
 import { drawLineup, drawReserves, poolOf, type Lineup } from "../sim/drivers";
 import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, migrateSpares, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
@@ -561,7 +562,8 @@ export class Room {
     this.weekend = {
       seed,
       trackIndex: ch ? ch.rounds[ch.round] : this.trackIndex,
-      laps: this.laps,
+      // percentual das voltas oficiais vira voltas desta pista (cada etapa do campeonato tem a sua)
+      laps: resolveLaps(this.laps, ch ? ch.rounds[ch.round] : this.trackIndex),
       equalCars: this.equalCars,
       teamNames,
       engineers,

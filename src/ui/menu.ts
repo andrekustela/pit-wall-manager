@@ -12,6 +12,7 @@ import { editMyLivery } from "./liveryEditor";
 import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
 import { LAP_OPTIONS } from "../net/protocol";
+import { isPct, lapChoiceLabel, officialLaps, resolveLaps } from "../sim/officialLaps";
 import { champRounds } from "../sim/championship";
 import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
@@ -229,7 +230,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
              <div class="fld"><span>Quantas pistas</span><div class="seg pctseg" data-seg="champPct">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((x) => `<button data-v="${x}" class="${x === sp.champPct ? "on" : ""}" title="${champRounds(x)} etapas">${x}%</button>`).join("")}</div>
              <span class="hint" style="margin:4px 0 0" data-rounds>${champRounds(sp.champPct)} etapas, em pistas sorteadas</span></div>`
           : `<div class="fld"><span>Pista</span><div data-tpick></div></div>`}
-        <div class="fld"><span>Voltas da corrida</span><div class="seg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}">${n} VOLTAS</button>`).join("")}</div></div>
+        <div class="fld"><span>Voltas da corrida</span><div class="seg lapseg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}" title="${isPct(n) ? `${-n}% das voltas da corrida oficial da pista (arredonda pra cima)` : `${n} voltas`}">${lapChoiceLabel(n)}</button>`).join("")}</div>
+          <span class="hint" style="margin:4px 0 0" data-lapshint></span></div>
         ${toggle("realDrivers", sp.realDrivers, "Lendas da F1", "Pilotos reais de todas as eras. Desligado = fictícios.")}
         ${toggle("equalCars", sp.equalCars, "Carros iguais", "Todo mundo com o mesmo carro: ganha quem acerta e decide melhor.")}
         <button class="m2btn hot" id="m-start" data-kind="${p === "cfg-corrida" ? "corrida" : p === "cfg-fds" ? "fds" : "campeonato"}"><b>COMEÇAR</b><span>${camp ? "1ª etapa: treino livre" : p === "cfg-fds" ? "Começa pelo treino livre" : "Vai direto pra estratégia"}</span><i>▶</i></button>`;
@@ -254,11 +256,25 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         seg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === bt));
         const r = el.querySelector<HTMLElement>("[data-rounds]");
         if (r && seg.dataset.seg === "champPct") r.textContent = `${champRounds(Number(bt.dataset.v))} etapas, em pistas sorteadas`;
+        if (seg.dataset.seg === "laps") lapsHint();
       }),
     );
     // pista: lista com busca que só aceita uma pista que existe
     const tpHost = el.querySelector<HTMLElement>("[data-tpick]");
-    const tp = tpHost ? mountTrackPicker(tpHost, soloPrefs().track) : null;
+    let trackNow = soloPrefs().track;
+    const tp = tpHost ? mountTrackPicker(tpHost, trackNow, (v) => ((trackNow = v), lapsHint())) : null;
+    // percentual: mostra quantas voltas dá na pista escolhida
+    function lapsHint() {
+      const h = el.querySelector<HTMLElement>("[data-lapshint]");
+      if (!h) return;
+      const v = Number(el.querySelector<HTMLElement>("[data-seg=laps] .on")?.dataset.v ?? 0);
+      h.textContent = !isPct(v)
+        ? ""
+        : tpHost && trackNow >= 0
+          ? `${officialLaps(trackNow)} voltas oficiais → ${resolveLaps(v, trackNow)} voltas`
+          : `${-v}% das voltas oficiais de cada pista (arredonda pra cima)`;
+    }
+    lapsHint();
     el.querySelector("#m-start")?.addEventListener("click", (e) => {
       const kind = (e.currentTarget as HTMLElement).dataset.kind as SoloSetup["kind"];
       const segV = (k: string, d: number) => Number(el.querySelector<HTMLElement>(`[data-seg=${k}] .on`)?.dataset.v ?? d);

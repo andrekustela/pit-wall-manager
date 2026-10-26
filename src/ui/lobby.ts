@@ -1,5 +1,6 @@
 import type { Connection } from "../net/connection";
 import { LAP_OPTIONS, type LobbyState } from "../net/protocol";
+import { isPct, lapChoiceLabel, officialLaps, resolveLaps } from "../sim/officialLaps";
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { previewCanvas } from "../render/car3d";
@@ -176,8 +177,9 @@ export class LobbyScreen {
       <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:center">
         <div><div class="hint" style="margin:0 0 6px">Voltas da corrida</div>
           <div class="seg" style="min-width:240px">${LAP_OPTIONS.map(
-            (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"}>${n} voltas</button>`,
-          ).join("")}</div></div>
+            (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"} title="${isPct(n) ? `${-n}% das voltas oficiais da pista (arredonda pra cima)` : ""}">${lapChoiceLabel(n).toLowerCase()}</button>`,
+          ).join("")}</div>
+          ${isPct(lobby.laps) && lobby.trackIndex >= 0 ? `<div class="hint" style="margin:4px 0 0">${officialLaps(lobby.trackIndex)} voltas oficiais → ${resolveLaps(lobby.laps, lobby.trackIndex)} voltas</div>` : isPct(lobby.laps) ? `<div class="hint" style="margin:4px 0 0">${-lobby.laps}% das voltas oficiais de cada pista</div>` : ""}</div>
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
