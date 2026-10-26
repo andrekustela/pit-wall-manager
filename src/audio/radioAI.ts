@@ -209,6 +209,47 @@ class RadioAI {
     }
   }
 
+  /**
+   * Reação a um evento da corrida (ultrapassagem, toque, box lento...): o piloto fala por conta
+   * própria. null = a IA está ocupada (toca a fala pronta).
+   */
+  async react(event: string, slot: number, drivers: AIDriver[], team: string): Promise<AIReply | null> {
+    if (!this.engine || this.state !== "ready") return null;
+    const d = drivers[slot];
+    const sys = [
+      `Você é ${d.name}, piloto de Fórmula 1 da equipe ${team}${d.style ? ` (estilo: ${d.style})` : ""}, falando no rádio com o seu engenheiro durante a corrida.`,
+      "Acabou de acontecer algo com você. Fale no rádio o que sente sobre isso, em português do Brasil: uma frase curta (até 15 palavras), natural, com a emoção certa (bravo se te fecharam, empolgado se passou, preocupado se quebrou).",
+      "Use só os fatos dados. Não invente números nem nomes.",
+      'Responda só em JSON: {"fala": "o que você diz no rádio"}',
+      "",
+      `Situação do seu carro:\n${d.status()}`,
+    ].join("\n");
+    this.set("thinking");
+    try {
+      const r = await this.engine.chat.completions.create({
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: `O que aconteceu agora: ${event}` },
+        ],
+        temperature: 0.9,
+        max_tokens: 60,
+        response_format: { type: "json_object" },
+      });
+      const raw = r.choices[0]?.message?.content ?? "";
+      let text = "";
+      try {
+        const j = JSON.parse(raw) as { fala?: unknown };
+        text = typeof j.fala === "string" ? j.fala : "";
+      } catch {
+        text = raw;
+      }
+      text = text.replace(/^["'“”\s-]+|["'“”\s]+$/g, "").replace(/\s+/g, " ").slice(0, 160);
+      return text ? { slot, text, action: "nenhuma" } : null;
+    } finally {
+      if ((this.state as State) === "thinking") this.set("ready");
+    }
+  }
+
   /** a fala na voz do piloto (P1/P2 do Editor): endereço de um áudio pronto pra tocar */
   async voice(text: string, slot: number): Promise<string> {
     const v = getEditor().voices[slot === 1 ? "p2" : "p1"];

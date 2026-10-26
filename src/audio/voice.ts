@@ -98,10 +98,15 @@ class TeamVoice {
   /** fala gerada na hora (IA do rádio): o áudio já vem pronto, com a voz do piloto */
   sayUrl(url: string, slot: number, text: string) {
     if (!this.enabled || this.volume() <= 0) return;
-    // resposta a você: entra na frente da fila (não descarta por velha)
-    this.queue.unshift({ text, who: "driver", at: performance.now(), slot, url });
+    // a IA tem prioridade: passa na frente e as falas prontas que estavam esperando saem da fila
+    this.queue = [{ text, who: "driver", at: performance.now(), slot, url }];
     this.next();
   }
+
+  /** a IA está pensando numa resposta pra você: falas prontas novas não entram (o canal é dela) */
+  hold = false;
+  /** com a IA ligada: reação escrita por ela (true = ela fala; false = toca a fala pronta) */
+  aiReact: ((event: string, slot: number) => Promise<boolean>) | null = null;
 
   /** fala gravada pelo id (ex.: resposta do engenheiro ao comando de voz) */
   sayId(id: string, slot = 0) {
@@ -115,6 +120,10 @@ class TeamVoice {
     if (!rec || Math.random() > (rec.chance ?? 1)) return;
     const slot = this.slotOf(text, rec.target);
     if (slot < 0) return;
+    if (this.aiReact && this.enabled) {
+      void this.aiReact(text, slot).then((ok) => ok || this.say(text, "driver", slot, rec));
+      return;
+    }
     this.say(text, "driver", slot, rec);
   }
 
@@ -150,7 +159,7 @@ class TeamVoice {
 
   /** short = sigla do piloto que está falando (decide a voz) */
   say(text: string, who: Who, slot = 0, rec?: RadioLine) {
-    if (!this.enabled || !this.supported || this.volume() <= 0) return;
+    if (!this.enabled || !this.supported || this.volume() <= 0 || this.hold) return;
     // no máximo 2 esperando: com a corrida acelerada, o que ficou velho é descartado
     this.queue.push({ text, who, at: performance.now(), slot, rec });
     while (this.queue.length > 2) this.queue.shift();

@@ -60,6 +60,10 @@ interface RaceView {
   follow: string;
   speed: number;
   raf: number;
+  /** muda a câmera pra um carro (desliga o modo TV) */
+  setFollow: (id: string) => void;
+  /** liga/desliga o modo TV (devolve se ficou ligado) */
+  toggleTv: () => boolean;
   onKey: (e: KeyboardEvent) => void;
 }
 
@@ -449,12 +453,14 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       }
       follow(id);
     };
+    view.setFollow = setFollow;
     const toggleTv = () => {
       tv = !tv;
       tvSwitch = 0;
       view.hud.note(tv ? "📺 Modo TV ligado: a câmera segue as disputas" : "📺 Modo TV desligado");
       return tv;
     };
+    view.toggleTv = toggleTv;
     const tvPick = () => {
       if (!tv || race.time - tvSwitch < 7) return;
       const order = race.ordered().filter((c) => !c.retired && !c.finished && c.pit === "none");
@@ -623,6 +629,8 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     if (this.view !== view) return;
     // IA do rádio ligada: a frase inteira vai pra ela (menos "sim/não" a um pedido e ordem curtinha,
     // que já resolvem na hora)
+    // câmera por voz ("seguir Hamilton", "câmera no Verstappen", "modo TV"): precisa do ditado livre
+    if (radioAI.ready && this.voiceCamera(view, heard)) return;
     if (radioAI.ready && heard.trim()) {
       const short = heard.trim().split(/s+/).length <= 3;
       const yn = a?.kind === "yes" || a?.kind === "no";
@@ -646,6 +654,56 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     if (r.ack) teamVoice.sayId(r.ack, slot);
   }
 
+  /** reação do piloto a um evento, escrita pela IA e na voz dele; false = não deu (toca a fala pronta) */
+  async aiReact(event: string, slot: number): Promise<boolean> {
+    const view = this.view;
+    if (!view || radioAI.state !== "ready") return false;
+    const race = view.race;
+    const cars = teamVoice.drivers().map((d) => race.cars.find((c) => c.id === d.id)!).filter(Boolean);
+    const car = cars[slot];
+    if (!car) return false;
+    try {
+      const drivers = cars.map((c) => ({ id: c.id, name: c.driver.name, short: c.driver.short, style: c.driver.profile?.style, status: () => carStatusText(race, c) }));
+      const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
+      const r = await Promise.race([radioAI.react(event, slot, drivers, car.team.name), timeout]);
+      if (!r || this.view !== view) return false;
+      teamVoice.sayUrl(await radioAI.voice(r.text, slot), slot, r.text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** "seguir Hamilton", "câmera no Verstappen", "mostra o líder", "segue o safety car", "modo TV" */
+  private voiceCamera(view: RaceView, heard: string): boolean {
+    const t = ` ${heard.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")} `;
+    if (/ (modo )?tv /.test(t) && / (modo|liga|desliga|tv) /.test(t) && !/ segu/.test(t)) {
+      view.hud.note(view.toggleTv() ? "📺 Modo TV ligado (por voz)" : "📺 Modo TV desligado (por voz)");
+      return true;
+    }
+    // "câmera/mostra/foca": o nome em qualquer lugar; "segue/seguir": o nome logo depois do verbo
+    // ("seguir Hamilton", "segue o Verstappen"; "Senna, segue assim" é conversa, não câmera)
+    const cam = / (camera|mostra\w*|foca\w*|olha\w*) /.test(t);
+    const seg = / segu\w* (?:o |a |no |na )?([a-z0-9]+) /.exec(t);
+    if (!cam && !seg) return false;
+    const race = view.race;
+    let car = / (lider|primeiro colocado|ponta) /.test(t) ? race.leader() : null;
+    if (/ safety( car)? /.test(t) && race.sc.active && race.sc.onTrack) {
+      view.setFollow("SC");
+      view.hud.note("🎥 Câmera no safety car");
+      return true;
+    }
+    if (!car) {
+      const all = race.cars.filter((c) => !c.retired);
+      const i = pickSlot(cam ? heard : seg![1], all.map((c) => ({ name: c.driver.name, short: c.driver.short })));
+      car = i >= 0 ? all[i] : null;
+    }
+    if (!car) return false;
+    view.setFollow(car.id);
+    view.hud.note(`🎥 Câmera em ${car.driver.name} (P${car.position})`);
+    return true;
+  }
+
   /** conversa com a IA do rádio: quem você chamou responde com uma fala nova, na voz dele */
   private async askAI(view: RaceView, heard: string) {
     const race = view.race;
@@ -658,6 +716,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     const car = cars[slot] ?? cars[0];
     view.hud.note(`🎙 Você → ${car.driver.short}: "${heard}"`);
     this.voicePin(`📻 ${car.driver.short} pensando...`);
+    teamVoice.hold = true;
     try {
       const drivers = cars.map((c) => ({ id: c.id, name: c.driver.name, short: c.driver.short, style: c.driver.profile?.style, status: () => carStatusText(race, c) }));
       const r = await radioAI.ask(heard, slot, drivers, car.team.name);
@@ -672,6 +731,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     } catch (e) {
       view.hud.note(`📻 A IA do rádio não respondeu (${String((e as Error)?.message ?? e).slice(0, 60)})`);
     } finally {
+      teamVoice.hold = false;
       this.voicePin(null);
     }
   }
@@ -749,11 +809,20 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   // comando de voz: segura V e fala (só na corrida, com o 🎙 ligado). O aviso fica no feed da corrida
   const renderInd = () => {
     const st = voiceCmd.state;
-    appInst.voicePin(st === "listening" ? "🎙 OUVINDO... (solte o V)" : st === "loading" ? "🎙 Preparando o comando de voz..." : null);
+    appInst.voicePin(
+      st === "listening"
+        ? radioAI.ready
+          ? "🎙🤖 OUVINDO com a IA: fale livre e solte o V"
+          : "🎙 OUVINDO comandos (P1 box, P2 atacar...). Solte o V"
+        : st === "loading" ? "🎙 Preparando o comando de voz..." : null,
+    );
     if (st === "error") toast(`🎙 ${voiceCmd.error}`);
   };
   voiceCmd.onChange(renderInd);
   voiceCmd.free = () => radioAI.ready;
+  // com a IA ligada, as reações do seu piloto (ultrapassagem, toque, box lento...) também saem dela;
+  // se ela estiver ocupada ou demorar, toca a fala pronta
+  teamVoice.aiReact = (event, slot) => appInst.aiReact(event, slot);
   // IA do rádio: andamento do download no canto e aviso quando fica pronta (ou falha)
   let aiWas = radioAI.state;
   radioAI.onChange(() => {
