@@ -57,22 +57,25 @@ export class PracticeScreen {
     const me = lobby.players.find((p) => p.id === lobby.you)!;
     const track = CIRCUITS[w.trackIndex];
     root.innerHTML = `
-      <div class="screen"><div class="wrap">
-        <h1 class="title">TREINO <span>LIVRE</span></h1>
-        <p class="sub">${esc(champLabel(lobby))}${esc(track.name)} · ${esc(teamName(lobby, me.teamId!))} · Cada piloto tem ${PRACTICE_LAPS} voltas de teste. Ninguém mais vê seus tempos.</p>
-        ${this.conditionsHtml(w)}
-        <div class="cols" id="p-cars"></div>
-        <div class="row-btns" style="margin-top:20px">
-          <button class="go" id="p-ready" style="margin:0">PRONTO PARA A CLASSIFICAÇÃO ▶</button>
+      <div class="screen practice2"><div class="pwrap">
+        <header class="phead">
+          <div class="ptitle"><h1 class="title">TREINO <span>LIVRE</span></h1>
+            <p class="sub">${esc(champLabel(lobby))}${esc(track.name)} · ${esc(teamName(lobby, me.teamId!))} · ${PRACTICE_LAPS} voltas de teste por piloto · ninguém mais vê seus tempos</p></div>
+          ${this.conditionsHtml(w)}
+        </header>
+        <div class="pcols" id="p-cars"></div>
+        <footer class="pbtns">
+          <span class="phint">Ajuste, dê a volta (teclas <kbd>1</kbd> e <kbd>2</kbd>) e ouça o piloto no rádio. A volta marcada em USAR vai pra classificação.</span>
           ${backButtonHtml(lobby, lobby.champ && lobby.champ.round > 0 ? "VOLTAR PRO LOBBY (cancela o campeonato)" : "VOLTAR PRO LOBBY")}
-        </div>
+          <button class="go" id="p-ready">PRONTO PARA A CLASSIFICAÇÃO ▶</button>
+        </footer>
       </div></div>`;
 
     const wrap = root.querySelector("#p-cars")!;
     const myTeam = TEAMS.find((t) => t.id === me.teamId)!;
     for (const d of teamDrivers(lobby, me.teamId!)) {
       const el = document.createElement("div");
-      el.className = "box";
+      el.className = "box pcar";
       wrap.appendChild(el);
       const panel: CarPanel = { id: d.id, tuning: { ...DEFAULT_TUNING }, laps: [], chosen: null, pending: null, animating: false, el };
       this.panels.push(panel);
@@ -80,13 +83,17 @@ export class PracticeScreen {
         <h3 style="display:flex;justify-content:space-between;align-items:center"><span>${natBadge(d)} ${esc(d.name.toUpperCase())} · ${esc(d.style)}</span>
           <span><button class="linkbtn" data-ficha>ver ficha</button></span></h3>
         <div class="engrow" data-engrow></div>
-        ${LABELS.map(
-          ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
-            <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
-        ).join("")}
-        <canvas class="lapcanvas"></canvas>
-        <div class="radio" data-radio>Rádio: "Pronto pra sair, é só mandar."</div>
-        <button class="btn primary" data-go style="width:100%;margin-top:10px"></button>
+        <div class="pbody">
+          <div class="ptune">${LABELS.map(
+            ([k, label, lo, hi, tip]) => `<div class="tune"><span>${label}${tipButton(tip)}</span><input type="range" min="0" max="100" step="1" value="${panel.tuning[k]}" data-k="${k}"><b data-v="${k}">${panel.tuning[k]}</b>
+              <div class="ends"><span>${lo}</span><span>${hi}</span></div></div>`,
+          ).join("")}</div>
+          <div class="pside">
+            <canvas class="lapcanvas"></canvas>
+            <div class="radio" data-radio>Rádio: "Pronto pra sair, é só mandar."</div>
+            <button class="btn primary pplay" data-go></button>
+          </div>
+        </div>
         <table class="laps"><thead><tr><th>#</th><th>TEMPO</th><th>RETA</th><th title="Asa dianteira / traseira / altura / suspensão diant. e tras.">ACERTO</th><th>USAR</th></tr></thead><tbody data-laps></tbody></table>`;
       el.querySelector("[data-ficha]")!.addEventListener("click", () => showDriverCards([d], teamName(lobby, myTeam.id), myTeam.color));
       el.querySelectorAll<HTMLInputElement>("input[type=range]").forEach((inp) =>
@@ -125,7 +132,23 @@ export class PracticeScreen {
       this.renderReady();
     });
     this.renderReady();
+    // atalhos: 1 e 2 dão a volta de teste de cada piloto
+    this.onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" && (t as HTMLInputElement).type !== "range" || t.tagName === "TEXTAREA")) return;
+      const i = ["1", "2"].indexOf(e.key);
+      if (i < 0 || !this.panels[i] || this.ready) return;
+      e.preventDefault();
+      this.runLap(this.panels[i]);
+    };
+    window.removeEventListener("keydown", this.keyRef);
+    this.keyRef = (e) => this.onKey?.(e);
+    window.addEventListener("keydown", this.keyRef);
   }
+
+  private onKey: ((e: KeyboardEvent) => void) | null = null;
+  private keyRef: (e: KeyboardEvent) => void = () => {};
 
   /** faixa de condições: ícone + % de chuva; clique mostra os detalhes */
   private conditionsHtml(w: NonNullable<LobbyState["weekend"]>): string {
@@ -139,7 +162,7 @@ export class PracticeScreen {
       : "Condições normais de pista neste fim de semana.";
     const item = (icon: string, title: string, sub: string, tip: string) =>
       `<button type="button" class="cond" data-tip="${esc(tip)}"><span class="ci">${icon}</span><span>${title}<small>${sub}</small></span></button>`;
-    return `<div class="conds" style="margin-bottom:12px">
+    return `<div class="conds">
       ${item(wetIcon(w.practiceWet), "Treino", wetLabel(w.practiceWet), `Treino livre: ${wetLabel(w.practiceWet).toLowerCase()}. Os tempos do treino são com bastante combustível.`)}
       ${item(wetIcon(w.qualiWet), "Classificação", wetLabel(w.qualiWet), `Previsão pra classificação: ${wetLabel(w.qualiWet).toLowerCase()}. Pista molhada = todo mundo de pneu de chuva.`)}
       ${item(raceIcon, "Corrida", `${chance}% de chuva`, forecastText(w))}
@@ -197,7 +220,12 @@ export class PracticeScreen {
   private renderPanel(p: CarPanel) {
     const left = PRACTICE_LAPS - p.laps.length;
     const go = p.el.querySelector<HTMLButtonElement>("[data-go]")!;
-    go.textContent = p.animating ? "NA PISTA..." : left > 0 ? `DAR VOLTA DE TESTE (${left} restantes)` : "VOLTAS DE TESTE ESGOTADAS";
+    const key = this.panels.indexOf(p) + 1;
+    go.innerHTML = p.animating
+      ? "NA PISTA..."
+      : left > 0
+        ? `▶ DAR VOLTA DE TESTE <small>${left} de ${PRACTICE_LAPS}</small><kbd title="Atalho">${key}</kbd>`
+        : "VOLTAS DE TESTE ESGOTADAS";
     go.disabled = this.ready || p.animating || left <= 0;
     const bestIdx = p.laps.reduce((b, l, i) => (l.time < p.laps[b].time ? i : b), 0);
     p.el.querySelector("[data-laps]")!.innerHTML =
@@ -208,7 +236,11 @@ export class PracticeScreen {
           <td title="Asa diant. / asa tras. / altura / susp. diant. / susp. tras.">${l.tuning.fw}/${l.tuning.rw}/${l.tuning.h}/${l.tuning.sf}/${l.tuning.sr} ${tyreIcon(l.tyre, COMPOUNDS[l.tyre].label)}</td>
           <td><input type="radio" name="use-${p.id}" data-use="${i}" ${i === p.chosen ? "checked" : ""} ${this.ready ? "disabled" : ""}></td></tr>`,
         )
-        .join("") || `<tr><td colspan="5" class="fb">Nenhuma volta ainda. Sem voltas, vai pra classificação com o acerto atual.</td></tr>`;
+        .join("") +
+      // linhas que faltam: a tabela tem sempre o mesmo tamanho (o quadro não pula)
+      Array.from({ length: Math.max(0, PRACTICE_LAPS - p.laps.length) }, (_, j) =>
+        `<tr class="empty"><td>${p.laps.length + j + 1}</td><td class="t">—</td><td></td><td class="fb">${j === 0 && !p.laps.length ? "sem voltas: vai pra classificação com o acerto atual" : ""}</td><td></td></tr>`,
+      ).join("");
     p.el.querySelectorAll<HTMLInputElement>("[data-use]").forEach((r) =>
       r.addEventListener("change", () => {
         p.chosen = Number(r.dataset.use);
@@ -286,6 +318,7 @@ export class PracticeScreen {
   }
 
   destroy() {
+    window.removeEventListener("keydown", this.keyRef);
     updateWaitBar(null);
   }
 }

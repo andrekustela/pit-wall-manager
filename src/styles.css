@@ -1285,3 +1285,38 @@ label.edrow { grid-template-columns: 1fr 1.3fr; }
   background: linear-gradient(180deg, rgba(232,32,42,.35) 0%, rgba(232,32,42,.75) 45%, rgba(232,32,42,.4) 100%);
   border-left: 2px solid rgba(255,90,96,.8); border-right: 2px solid rgba(255,90,96,.35); }
 .m2stripe.hot::after { opacity: 1; transition: none; }
+
+/* treino em uma tela só (sem rolar): topo numa linha, dois pilotos lado a lado */
+.screen.practice2 { padding: 14px 20px; overflow: hidden; }
+.practice2 .pwrap { height: 100%; display: grid; grid-template-rows: auto auto auto; align-content: center; gap: 14px; max-width: 1640px; margin: 0 auto; }
+.practice2 .phead { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-right: 420px; }
+.practice2 .ptitle .title { font-size: 30px; line-height: 1; }
+.practice2 .ptitle .sub { margin: 4px 0 0; font-size: 13px; }
+.practice2 .conds .cond { padding: 4px 9px; font-size: 13px; }
+.practice2 .conds .cond .ci { font-size: 17px; }
+.practice2 .pbtns { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.practice2 .phint { margin-right: auto; color: var(--muted); font-size: 13px; }
+.practice2 .phint kbd { padding: 0 5px; border: 1px solid var(--line); border-radius: 3px; font: 11px var(--pix, monospace); color: var(--text); }
+.practice2 .laps tr.empty td { color: #4a5262; }
+.practice2 .pbtns .go { margin: 0; font-size: 15px; padding: 10px 20px; }
+.practice2 .pcols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-height: 0; align-items: stretch; }
+.practice2 .pcar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 12px 14px; }
+.practice2 .pcar h3 { margin: 0 0 6px; font-size: 15px; }
+.practice2 .pbody { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.practice2 .tune { grid-template-columns: 150px 1fr 30px; margin-bottom: 6px; }
+.practice2 .pside { display: flex; flex-direction: column; gap: 8px; }
+.practice2 .lapcanvas { height: clamp(110px, 22vh, 210px); }
+.practice2 .radio { margin-top: 0; min-height: 66px; }
+.practice2 .pplay { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 12px; font-family: var(--pix); font-size: 15px; letter-spacing: .06em; }
+.practice2 .pplay small { font-family: var(--font); font-size: 12px; opacity: .75; letter-spacing: 0; }
+.practice2 .pplay kbd { padding: 0 6px; border: 1px solid currentColor; border-radius: 3px; font: 11px var(--pix, monospace); opacity: .6; }
+.practice2 .laps { margin-top: 10px; }
+.practice2 .laps td, .practice2 .laps th { padding: 3px 6px; }
+.practice2 .pcar > .laps { flex: none; }
+/* tela baixa ou estreita: volta a rolar como antes */
+@media (max-height: 640px), (max-width: 1000px) {
+  .screen.practice2 { overflow-y: auto; }
+  .practice2 .pwrap { height: auto; }
+  .practice2 .pcols, .practice2 .pbody { grid-template-columns: 1fr; }
+  .practice2 .phead { padding-right: 0; }
+}
