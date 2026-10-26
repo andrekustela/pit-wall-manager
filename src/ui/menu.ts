@@ -1,3 +1,4 @@
+import { bindSoundPanel, soundPanelHtml } from "./soundPanel";
 import { esc, storeGet, storeSet } from "./common";
 import type { ChampSave } from "../net/room";
 import { CIRCUITS, randomTrack } from "../sim/track";
@@ -18,7 +19,7 @@ import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen, isCovered } from "./transition";
-import { car3dPref } from "../render/car3d";
+import { PRESETS, gfx, setGfx, type CarStyle, type Gfx, type Lv } from "../render/gfx";
 import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -202,6 +203,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <button class="m2btn mode" data-panel="online"><b>MODO ONLINE</b><span>Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
       <button class="m2btn mode small" data-editor><b>EDITOR</b><span>Nomes de pistas e pilotos, vozes do rádio</span><i>▶</i></button>
       <button class="m2btn mode" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
+      <button class="m2btn mode small" data-settings><b>CONFIGURAÇÕES</b><span>Gráficos, desempenho e sons</span><i>▶</i></button>
     </nav>`;
   const head = (t: string) => `<div class="m2vhead"><button class="m2back" data-back>◀ VOLTAR</button><b>${t}</b></div>`;
   const panelHtml = (p: Panel) => {
@@ -252,6 +254,12 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     el.querySelectorAll<HTMLElement>("[data-panel]").forEach((bt) => bt.addEventListener("click", () => show(bt.dataset.panel as Panel)));
     el.querySelector("[data-back]")?.addEventListener("click", () => show(openPanel ? PARENT[openPanel] ?? null : null));
     el.querySelector("#m-edit")?.addEventListener("click", () => showProfileEditor(redraw, onLogout));
+    el.querySelector("[data-settings]")?.addEventListener("click", () => showSettings(redraw));
+    // voltando do teste de FPS: abre direto as Configurações
+    if (new URLSearchParams(location.search).get("config") === "graficos") {
+      history.replaceState(null, "", location.pathname);
+      showSettings(redraw);
+    }
     el.querySelector("#m-solo")?.addEventListener("click", () => show("solo-tipo"));
     // formulário do jogo solo
     el.querySelectorAll<HTMLElement>("[data-seg]").forEach((seg) =>
@@ -466,6 +474,123 @@ Ele fica 30 dias na lixeira (Backup dos campeonatos), dá pra restaurar.`, ok: "
 }
 
 /** editar perfil (engrenagem): nome, equipe, pintura e sair da conta */
+/** aba GRÁFICOS: o que pesa no jogo dá pra baixar ou desligar (PC fraco também joga) */
+function gfxHtml() {
+  const g = gfx();
+  const seg = (key: string, opts: [string, string][], cur: string) =>
+    `<div class="seg" data-g="${key}">${opts.map(([v, l]) => `<button data-v="${v}" class="${cur === v ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  const onoff = (key: string, on: boolean, yes = "LIGADA", no = "DESLIGADA") => seg(key, [["1", yes], ["0", no]], on ? "1" : "0");
+  const lv = (key: keyof Gfx) => seg(key, [["off", "DESLIGADO"], ["baixo", "BAIXO"], ["medio", "MÉDIO"], ["alto", "ALTO"]], String(g[key]));
+  const fld = (label: string, html: string, hint = "") => `<div class="fld"><span>${label}</span>${html}</div>${hint ? `<p class="hint gfxhint">${hint}</p>` : ""}`;
+  return (
+    `<div class="fld"><span>Predefinição (ajusta tudo de uma vez)</span><div class="seg" data-presets>${(["minimo", "baixo", "medio", "alto"] as const)
+      .map((k) => `<button data-preset="${k}">${{ minimo: "MÍNIMO", baixo: "BAIXO", medio: "MÉDIO", alto: "ALTO" }[k]}</button>`)
+      .join("")}</div></div>` +
+    fld("Carros na pista", seg("carStyle", [["2d", "2D"], ["sprite", "2D ESTILIZADO"], ["real", "3D"]], g.carStyle), "2D é o mais leve; 2D estilizado usa imagens do modelo 3D; 3D desenha o carro em 3D de verdade.") +
+    fld("Pista em 3D", onoff("track3d", g.track3d), "Em teste: no modo 3D, o autódromo inteiro em 3D com o entorno real (prédios, arquibancadas, árvores). Por enquanto só em Interlagos.") +
+    fld("Antisserrilhado (3D)", onoff("aa", g.aa, "LIGADO", "DESLIGADO"), "Sem pneus e bordas serrilhados, em resolução cheia (pede mais da placa de vídeo).") +
+    fld("Sombras", lv("shadows"), "Baixo: mancha simples. Médio e alto: sombra de verdade (no 3D), alto mais suave.") +
+    fld("Faíscas", lv("sparks")) +
+    fld("Fumaça e poeira", lv("smoke")) +
+    fld("Chuva (spray dos carros e gotas)", lv("rain")) +
+    fld("Marcas de pneu", lv("skids"), "Quanto mais alto, mais tempo elas ficam no asfalto.") +
+    fld("Câmera onboard nos cards", onoff("onboard", g.onboard)) +
+    fld("Pódio", seg("podium3d", [["1", "3D"], ["0", "DESENHADO"]], g.podium3d ? "1" : "0")) +
+    fld("Limite de FPS", `<input class="txt fpsin" data-fpscap type="number" min="15" max="360" step="1" placeholder="sem limite" value="${g.fpsCap || ""}"> <small class="hint">vazio = sem limite</small>`, "Com limite o FPS fica constante (sem subir e descer) e o notebook esquenta menos. Mais liso: um valor que divide a taxa do monitor (ex.: 72 ou 144 num de 144 Hz; 60 num de 60 Hz).") +
+    `<button class="m2btn small" data-fpstest><b>▶ TESTE DE FPS</b><span>Uma corrida de demonstração de 20 s com estas opções: mostra o FPS e o que dá pra baixar</span><i>▶</i></button>`
+  );
+}
+
+/** lê a aba GRÁFICOS e salva */
+function saveGfx(m: HTMLElement) {
+  const v = (k: string) => m.querySelector<HTMLElement>(`[data-g="${k}"] .on`)?.dataset.v ?? "";
+  const g = gfx();
+  const b = (k: "aa" | "onboard" | "podium3d" | "track3d") => (v(k) ? v(k) === "1" : g[k]);
+  const l = (k: "shadows" | "sparks" | "smoke" | "rain" | "skids") => (v(k) || g[k]) as Lv;
+  setGfx({
+    carStyle: (v("carStyle") || g.carStyle) as CarStyle,
+    aa: b("aa"),
+    shadows: l("shadows"),
+    sparks: l("sparks"),
+    smoke: l("smoke"),
+    rain: l("rain"),
+    skids: l("skids"),
+    onboard: b("onboard"),
+    track3d: b("track3d"),
+    podium3d: b("podium3d"),
+    fpsCap: (() => {
+      const n = Number(m.querySelector<HTMLInputElement>("[data-fpscap]")?.value || 0);
+      return n > 0 ? Math.max(15, Math.min(360, Math.round(n))) : 0;
+    })(),
+  });
+}
+
+/** marca na tela as opções de uma predefinição (salva no SALVAR) */
+function applyPreset(m: HTMLElement, k: keyof typeof PRESETS) {
+  const p = PRESETS[k] as unknown as Record<string, unknown>;
+  const cap = m.querySelector<HTMLInputElement>("[data-fpscap]");
+  if (cap) cap.value = PRESETS[k].fpsCap ? String(PRESETS[k].fpsCap) : "";
+  for (const [key, val] of Object.entries(p)) {
+    const want = typeof val === "boolean" ? (val ? "1" : "0") : String(val);
+    m.querySelectorAll<HTMLElement>(`[data-g="${key}"] button`).forEach((bt) => bt.classList.toggle("on", bt.dataset.v === want));
+  }
+}
+
+/** Configurações: abas GRÁFICOS e SONS (outras seções entram aqui depois) */
+export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "sons" = "graficos") {
+  const m = document.createElement("div");
+  m.className = "helpmodal";
+  m.innerHTML = `<div class="helpbox panel profbox setbox">
+      <div class="helphead"><b>⚙ CONFIGURAÇÕES</b><button class="btn small" data-x>✕</button></div>
+      <div class="seg settabs"><button data-tab="graficos" class="${tab === "graficos" ? "on" : ""}">GRÁFICOS</button><button data-tab="sons" class="${tab === "sons" ? "on" : ""}">SONS</button></div>
+      <div class="setpane" data-pane="graficos" ${tab === "graficos" ? "" : "hidden"}>${gfxHtml()}<p class="hint">Algumas mudanças (como o modo dos carros) valem a partir da próxima corrida.</p></div>
+      <div class="setpane" data-pane="sons" ${tab === "sons" ? "" : "hidden"}></div>
+      <div class="row-btns" style="justify-content:flex-end;margin-top:14px"><button class="btn" data-x>CANCELAR</button><button class="btn primary" data-save>SALVAR</button></div>
+    </div>`;
+  document.body.appendChild(m);
+  // sons: mudam na hora (não precisam do SALVAR)
+  const snd = m.querySelector<HTMLElement>('[data-pane="sons"]')!;
+  const renderSnd = () => (snd.innerHTML = soundPanelHtml());
+  renderSnd();
+  bindSoundPanel(snd, renderSnd);
+  const close = () => {
+    m.remove();
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  window.addEventListener("keydown", onKey, true);
+  m.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t === m || t.closest("[data-x]")) return close();
+    const tb = t.closest<HTMLElement>("[data-tab]");
+    if (tb) {
+      m.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b === tb));
+      m.querySelectorAll<HTMLElement>("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== tb.dataset.tab));
+      return;
+    }
+    const pre = t.closest<HTMLElement>("[data-preset]");
+    if (pre) return applyPreset(m, pre.dataset.preset as keyof typeof PRESETS);
+    if (t.closest("[data-fpstest]")) {
+      // salva o que está escolhido e roda a corrida de demonstração
+      saveGfx(m);
+      location.href = `${location.pathname}?auto&fpsteste`;
+      return;
+    }
+    const seg = t.closest<HTMLButtonElement>("[data-g] button");
+    if (seg && !seg.disabled) seg.parentElement!.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === seg));
+    if (t.closest("[data-save]")) {
+      saveGfx(m);
+      close();
+      onDone();
+    }
+  });
+}
+
 function showProfileEditor(onDone: () => void, onLogout?: () => void) {
   const name = account.profile?.name ?? storeGet("pwm.name");
   const team = account.profile?.team_name ?? storeGet("pwm.team");
@@ -478,8 +603,6 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
       <label class="fld"><span>Nome do engenheiro</span><input class="txt" id="p-name" maxlength="18" placeholder="Ex.: André" value="${esc(name)}"></label>
       <label class="fld"><span>Nome da equipe (vazio = nome original)</span><input class="txt" id="p-team" maxlength="24" placeholder="Ex.: Kustela Racing" value="${esc(team)}"></label>
       <button class="m2btn small profliv" data-liv><b>🎨 PINTURA DO CARRO E EMBLEMA</b><i>▶</i></button>
-      <div class="fld"><span>Carros na pista</span><div class="seg" data-carstyle>
-        <button data-v="3d" class="${car3dPref.on ? "on" : ""}">3D</button><button data-v="2d" class="${car3dPref.on ? "" : "on"}">2D CLÁSSICO</button></div></div>
       <h3 class="m2psub">RECORDES NO MENU</h3>
       <p class="hint" style="margin:-2px 0 8px">Embaixo do nome da pista aparece o melhor tempo e, na pista, os 3 melhores.</p>
       <div class="fld"><span>Contar tempos de</span><div class="seg" data-recmode>
@@ -510,7 +633,6 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
     storeSet("pwm.team", t);
     if (n) account.setNames(n, t);
     const pick = (sel: string) => m.querySelector<HTMLElement>(`${sel} .on`)?.dataset.v;
-    car3dPref.set(pick("[data-carstyle]") !== "2d");
     setRecPrefs({ mode: (pick("[data-recmode]") as RecMode) ?? rp.mode, scope: (pick("[data-recscope]") as RecScope) ?? rp.scope });
     close();
     onDone();
@@ -520,7 +642,7 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
   m.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t === m || t.closest("[data-x]")) return close();
-    const seg = t.closest<HTMLButtonElement>("[data-recmode] button, [data-recscope] button, [data-carstyle] button");
+    const seg = t.closest<HTMLButtonElement>("[data-recmode] button, [data-recscope] button");
     if (seg && !seg.disabled) seg.parentElement!.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === seg));
     if (t.closest("[data-save]")) return save();
     if (t.closest("[data-logout]")) {

@@ -1,3 +1,5 @@
+import { LV_AMOUNT, gfx } from "./gfx";
+import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
 import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
@@ -11,6 +13,26 @@ import { TRACK_WIDTH, angDiff } from "../sim/track";
  * ver worldVector.ts) e por cima carros, safety car, etiquetas, chuva e luzes.
  * A câmera segue um carro; roda do mouse / +/- dão zoom.
  */
+/** pronto do modelo 3D (vem junto do módulo dos carros 3D, carregado sob demanda) */
+let realCarsReadyFn: (() => boolean) | null = null;
+let realPropReady: ((k: "sc" | "crane") => boolean) | null = null;
+
+/** nuvem macia de água (desenhada uma vez): o spray é feito delas */
+let puffCv: HTMLCanvasElement | null = null;
+function puff() {
+  if (puffCv) return puffCv;
+  const c = (puffCv = document.createElement("canvas"));
+  c.width = c.height = 48;
+  const g = c.getContext("2d")!;
+  const gr = g.createRadialGradient(24, 24, 0, 24, 24, 24);
+  gr.addColorStop(0, "rgba(232,238,246,1)");
+  gr.addColorStop(0.45, "rgba(232,238,246,0.55)");
+  gr.addColorStop(1, "rgba(232,238,246,0)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 48, 48);
+  return c;
+}
+
 export class Renderer {
   private octx: CanvasRenderingContext2D;
   private world: WorldTiles;
@@ -269,7 +291,15 @@ export class Renderer {
     o.setTransform(1, 0, 0, 1, 0, 0);
     // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
     void speed;
-    this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, 1);
+    // modo 3D com a pista 3D ligada: o autódromo em 3D (enquanto monta, a pista 2D)
+    const real3 = car3dPref.style === "real" && gfx().track3d ? this.realCars() : null;
+    let drew3d = false;
+    if (real3) {
+      o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      drew3d = real3.drawTrack(o, W, H, m, viewX, viewY, race.track);
+      o.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    if (!drew3d) this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, 1);
     o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = "medium";
@@ -283,7 +313,10 @@ export class Renderer {
 
     this.screenPos.clear();
     const rainLight = race.wet > 0.2 && Math.floor(performance.now() / 300) % 2 === 0;
-    const sorted = [...race.cars].sort((a, b) => Number(a.id === this.followId) - Number(b.id === this.followId));
+    // o guindaste já levou (fora da corrida e "na garagem"): some da pista. O que abandonou pelo box fica no box
+    const sorted = [...race.cars]
+      .filter((c) => !(c.retired && c.pit === "parked" && c.retireReason !== "Abandono"))
+      .sort((a, b) => Number(a.id === this.followId) - Number(b.id === this.followId));
     // pedaços de asa: voam um pouco, escorregam e ficam na pista até sumir
     // pausado: fumaça, faíscas e pedaços param junto com a corrida
     const dt = speed === 0 ? 0 : Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed));
@@ -302,13 +335,21 @@ export class Renderer {
     }
     this.fx.step(dt);
     this.fx.drawGround(o, toCss, m);
+    this.mistStep(o, dt, toCss, m);
+    // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
+    this.fx.drawAir(o, toCss, m, true);
+    // 3D de verdade: os carros vão pra camada do Three.js (desenhada de uma vez depois do laço)
+    const real = car3dPref.style === "real" ? this.realCars() : null;
+    const realList: CarDraw[] = [];
+    this.realProps.length = 0;
+    this.realOn = !!real;
     for (const c of sorted) {
       const p = pos.get(c.id)!;
       let { x, y } = toCss(p);
       const margin = CAR_LEN_M * m * (c.recover ? 12 : 1);
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
-      if (race.wet > 0.25 && c.v > 25) this.spray(o, x, y, p.h, race.wet, m);
+      if (race.wet > 0.25 && c.v > 25 && gfx().rain !== "off") this.spray(o, x, y, p.h, race.wet * LV_AMOUNT[gfx().rain], m, p, c.v, dt);
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
       const crashed = this.fx.crashed(c);
@@ -316,31 +357,40 @@ export class Renderer {
       // guindaste retirando o carro: desenha o caminhão e leva o carro junto
       const lift = c.recover ? this.crane(o, c, p, hh, toCss, m) : null;
       if (lift) ({ x, y, h: hh, scale: mm, alpha } = { ...lift, scale: m * lift.scale, alpha: alpha * lift.alpha });
-      let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c));
+      let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c, p.h));
       // bateu: sem asa dianteira e com uma roda arrancada (os pedaços voam pelo dropParts)
       if (crashed) {
         const lost = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 4;
         look = { ...look, fw: { state: "none", side: "l" }, wheels: look.wheels.map((w, i) => (i === lost ? "off" : w)) as CarLook["wheels"] };
       }
       this.dropParts(c, look, p);
-      if (lift && lift.scale > 1.01) {
-        // no ar: sombra no chão, deslocada
+      if (lift && lift.scale > 1.01 && !real) {
+        // no ar: sombra no chão, deslocada (no 3D a sombra de verdade já aparece)
         o.fillStyle = "rgba(0,0,0,.28)";
         o.beginPath();
         o.ellipse(x + (lift.scale - 1) * 6 * m, y + (lift.scale - 1) * 9 * m, 1 * m, 2.6 * m, hh + Math.PI / 2, 0, Math.PI * 2);
         o.fill();
       }
-      if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, mm, alpha, look, rainLight, performance.now() / 1000)))
+      if (real) {
+        // sombra baixa: mancha simples no chão (barata); média/alta: o 3D faz a sombra de verdade
+        if (gfx().shadows === "baixo") {
+          o.fillStyle = "rgba(0,0,0,.32)";
+          o.beginPath();
+          o.ellipse(x + 0.25 * m, y + 0.35 * m, 2.5 * mm, 0.95 * mm, hh, 0, Math.PI * 2);
+          o.fill();
+        }
+        realList.push({ id: c.id, team: c.team, x: x / m + viewX, y: y / m + viewY, h: hh, scale: mm / m, look, v: c.v, compound: c.compound, lift: lift ? (lift.scale - 1) / 0.18 : 0 });
+      } else if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, mm, alpha, look, rainLight, performance.now() / 1000)))
         this.drawCar(o, x, y, hh, carImage(c.team, rainLight), mm, alpha);
       if (!lift && c.retired) this.smoke(o, x, y, m);
     }
-
     if (scPos) {
       const { x, y } = toCss(scPos);
       this.screenPos.set("SC", { x, y });
       const blink = Math.floor(performance.now() / 250) % 2 === 0;
       const sc3d = car3dPref.on ? prop("sc") : null;
-      if (sc3d) {
+      if (real && realPropReady?.("sc")) this.realProps.push({ kind: "sc", id: "SC", x: scPos.x, y: scPos.y, h: scPos.h, blink });
+      else if (sc3d) {
         drawProp(o, sc3d, x, y, scPos.h, m);
         // giroflex no teto: laranja piscando, um lado de cada vez
         const fx = Math.cos(scPos.h), fy = Math.sin(scPos.h);
@@ -360,8 +410,9 @@ export class Renderer {
         o.restore();
       } else this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
+    if (real) real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
 
-    this.fx.drawAir(o, toCss, m);
+    this.fx.drawAir(o, toCss, m, false);
 
     // túnel: o teto cobre os carros (as etiquetas continuam aparecendo)
     if (race.track.tunnel) {
@@ -407,16 +458,25 @@ export class Renderer {
 
   /** ângulo das rodas da frente: a curvatura um pouco à frente (exagerado pra ler de cima); rodando, contra-esterço */
   private steerSmooth = new Map<string, { v: number; t: number }>();
-  private steerOf(c: Race["cars"][number]): number {
+  /** direção desenhada e posição de cada carro no quadro anterior (pra medir a curva que ele faz de verdade) */
+  private headSeen = new Map<string, { h: number; s: number; k: number }>();
+  private steerOf(c: Race["cars"][number], h: number): number {
     const tr = this.race.track;
     let target: number;
+    // curva que o carro está fazendo de verdade: quanto a direção dele muda por metro (inclui troca de
+    // faixa, ultrapassagem e desvio, que a curvatura da pista não mostra)
+    const prev = this.headSeen.get(c.id);
+    let kPath = prev?.k ?? 0;
+    const ds = prev ? tr.wrap(c.s - prev.s) : 0;
+    if (prev && ds > 0.05 && ds < 40) kPath += (angDiff(prev.h, h) / ds - kPath) * 0.35;
+    if (!prev || (ds > 0.05 && ds < 40) || ds >= 40) this.headSeen.set(c.id, { h, s: c.s, k: kPath });
     if (c.spin > 0) target = Math.sin(performance.now() / 90) * 0.45; // contra-esterço rodando
     else {
-      // média da curvatura logo à frente (o piloto já vira na entrada) e ângulo proporcional à curva:
-      // raio 300 m ≈ 5°, 100 m ≈ 14°, grampo = batente (exagerado de propósito pra ler de cima)
+      // curvatura logo à frente (o piloto já vira na entrada) misturada com a curva real do carro;
+      // ângulo proporcional: raio 300 m ≈ 5°, 100 m ≈ 14°, grampo = batente (exagerado de propósito pra ler de cima)
       let k = 0;
       for (const d of [2, 5, 8, 11]) k += tr.curvature[Math.floor(tr.wrap(c.s + d)) % tr.L] ?? 0;
-      target = Math.max(-0.5, Math.min(0.5, (k / 4) * 25));
+      target = Math.max(-0.5, Math.min(0.5, (0.45 * (k / 4) + 0.55 * kPath) * 25));
     }
     // suave: o volante não pula de uma posição pra outra
     const now = performance.now();
@@ -484,19 +544,62 @@ export class Renderer {
     o.fillText(text, x, y + 1);
   }
 
-  private spray(o: CanvasRenderingContext2D, x: number, y: number, h: number, wet: number, m: number) {
-    const n = Math.round(6 + wet * 14);
-    for (let i = 0; i < n; i++) {
-      const back = (2.6 + Math.random() * 4) * m;
-      const side = (Math.random() - 0.5) * 2.2 * m;
-      const sx = x - Math.cos(h) * back - Math.sin(h) * side;
-      const sy = y - Math.sin(h) * back + Math.cos(h) * side;
-      o.fillStyle = `rgba(220,230,245,${(0.1 + Math.random() * 0.22).toFixed(2)})`;
-      const r = (0.15 + Math.random() * 0.35) * m;
-      o.beginPath();
-      o.arc(sx, sy, r, 0, Math.PI * 2);
-      o.fill();
+  /** água no ar (m, mundo da pista): sai das rodas de trás, abre, perde velocidade e some */
+  private mist: { x: number; y: number; vx: number; vy: number; r: number; a: number; t: number; life: number }[] = [];
+
+  /**
+   * Spray na chuva: uma névoa contínua atrás do carro (mais forte quanto mais rápido e mais molhado) e a
+   * água das duas rodas de trás subindo pra trás. `wet` já vem multiplicado pelo nível nas configurações.
+   */
+  private spray(o: CanvasRenderingContext2D, x: number, y: number, h: number, wet: number, m: number, p: { x: number; y: number }, v: number, dt: number) {
+    const fx = Math.cos(h), fy = Math.sin(h);
+    const k = Math.min(1, (v - 25) / 45) * wet;
+    // névoa: mancha comprida e macia atrás do carro
+    const bx = x - fx * 4.2 * m, by = y - fy * 4.2 * m;
+    o.save();
+    o.translate(bx, by);
+    o.rotate(h);
+    o.scale(1, 0.42);
+    const gr = o.createRadialGradient(0, 0, 0, 0, 0, 4.6 * m);
+    gr.addColorStop(0, `rgba(225,232,242,${(0.3 * k).toFixed(3)})`);
+    gr.addColorStop(1, "rgba(225,232,242,0)");
+    o.fillStyle = gr;
+    o.beginPath();
+    o.arc(0, 0, 4.6 * m, 0, Math.PI * 2);
+    o.fill();
+    o.restore();
+    // água das rodas: nasce rápida (quase na velocidade do carro) e vai ficando pra trás
+    let n = k * 60 * dt;
+    while (n > 0 && (n >= 1 || Math.random() < n)) {
+      n -= 1;
+      const side = Math.random() < 0.5 ? -0.75 : 0.75;
+      const sx = p.x - fx * 1.7 - fy * side, sy = p.y - fy * 1.7 + fx * side;
+      const sp = v * (0.55 + Math.random() * 0.2), lat = (Math.random() - 0.5) * 5 + side * 2.5;
+      this.mist.push({ x: sx, y: sy, vx: fx * sp - fy * lat, vy: fy * sp + fx * lat, r: 0.35, a: 0.16 + Math.random() * 0.12, t: 0, life: 0.7 + Math.random() * 0.5 });
     }
+    if (this.mist.length > 900) this.mist.splice(0, this.mist.length - 900);
+  }
+
+  /** anda e desenha a água no ar (antes dos carros: ela fica atrás deles) */
+  private mistStep(o: CanvasRenderingContext2D, dt: number, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number) {
+    if (!this.mist.length) return;
+    o.save();
+    for (const d of this.mist) {
+      d.t += dt;
+      const drag = Math.exp(-2.6 * dt);
+      d.vx *= drag;
+      d.vy *= drag;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.r += dt * 2.6;
+      const q = d.t / d.life;
+      if (q >= 1) continue;
+      const c = toCss(d), r = d.r * m;
+      o.globalAlpha = d.a * (1 - q) * (q < 0.15 ? q / 0.15 : 1);
+      o.drawImage(puff(), c.x - r, c.y - r, r * 2, r * 2);
+    }
+    o.restore();
+    this.mist = this.mist.filter((d) => d.t < d.life);
   }
 
   /**
@@ -513,7 +616,8 @@ export class Renderer {
     };
     const seg = (a: number, b: number) => ease((q - a) / (b - a));
     const cr = prop("crane");
-    const hookF = cr?.hookF ?? 5.8, hookL = cr?.hookL ?? 0;
+    // (no 3D a lança é estendida 3 m: art/export_props_glb.py; o carro sobe por cima da cabine)
+    const hookF = (cr?.hookF ?? 5.8) + (this.realOn ? 3 : 0), hookL = cr?.hookL ?? 0;
     // direções: frente da pista e "pra fora" (lado em que o carro parou)
     const fx = Math.cos(p.h), fy = Math.sin(p.h);
     const a = t.pose(c.s, c.lateral), b = t.pose(c.s, c.lateral + 1);
@@ -536,9 +640,31 @@ export class Renderer {
     const carW = hang ? hook : { x: p.x, y: p.y };
     const fade = 1 - seg(0.92, 1);
     const tp = toCss({ x: tx, y: ty });
-    if (cr) drawProp(o, cr, tp.x, tp.y, th, m, fade);
+    // modo 3D: o guindaste vai pra camada 3D (com sombra), senão a imagem vista de cima
+    if (this.realOn && realPropReady?.("crane")) this.realProps.push({ kind: "crane", id: `crane-${c.id}`, x: tx, y: ty, h: th });
+    else if (cr) drawProp(o, cr, tp.x, tp.y, th, m, fade);
     const cp = toCss(carW);
     return { x: cp.x, y: cp.y, h: turn(carH, th, seg(0.55, 0.75)), scale: 1 + up * 0.18, alpha: fade };
+  }
+
+  /** a camada dos carros 3D de verdade (o Three.js só é baixado na primeira vez); null enquanto carrega */
+  private real3d: RealCars | null = null;
+  /** safety car e guindaste deste quadro (modo 3D) */
+  private realProps: PropDraw[] = [];
+  private realOn = false;
+  private real3dLoading = false;
+  private realCars(): RealCars | null {
+    if (this.real3d) return realCarsReadyFn?.() ? this.real3d : null;
+    if (!this.real3dLoading) {
+      this.real3dLoading = true;
+      void import("./cars3dReal").then((mod) => {
+        realCarsReadyFn = mod.realCarsReady;
+        realPropReady = mod.propReady;
+        mod.realCarsReady();
+        this.real3d = new mod.RealCars();
+      });
+    }
+    return null;
   }
 
   private smoke(o: CanvasRenderingContext2D, x: number, y: number, m: number) {

@@ -5,22 +5,25 @@
 // mask_* = onde vai cada cor (R carroceria, G asa, B capacete). O 2D clássico (carArt.ts) continua.
 import type { Team } from "../sim/types";
 import { liveryKey } from "../sim/livery";
-import { storeGet, storeSet } from "../ui/common";
+import { gfx, type CarStyle } from "./gfx";
 import { patternShapes, type CarImage } from "./carArt";
 
 /** comprimento do carro na pista (m): o mesmo porte do 2D, pros carros não se sobreporem nas disputas */
 const SHOW_LEN = 4.8;
 
-/** liga/desliga (configuração do perfil); padrão: 3D */
+/** como os carros aparecem (Configurações > Gráficos). `on` = usa as imagens do Blender (estilizado ou 3D) */
 export const car3dPref = {
-  get on() {
-    return storeGet("pwm.car3d") !== "0";
+  get style(): CarStyle {
+    // teste: ?carros=2d|estilizado|3d força o modo
+    const q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("carros") : null;
+    if (q) return q === "3d" ? "real" : q === "2d" ? "2d" : "sprite";
+    return gfx().carStyle;
   },
-  set(on: boolean) {
-    storeSet("pwm.car3d", on ? "1" : "0");
+  get on() {
+    return this.style !== "2d";
   },
 };
-
+export type { CarStyle };
 type Tag = "corpo" | "asa_d" | "asa_t" | "roda_fe" | "roda_fd" | "roda_te" | "roda_td";
 interface Info { layers: Tag[]; pxPerM: number; lenM: number; widM: number; carLen: number; carWid: number }
 interface Layer { base: ImageData; mask: ImageData; box: [number, number, number, number] }
@@ -328,7 +331,18 @@ export function drawCar3d(o: CanvasRenderingContext2D, team: Team, x: number, y:
     wingDraw("asa_d", look.fw, true);
     wingDraw("asa_t", look.rw, false);
   };
-  parts();
+  // sombra: desligada, mancha simples (baixo) ou a sombra das peças (médio/alto)
+  const sh = gfx().shadows;
+  if (sh === "medio" || sh === "alto") parts();
+  else if (sh === "baixo") {
+    o.save();
+    o.globalAlpha = alpha * 0.3;
+    o.fillStyle = "#000";
+    o.beginPath();
+    o.ellipse(W / 2 + sox, H / 2 + soy, W * 0.42, H * 0.3, 0, 0, Math.PI * 2);
+    o.fill();
+    o.restore();
+  }
   shadowPass = false;
   parts();
   // luz de chuva na traseira

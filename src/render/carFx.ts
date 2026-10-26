@@ -1,5 +1,6 @@
 // Efeitos dos carros (só desenho, a simulação não muda): rodada com giro natural, batida com impacto,
 // fumaça de pneu, poeira de brita, faíscas, marcas de pneu no asfalto e tremor da câmera.
+import { LV_AMOUNT, gfx } from "./gfx";
 import type { CarState } from "../sim/types";
 
 interface Part {
@@ -27,7 +28,27 @@ interface St {
 /** abandonos que são batida de verdade (o resto só para: motor, combustível...) */
 const CRASH = new Set(["Acidente", "Bateu no muro"]);
 
+/** brilho macio da faísca (desenhado uma vez) */
+let glowCv: HTMLCanvasElement | null = null;
+function glow() {
+  if (glowCv) return glowCv;
+  const c = (glowCv = document.createElement("canvas"));
+  c.width = c.height = 32;
+  const g = c.getContext("2d")!;
+  const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gr.addColorStop(0, "rgba(255,245,210,1)");
+  gr.addColorStop(0.25, "rgba(255,190,80,0.55)");
+  gr.addColorStop(1, "rgba(255,90,20,0)");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 32, 32);
+  return c;
+}
+
 export class CarFx {
+  /** partículas que já existiam no fim do último passo */
+  private kept = 0;
+  /** acumulador pra deixar passar só uma fração das partículas novas */
+  private acc = 0;
   private st = new Map<string, St>();
   private parts: Part[] = [];
   private skids: Skid[] = [];
@@ -50,8 +71,10 @@ export class CarFx {
     // ---- solto (rodou, passou reto, bateu): o giro vem da física; fumaça e marca de pneu enquanto arrasta ----
     if (c.slide) {
       yaw = c.slide.yaw;
-      marks = c.v > 3;
-      smoke = c.slide.mode !== "off" && c.v > 6;
+      // voltando: só canta pneu (fumaça e marca) no 180; o resto é o carro andando normal
+      const back = c.slide.mode === "rejoin";
+      marks = back ? !!c.slide.smoke : c.v > 3;
+      smoke = back ? !!c.slide.smoke : c.slide.mode !== "off" && c.v > 6;
     } else if (c.retired && c.restYaw != null) yaw = c.restYaw;
 
     // ---- batida: estoura no impacto e gira até parar torto ----
@@ -124,6 +147,18 @@ export class CarFx {
 
   /** anda as partículas e envelhece as marcas */
   step(dt: number) {
+    // Configurações > Gráficos: menos (ou nenhuma) partícula e marca de pneu
+    const g = gfx();
+    if (this.parts.length > this.kept) {
+      // das que nasceram neste quadro, fica a fração do nível de cada tipo
+      const keep = (k: string) => LV_AMOUNT[k === "faisca" ? g.sparks : g.smoke];
+      const fresh = this.parts.splice(this.kept).filter((p) => {
+        const a = keep(p.kind);
+        return a >= 1 || (a > 0 && (this.acc = (this.acc + a) % 1) < a);
+      });
+      this.parts.push(...fresh);
+    }
+    if (g.skids === "off") this.skids.length = 0;
     for (const p of this.parts) {
       p.t += dt;
       const f = Math.exp(-(p.kind === "faisca" ? 3 : 1.6) * dt);
@@ -134,7 +169,9 @@ export class CarFx {
     }
     this.parts = this.parts.filter((p) => p.t < p.life);
     for (const s of this.skids) s.t += dt;
-    this.skids = this.skids.filter((s) => s.t < 45);
+    const life = { off: 0, baixo: 12, medio: 25, alto: 45 }[gfx().skids];
+    this.skids = this.skids.filter((s) => s.t < life);
+    this.kept = this.parts.length;
   }
 
   /** no chão, embaixo dos carros: marcas de pneu */
@@ -155,22 +192,38 @@ export class CarFx {
   }
 
   /** por cima dos carros: fumaça, poeira e faíscas */
-  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number) {
+  /** `sparks`: só as faíscas (desenhadas antes dos carros: saem de baixo deles) ou só fumaça e poeira */
+  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, sparks: boolean) {
     if (!this.parts.length) return;
     o.save();
     for (const p of this.parts) {
+      if ((p.kind === "faisca") !== sparks) continue;
       const q = p.t / p.life, { x, y } = toCss(p);
       if (p.kind === "faisca") {
-        // risco brilhante (somando luz) com a ponta quase branca
+        // titânio raspando: nasce branca de quente, passa pro amarelo e laranja e apaga vermelha;
+        // rastro (largo e fraco + núcleo fino e forte) do tamanho da velocidade e um brilho na ponta
+        const heat = 1 - q;
+        const gc = Math.round(110 + 145 * heat), bc = Math.round(30 + 200 * heat * heat);
+        const trail = (0.045 + 0.035 * heat) * m;
+        const tx = x - p.vx * trail, ty = y - p.vy * trail;
         o.globalCompositeOperation = "lighter";
-        o.strokeStyle = `rgba(255,${150 + Math.round(90 * (1 - q))},${40 + Math.round(80 * (1 - q))},${(1 - q).toFixed(3)})`;
-        o.lineWidth = Math.max(1.4, 0.16 * m);
+        o.lineCap = "round";
+        o.strokeStyle = `rgba(255,${Math.round(gc * 0.75)},${Math.round(bc * 0.4)},${(0.32 * heat).toFixed(3)})`;
+        o.lineWidth = Math.max(1.2, 0.16 * m);
         o.beginPath();
         o.moveTo(x, y);
-        o.lineTo(x - p.vx * 0.045 * m, y - p.vy * 0.045 * m);
+        o.lineTo(tx, ty);
         o.stroke();
-        o.fillStyle = `rgba(255,250,220,${(0.9 * (1 - q)).toFixed(3)})`;
-        o.fillRect(x - 1, y - 1, 2, 2);
+        o.strokeStyle = `rgba(255,${gc},${bc},${heat.toFixed(3)})`;
+        o.lineWidth = Math.max(0.6, 0.05 * m);
+        o.beginPath();
+        o.moveTo(x, y);
+        o.lineTo(x - p.vx * trail * 0.6, y - p.vy * trail * 0.6);
+        o.stroke();
+        const gs = (0.18 + 0.3 * heat) * m * (p.size / 0.5);
+        o.globalAlpha = 0.6 * heat;
+        o.drawImage(glow(), x - gs, y - gs, gs * 2, gs * 2);
+        o.globalAlpha = 1;
         o.globalCompositeOperation = "source-over";
       } else {
         const r = (p.size + q * (p.kind === "fumaca" ? 1.2 : 2)) * m;

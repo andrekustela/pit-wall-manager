@@ -3,6 +3,7 @@
 // então as curvas são as de verdade; o sobe-e-desce é inventado, mais forte
 // nas pistas onduladas. Por cima, o cockpit: halo, bico, pneus da frente,
 // retrovisores e o volante com marcha, velocidade e luzes de giro.
+import { gfx } from "./gfx";
 import type { Race } from "../sim/race";
 import { TRACK_WIDTH, angDiff, type Track } from "../sim/track";
 import { drawCockpit3d, drawRearCar } from "./onboard3d";
@@ -317,7 +318,7 @@ export class OnboardCam {
     }
 
     // chuva na viseira
-    if (race.rain > 0.05) {
+    if (race.rain > 0.05 && gfx().rain !== "off" && gfx().rain !== "baixo") {
       if (Math.random() < race.rain * 0.9) this.drops.push({ x: Math.random() * W, y: Math.random() * H * 0.7, r: 1 + Math.random() * 3, life: 1 });
       g.fillStyle = "rgba(220,235,255,.35)";
       for (const d of this.drops) {

@@ -105,6 +105,10 @@ const COOLDOWN_TIMEOUT = 260; // s depois da bandeirada
 /** tamanho do carro pra colisão (m) */
 const CAR_L = 4.4;
 const CAR_W = 2.3;
+/** tamanho do carro como aparece na tela (m): o encosto entre carros usa este (com o da simulação dava toque
+ * com folga na tela, ou carro encostado na tela sem toque) */
+const VIS_L = 4.8;
+const VIS_W = 1.9;
 /** distância lateral entre "faixas" numa disputa */
 const LANE_STEP = 3.4;
 const LANE_EDGE = TRACK_WIDTH / 2 - 1.6;
@@ -131,7 +135,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "restYaw", "recover", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "restYaw", "recover", "retireAtBox", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -329,7 +333,22 @@ export class Race {
         }
         break;
       case "cancelBox":
-        if (car.pit === "none") car.boxRequest = null;
+        if (car.pit === "none") {
+          car.boxRequest = null;
+          car.retireAtBox = false;
+        }
+        break;
+      case "retire":
+        // abandonar: chama pro box (o pneu não importa) e lá vai pra garagem; parado no box, vai na hora
+        if (!cmd.on) {
+          if (car.pit === "none" && car.retireAtBox) car.boxRequest = null;
+          car.retireAtBox = false;
+        } else if (car.pit === "stopped") this.parkRetired(car);
+        else if (car.pit === "none" || car.pit === "entering") {
+          car.retireAtBox = true;
+          car.boxRequest = car.boxRequest ?? car.compound;
+          this.log(`${car.driver.name}: a equipe manda abandonar. Volta pro box.`, car.isHuman, car.team.id, "out", car.id);
+        }
         break;
       case "pace":
         if (PACE[cmd.mode] && !(car.engineSave && cmd.mode === "push")) car.pace = cmd.mode;
@@ -691,6 +710,13 @@ export class Race {
     }
   }
 
+  /** meio comprimento (na direção da pista) e meia largura (de lado) do carro desenhado, virado como está */
+  private extent(c: CarState): [number, number] {
+    const yaw = c.slide?.yaw ?? c.restYaw ?? 0;
+    const cs = Math.abs(Math.cos(yaw)), sn = Math.abs(Math.sin(yaw));
+    return [(VIS_L / 2) * cs + (VIS_W / 2) * sn, (VIS_L / 2) * sn + (VIS_W / 2) * cs];
+  }
+
   /** o carro fica solto: rodada, passada reta ou batida (a física é do stepSlide) */
   private startSlide(c: CarState, mode: "spin" | "off" | "crash") {
     const t = this.track;
@@ -715,6 +741,7 @@ export class Race {
 
   /** um passo do carro solto */
   private stepSlide(c: CarState, dt: number) {
+    if (c.slide!.mode === "rejoin") return this.stepRejoin(c, dt);
     const t = this.track, sl = c.slide!;
     const street = !!t.def.street, edge = TRACK_WIDTH / 2;
     const wall = edge + (street ? STREET_RUNOFF : RUNOFF);
@@ -767,17 +794,55 @@ export class Race {
       this.crashOut(c, "Preso na brita");
       return;
     }
-    // o piloto dá a volta com o carro parado (até ficar de frente pra pista) e volta
+    // parado um instante e o piloto pega o carro de volta (stepRejoin)
     sl.stop += dt;
-    const turns = Math.round(sl.yaw / (2 * Math.PI)) * 2 * Math.PI;
-    const left = turns - sl.yaw;
-    sl.yaw += Math.sign(left) * Math.min(Math.abs(left), 1.4 * dt);
-    if (sl.stop > 1.2 && Math.abs(left) < 0.02) {
+    if (sl.stop > 0.9) {
+      sl.mode = "rejoin";
+      sl.yaw = Math.atan2(Math.sin(sl.yaw), Math.cos(sl.yaw));
+      sl.psi = sl.yaw;
+      sl.yawRate = 0;
+      c.spin = 0;
+      c.offTrack = 1;
+    }
+  }
+
+  /**
+   * O piloto volta pra pista sozinho: de costas, dá um 180 no lugar cantando pneu (fumaça, marca); de frente,
+   * acelera esterçando pra pista (o carro anda pra onde aponta, sem deslizar de lado) até se alinhar nela.
+   */
+  private stepRejoin(c: CarState, dt: number) {
+    const t = this.track, sl = c.slide!, edge = TRACK_WIDTH / 2;
+    sl.yaw = Math.atan2(Math.sin(sl.yaw), Math.cos(sl.yaw));
+    const lat = c.lateral;
+    const off = Math.abs(lat) > edge - 1.5;
+    const back = Math.abs(sl.yaw) > 1.75;
+    if (back) {
+      // de costas: gira pro lado mais curto até ficar de frente, quase sem sair do lugar
+      sl.smoke = true;
+      sl.yaw -= Math.sign(sl.yaw) * 2.6 * dt;
+      c.v = Math.min(4, c.v + 4 * dt);
+    } else {
+      sl.smoke = false;
+      // aponta pra pista (mais inclinado quanto mais longe dela) e endireita chegando
+      const target = off ? -Math.sign(lat) * Math.min(0.55, 0.1 * (Math.abs(lat) - (edge - 2.5))) : 0;
+      const d = target - sl.yaw;
+      sl.yaw += Math.sign(d) * Math.min(Math.abs(d), 1.1 * dt);
+      const grip = Math.abs(lat) > edge + 0.5 ? (t.def.street ? 0.8 : 0.6) : 1;
+      c.v = Math.min((off ? 14 : 22) * grip, c.v + 7 * grip * dt);
+    }
+    sl.psi = sl.yaw;
+    const k = t.curvature[Math.floor(t.wrap(c.s)) % t.L] ?? 0;
+    const ds = Math.max(0, c.v * Math.cos(sl.psi) * dt);
+    c.s += ds;
+    c.lateral += c.v * Math.sin(sl.psi) * dt;
+    sl.yaw -= k * ds;
+    if (!off && !back && Math.abs(sl.yaw) < 0.1) {
       c.slide = null;
       c.spin = 0;
-      c.offTrack = 2;
-      c.lateralTarget = Math.sign(c.lateral || 1) * (edge - 2);
-      this.log(`${c.driver.name} volta pra pista.`, c.isHuman, team, "off", c.id);
+      c.offTrack = 0;
+      c.latV = 0;
+      c.lateralTarget = c.lateral;
+      this.log(`${c.driver.name} volta pra pista.`, c.isHuman, c.isHuman ? c.team.id : undefined, "off", c.id);
     }
   }
 
@@ -1100,6 +1165,52 @@ export class Race {
         // vai pro lado do pit antes da entrada
         if (!c.finished && c.boxRequest && this.track.wrap(this.track.pitEntryS - c.s) < 320) want = PIT_MERGE;
         if (c.defendTill > this.time) want = this.onLine(c.s, c.defendLat);
+        // carro rodado, voltando pra pista ou quase parado lá na frente: desvia cedo (até 80 m) pro lado
+        // contrário de onde ele está escorregando, contando o tamanho dele atravessado, e tira o pé
+        // (sem isso todo mundo freava atrás dele; quem não consegue desviar bate)
+        if (!c.finished && c.v > 15) {
+          let haz: CarState | null = null, hd = 80, hLat = 0, hW = 0, drift = 0;
+          for (const o of this.cars) {
+            if (o === c || o.pit !== "none" || o.finished) continue;
+            const slow = !!o.slide || (o.retired && Math.abs(o.lateral) < TRACK_WIDTH / 2 + 2) || o.v < Math.min(25, c.v * 0.45);
+            if (!slow) continue;
+            const d = this.rel(c, o);
+            if (d <= 2 || d >= hd) continue;
+            // onde ele vai estar quando eu chegar
+            const vl = o.slide ? o.v * Math.sin(o.slide.psi) : 0;
+            const tArr = Math.min(2.5, d / Math.max(5, c.v - o.v));
+            const pred = o.lateral + vl * tArr;
+            const w = this.extent(o)[1] + VIS_W / 2 + 1;
+            if (Math.abs(pred - c.lateral) < w || Math.abs(o.lateral - c.lateral) < w) {
+              haz = o;
+              hd = d;
+              hLat = pred;
+              hW = w + 0.3;
+              drift = Math.sign(vl);
+            }
+          }
+          if (haz) {
+            const room = (x: number) => {
+              if (Math.abs(x) > LANE_EDGE + 0.5) return -1;
+              let m = 10;
+              for (const o of this.cars) {
+                if (o === c || o === haz || o.pit !== "none") continue;
+                const d = this.rel(c, o);
+                if (d > -10 && d < 40) m = Math.min(m, Math.abs(o.lateral - x));
+              }
+              return m;
+            };
+            const left = Math.max(hLat, haz.lateral) + hW, right = Math.min(hLat, haz.lateral) - hW;
+            const cand = [left, right].filter((x) => Math.abs(x) <= LANE_EDGE + 0.5);
+            // preferência: o lado contrário de onde ele escorrega; empate: o com mais espaço
+            cand.sort((x, y) => {
+              const px = drift !== 0 && Math.sign(x - haz!.lateral) === -drift ? 1 : 0, py = drift !== 0 && Math.sign(y - haz!.lateral) === -drift ? 1 : 0;
+              return py - px || room(y) - room(x);
+            });
+            if (cand.length) want = Math.max(-LANE_EDGE, Math.min(LANE_EDGE, cand[0]));
+            myT *= hd < 35 ? 0.72 : 0.88;
+          }
+        }
         // ordem de equipe: abre espaço pro companheiro que está chegando
         if (c.order === "letPass") {
           const m = this.mate(c);
@@ -1293,7 +1404,12 @@ export class Race {
         const d = this.rel(a, b);
         if (Math.abs(d) > CAR_L + 1) continue;
         const dl = b.lateral - a.lateral;
-        const overlap = Math.abs(d) < CAR_L * 0.92 && Math.abs(dl) < CAR_W * 0.88;
+        // tamanho de cada um virado como está (rodado, o carro fica atravessado e ocupa a pista)
+        const [la, wa] = this.extent(a), [lb, wb] = this.extent(b);
+        const longLim = (la + lb) * 0.95, latLim = wa + wb;
+        // pertinho (até 30 cm de folga na tela): se afastam; encostou na tela: é toque
+        const overlap = Math.abs(d) < longLim && Math.abs(dl) < latLim + 0.3;
+        const touching = Math.abs(d) < longLim && Math.abs(dl) < latLim - 0.02;
         const sideBySide = !overlap && Math.abs(d) < CAR_L && Math.abs(dl) < CAR_W + 1.2;
         // (o toque em si só acontece se encostarem: ver maybeContact)
         const front = d > 0 ? b : a;
@@ -1302,7 +1418,7 @@ export class Race {
           // separa
           // separa aos poucos (rápido, mas sem pular de lado de um quadro pro outro): cada um ganha
           // velocidade de lado pra longe do outro
-          const push = Math.min((CAR_W * 0.88 - Math.abs(dl)) / 2 + 0.05, 3.5 * dt + 0.02);
+          const push = Math.min((latLim + 0.3 - Math.abs(dl)) / 2 + 0.05, 3.5 * dt + 0.02);
           const dir = dl >= 0 ? 1 : -1;
           if (!a.retired) {
             a.lateral = Math.max(-LANE_EDGE - 0.5, a.lateral - push * dir);
@@ -1313,8 +1429,7 @@ export class Race {
             b.latV = dir * Math.max(2.5, dir * (b.latV ?? 0));
           }
           rear.v = Math.min(rear.v, front.v * 0.95);
-          const rel = Math.abs(a.v - b.v);
-          this.maybeContact(a, b, rear, Math.min(0.9, 0.2 + rel * 0.04) * (1 + this.wet));
+          if (touching) this.maybeContact(a, b, rear, 1);
         } else if (sideBySide && this.track.speedAt(a.s) < 62 && !this.sc.active && !a.finished && !b.finished) {
           // lado a lado na curva: risco de toque
           // lado a lado na curva tem risco (bem mais na largada, com todo mundo junto)
@@ -1338,7 +1453,8 @@ export class Race {
   private maybeContact(a: CarState, b: CarState, rear: CarState, p: number) {
     if (this.checkered || a.retired || b.retired) return;
     // só encostando de verdade (antes valia até 1,2 m de lado e parecia que nem tinham se tocado)
-    if (Math.abs(this.rel(a, b)) > CAR_L + 0.3 || Math.abs(a.lateral - b.lateral) > CAR_W + 0.2) return;
+    const [la, wa] = this.extent(a), [lb, wb] = this.extent(b);
+    if (Math.abs(this.rel(a, b)) > la + lb + 0.1 || Math.abs(a.lateral - b.lateral) > wa + wb + 0.05) return;
     const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
     if ((this.contactCooldown.get(key) ?? -1) > this.time) return;
     this.contactCooldown.set(key, this.time + 4);
@@ -1385,6 +1501,18 @@ export class Race {
 
   // ---------- box ----------
 
+  /** abandono da equipe: o carro fica na garagem, fora da corrida */
+  private parkRetired(c: CarState) {
+    c.retired = true;
+    c.retireReason = "Abandono";
+    c.retireAtBox = false;
+    c.boxRequest = null;
+    c.overtaking = null;
+    c.pit = "parked";
+    c.v = 0;
+    this.log(`${c.driver.name} abandona: o carro vai pra garagem.`, true, c.isHuman ? c.team.id : undefined, "out", c.id);
+  }
+
   boxS(c: CarState): number {
     const t = this.track;
     const span = t.wrap(t.pitBoxEnd - t.pitBoxStart);
@@ -1413,6 +1541,10 @@ export class Race {
         c.s = this.boxS(c);
         c.v = 0;
         c.lateral = t.pitLateralAt(c.s) + BOX_SHIFT;
+        if (c.retireAtBox) {
+          this.parkRetired(c);
+          return;
+        }
         if (c.finished) {
           c.pit = "parked";
           return;

@@ -1,3 +1,4 @@
+import { gfx } from "../render/gfx";
 import type { Connection } from "../net/connection";
 import type { LobbyState } from "../net/protocol";
 import { engineerLabel } from "../sim/entrants";
@@ -71,8 +72,9 @@ export class PodiumScreen {
     });
     const cv = root.querySelector("canvas")!;
     const title = `GRANDE PRÊMIO · ${race.track.name.toUpperCase()}`;
-    // 3D (Three.js, carregado só aqui); sem WebGL, o pódio desenhado em 2D
-    void import("../render/podium3d")
+    // 3D (Three.js, carregado só aqui); sem WebGL ou desligado nas configurações, o pódio desenhado em 2D
+    if (!gfx().podium3d) this.animate(cv, top, title);
+    else void import("../render/podium3d")
       .then((m) =>
         m.mountPodium3d(
           cv,

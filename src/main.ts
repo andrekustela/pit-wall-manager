@@ -1,3 +1,9 @@
+import { CIRCUITS } from "./sim/track";
+import { toggleFullscreen } from "./ui/help";
+import { showRaceMenu } from "./ui/raceMenu";
+import { showSettings } from "./ui/menu";
+import { gfx } from "./render/gfx";
+import { showFpsResult } from "./ui/fpsTest";
 import "./fonts.css";
 import "./styles.css";
 import { enterScreen, isCovered, revealScreen, wipe } from "./ui/transition";
@@ -345,7 +351,16 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       case "lobby":
         this.quali = null;
         this.screen = new LobbyScreen(app, conn, l, () => this.leave());
-        if (AUTO) conn.send({ t: "startWeekend" });
+        if (AUTO) {
+          // teste: ?auto&pista=<nome> escolhe a pista (ex.: pista=interlagos)
+          const want = params.get("pista");
+          if (want) {
+            const norm = (x: string) => x.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+            const i = CIRCUITS.findIndex((c) => !c.standby && norm(c.name) === norm(want));
+            if (i >= 0) conn.send({ t: "options", trackIndex: i });
+          }
+          conn.send({ t: "startWeekend" });
+        }
         break;
       case "practice":
         this.quali = null;
@@ -477,7 +492,21 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     };
     view.toggleTv = toggleTv;
     const tvPick = () => {
-      if (!tv || race.time - tvSwitch < 7) return;
+      if (!tv) return;
+      // prioridade: rodada, saída de pista, batida e o guindaste (corta na hora, como na transmissão);
+      // fica nele até ele voltar pra pista ou o guindaste levar
+      const drama = (c: (typeof race.cars)[number]) => !!c.slide || (!!c.recover && c.recover.t < 14);
+      const curCar = race.cars.find((c) => c.id === view.follow);
+      if (curCar && drama(curCar)) return;
+      const hot = race.cars.filter((c) => drama(c) && c.pit === "none");
+      if (hot.length) {
+        // a mais recente (rodando antes de guindaste)
+        const pick = hot.find((c) => c.slide && c.slide.mode !== "rejoin") ?? hot.find((c) => c.slide) ?? hot[0];
+        tvSwitch = race.time;
+        follow(pick.id);
+        return;
+      }
+      if (race.time - tvSwitch < 7) return;
       const order = race.ordered().filter((c) => !c.retired && !c.finished && c.pit === "none");
       const gapOf = (i: number) => (race.dist(order[i - 1]) - race.dist(order[i])) / Math.max(25, order[i].v);
       // a atual ainda está brigando: fica nela
@@ -498,6 +527,29 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       }
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
+    // canto de baixo: FPS e o MENU (pausa no solo; online não pausa)
+    const corner = document.createElement("div");
+    corner.className = "racecorner";
+    corner.innerHTML = `<span class="fps" title="Quadros por segundo"></span><button class="btn small" data-racemenu title="Menu (sons, microfone, configurações, sair)">☰ MENU</button><button class="btn small" data-rhelp title="Ajuda">?</button><button class="btn small" data-rfull title="Tela cheia (F)">⛶</button>`;
+    app.appendChild(corner);
+    // (a barra de cima some na corrida: a ajuda dela abre na aba certa)
+    corner.querySelector("[data-rhelp]")!.addEventListener("click", () => document.querySelector<HTMLElement>(".helpbtns [data-help]")?.click());
+    corner.querySelector("[data-rfull]")!.addEventListener("click", () => toggleFullscreen());
+    corner.querySelector("[data-racemenu]")!.addEventListener("click", () => {
+      let before = view.speed;
+      showRaceMenu({
+        online: !this.lobby?.solo,
+        pause: () => {
+          before = view.speed;
+          if (before !== 0) setSpeed(0);
+        },
+        resume: () => {
+          if (before !== 0) setSpeed(before);
+        },
+        settings: () => showSettings(),
+        leave: () => this.exitToMenu(),
+      });
+    });
     view.renderer.showEngineers = !this.lobby?.solo;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
@@ -572,7 +624,29 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
 
     let lastT = performance.now();
     let hudT = 0;
+    // limite de FPS (Configurações > Gráficos); teste de FPS (?fpsteste): mede 20 s depois de 3 s
+    const cap = gfx().fpsCap;
+    let lastDraw = 0;
+    const test = params.has("fpsteste") ? { t0: performance.now(), frames: [] as number[], done: false } : null;
+    document.body.classList.toggle("no-onboard", !gfx().onboard);
     const frame = (now: number) => {
+      if (cap) {
+        // ritmo constante: o que sobra de um quadro passa pro próximo (só pular quadros deixava irregular)
+        const step = 1000 / cap, el = now - lastDraw;
+        if (el < step - 1) {
+          view.raf = requestAnimationFrame(frame);
+          return;
+        }
+        lastDraw = el > step * 3 ? now : lastDraw + step * Math.floor(el / step);
+      } else lastDraw = now;
+      if (test && !test.done) {
+        const el = (now - test.t0) / 1000;
+        if (el > 3) test.frames.push(now);
+        if (el > 23) {
+          test.done = true;
+          showFpsResult(test.frames);
+        }
+      }
       const gap = (now - lastT) / 1000;
       const realDt = gap > 0.5 ? 0.6 : Math.min(0.1, gap);
       lastT = now;
@@ -589,11 +663,13 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       this.requests?.tick(my);
       tvPick();
       view.minimap.draw(view.follow);
-      view.hud.drawOnboard(realDt, view.renderer.interp);
+      if (gfx().onboard) view.hud.drawOnboard(realDt, view.renderer.interp);
       view.renderer.setBottomInset(view.hud.coverHeight() * 0.85);
       hudT += realDt;
       if (hudT > 0.1) {
         hudT = 0;
+        // (a onboard pode ser desligada no meio da corrida, pelo MENU: a caixa dela some na hora)
+        document.body.classList.toggle("no-onboard", !gfx().onboard);
         view.hud.update();
       }
       view.raf = requestAnimationFrame(frame);

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Prévia do autódromo</title>
+<style>html,body{margin:0;background:#111;color:#ddd;font:13px sans-serif}canvas{display:block}#i{position:fixed;left:8px;top:6px}</style>
+</head>
+<body>
+<div id="i">Prévia: entorno do OpenStreetMap (cores) × pista do jogo (linha vermelha). ?p=interlagos&i=71</div>
+<canvas id="c"></canvas>
+<script type="module">
+  import { getTrack } from "/src/sim/track.ts";
+  const q = new URLSearchParams(location.search);
+  const name = q.get("p") || "interlagos", idx = Number(q.get("i") || 71);
+  const data = await (await fetch(`/autodromos/${name}.json`)).json();
+  const t = getTrack(idx);
+  const cv = document.getElementById("c");
+  const W = (cv.width = innerWidth), H = (cv.height = innerHeight);
+  const g = cv.getContext("2d");
+  const pts = [];
+  for (let s = 0; s < t.L; s += 4) pts.push(t.pose(s, 0));
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const pad = 250;
+  const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+  const k = Math.min(W / (x1 - x0), H / (y1 - y0));
+  const P = ([x, y]) => [(x - x0) * k, (y - y0) * k];
+  g.fillStyle = "#2f3a28";
+  g.fillRect(0, 0, W, H);
+  const col = { grama: "#4f8a3a", bosque: "#2d5e2a", agua: "#3b7bd1", piscina: "#5ab4e6", predio: "#9a9aa4", arquibancada: "#e8202a", estacionamento: "#555", rua: "#6b6b70", caminho: "#8a8070", pista: "#222", kart: "#333", cerca: "#ddd", muro: "#fff", arvores: "#1f4d1f" };
+  const order = ["grama", "bosque", "agua", "piscina", "estacionamento", "rua", "caminho", "kart", "pista", "predio", "arquibancada", "arvores", "cerca", "muro"];
+  for (const kind of order)
+    for (const f of data.itens.filter((x) => x.k === kind)) {
+      g.beginPath();
+      f.p.forEach((p, i) => (i ? g.lineTo(...P(p)) : g.moveTo(...P(p))));
+      const area = f.fechado && !["cerca", "muro", "arvores", "pista", "kart", "rua", "caminho"].includes(kind);
+      if (area) {
+        g.closePath();
+        g.fillStyle = col[kind];
+        g.fill();
+      } else {
+        g.strokeStyle = col[kind];
+        g.lineWidth = kind === "pista" ? 14 * k : kind === "rua" ? (f.w || 6) * k : kind === "kart" ? 7 * k : kind === "arvores" ? 4 * k : 1.2;
+        g.stroke();
+      }
+    }
+  // pista do jogo por cima (linha central)
+  g.strokeStyle = "rgba(255,40,40,.9)";
+  g.lineWidth = 1.5;
+  g.beginPath();
+  pts.forEach((p, i) => (i ? g.lineTo(...P([p.x, p.y])) : g.moveTo(...P([p.x, p.y]))));
+  g.closePath();
+  g.stroke();
+</script>
+</body>
+</html>

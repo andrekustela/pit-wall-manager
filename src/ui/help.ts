@@ -192,7 +192,8 @@ Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as
     document.addEventListener("pointerdown", (e) => {
       if (!player.hidden && !player.contains(e.target as Node) && e.target !== mb) player.hidden = true;
     });
-    // Esc fecha a janela de cima: o player de música, depois a janela aberta por último
+    // Esc fecha a janela de cima: o player de música, depois a janela aberta por último; sem nada aberto,
+    // na corrida, abre o MENU
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       if (!player.hidden) {
@@ -200,7 +201,11 @@ Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as
         return;
       }
       const top = [...document.querySelectorAll<HTMLElement>(".helpmodal")].pop();
-      if (!top) return;
+      // nada aberto e na corrida: Esc abre o MENU (pausa no solo)
+      if (!top) {
+        if (!(e.target as HTMLElement)?.closest?.("input, textarea")) document.querySelector<HTMLElement>(".racecorner [data-racemenu]")?.click();
+        return;
+      }
       const x = top.querySelector<HTMLElement>("[data-x], [data-close], [data-cancel]");
       if (x) x.click();
       else top.remove();
@@ -235,6 +240,11 @@ Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as
     };
     music.onChange(renderMusic);
     renderMusic();
+    // na corrida a barra some: MENU, ajuda e tela cheia ficam no canto de baixo (voltar ao menu e o
+    // microfone, dentro do MENU)
+    setInterval(() => document.body.classList.toggle("inrace", !!document.querySelector(".racecorner")), 400);
+    // som, rádio falado, música, volume e FPS ficam no MENU da corrida e em Configurações > Sons
+    this.el.querySelectorAll<HTMLElement>("[data-mute], [data-voice], [data-music], .vol, .fps").forEach((x) => (x.hidden = true));
   }
 
   private renderMute() {
@@ -268,7 +278,7 @@ Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as
 
 export type HelpTab = Tab;
 
-// ---------- contador de FPS (ao lado do som) ----------
+// ---------- contador de FPS (no canto da corrida, do lado do MENU) ----------
 let frames = 0;
 let since = 0;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -277,7 +287,7 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null;
 export function reportFrame(now: number) {
   frames++;
   if (!since) since = now;
-  const el = document.querySelector<HTMLElement>(".helpbtns .fps");
+  const el = document.querySelector<HTMLElement>(".racecorner .fps");
   if (!el) return;
   if (now - since >= 500) {
     const fps = Math.round((frames * 1000) / (now - since));

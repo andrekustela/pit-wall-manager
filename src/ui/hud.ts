@@ -1,3 +1,4 @@
+import { confirmDialog } from "./confirm";
 import { fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
 import { mountWavingFlag } from "./checkerFlag";
 import {
@@ -348,7 +349,7 @@ export class Hud {
       card.dataset.id = c.id;
       card.style.borderTopColor = c.team.color;
       card.innerHTML = `
-        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}${partsListHtml()}</div>
+        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}<div class="stats colstats"><div>Última<b class="last"></b></div><div>Melhor<b class="best"></b></div></div>${partsListHtml()}<button class="btn small retirebtn" data-retire title="O carro entra no box e vai pra garagem (sai da corrida)">🏳 ABANDONAR</button></div>
         <div class="top">
           <div class="p"></div>
           <div class="nm" title="Clique no card pra seguir esse piloto">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
@@ -367,11 +368,6 @@ export class Hud {
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
         </div></div>
-        <div class="stats">
-          <div>Última<b class="last"></b></div>
-          <div>Melhor<b class="best"></b></div>
-          <div>À frente<b class="int"></b></div>
-        </div>
         </div>
         <div class="pane" data-pane="box">
         <div class="row2"><span class="lbl">Pneu</span><div class="seg next">
@@ -435,6 +431,22 @@ export class Hud {
         if (c.pit !== "none" || c.finished || c.retired) return;
         if (c.boxRequest) this.hooks.send({ type: "cancelBox", carId: c.id });
         else this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
+        this.update();
+      });
+      card.querySelector("[data-retire]")!.addEventListener("click", async () => {
+        if (c.finished || c.retired) return;
+        if (c.retireAtBox) {
+          this.hooks.send({ type: "retire", carId: c.id, on: false });
+          this.update();
+          return;
+        }
+        const ok = await confirmDialog({
+          title: "ABANDONAR",
+          icon: "🏳",
+          text: `Tirar ${c.driver.name} da corrida?\n\nEle entra no box na próxima passagem e vai pra garagem. Dá pra desistir até ele entrar no box.`,
+          ok: "ABANDONAR",
+        });
+        if (ok) this.hooks.send({ type: "retire", carId: c.id, on: true });
         this.update();
       });
       const setTab = (t: CardState["tab"]) => {
@@ -812,8 +824,6 @@ export class Hud {
       card.querySelector(".p")!.textContent = c.retired ? "OUT" : `P${c.position}`;
       card.querySelector(".last")!.textContent = c.lastLap ? fmtLap(c.lastLap) : "--";
       card.querySelector(".best")!.textContent = c.bestLap ? fmtLap(c.bestLap) : "--";
-      card.querySelector(".int")!.textContent =
-        idx <= 0 ? "--" : gaps[idx].laps > 0 ? `+${gaps[idx].laps} V` : `+${Math.max(0, gaps[idx].seconds - gaps[idx - 1].seconds).toFixed(1)}s`;
       const wearPct = Math.min(1, c.wear);
       const bar = card.querySelector<HTMLElement>(".wear i")!;
       bar.style.width = `${(1 - wearPct) * 100}%`;
@@ -862,10 +872,17 @@ export class Hud {
       card.querySelector<HTMLElement>("[data-fuelauto]")!.classList.toggle("primary", cs.fuelLaps === null);
       this.renderPlan(c, card, cs);
 
+      const rb = card.querySelector<HTMLButtonElement>("[data-retire]")!;
+      rb.hidden = c.retired || c.finished;
+      rb.textContent = c.retireAtBox ? "✕ DESISTIR DO ABANDONO" : "🏳 ABANDONAR";
+      rb.classList.toggle("primary", !!c.retireAtBox);
       const box = card.querySelector<HTMLButtonElement>(".boxbtn")!;
       box.className = "boxbtn";
       box.disabled = false;
-      if (c.retired) {
+      if (c.retireAtBox && !c.retired) {
+        box.textContent = "🏳 ABANDONANDO: INDO PRO BOX";
+        box.disabled = true;
+      } else if (c.retired) {
         box.textContent = `FORA: ${c.retireReason ?? ""}`.toUpperCase();
         box.disabled = true;
       } else if (c.finished) {

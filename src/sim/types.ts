@@ -132,7 +132,9 @@ export type Command =
   | { type: "plan"; carId: string; plan: PlannedStop[] }
   | { type: "repair"; carId: string; parts: Partial<Record<"fw" | "suspF" | "rw" | "suspR", boolean>> }
   | { type: "engineSave"; carId: string; on: boolean }
-  | { type: "order"; carId: string; mode: TeamOrder };
+  | { type: "order"; carId: string; mode: TeamOrder }
+  /** abandonar: o carro entra no box e vai pra garagem */
+  | { type: "retire"; carId: string; on: boolean };
 
 export type FaultKind = "puncture" | "gearbox" | "brakes" | "power" | "hydraulics";
 
@@ -241,11 +243,14 @@ export interface CarState {
   spin: number;
   /**
    * carro solto (rodou, passou reto, bateu): segue reto pela inércia em vez de acompanhar a pista.
-   * psi = direção do movimento e yaw = do carro, as duas em relação à pista (rad); stop = tempo parado (s)
+   * psi = direção do movimento e yaw = do carro, as duas em relação à pista (rad); stop = tempo parado (s).
+   * "rejoin": o piloto voltando pra pista (dá um 180 cantando pneu se estiver de costas; `smoke` = fumaça)
    */
-  slide?: { mode: "spin" | "off" | "crash"; psi: number; yaw: number; yawRate: number; stop: number } | null;
+  slide?: { mode: "spin" | "off" | "crash" | "rejoin"; psi: number; yaw: number; yawRate: number; stop: number; smoke?: boolean } | null;
   /** fora da corrida e parado: como ficou virado (rad, em relação à pista) */
   restYaw?: number | null;
+  /** a equipe mandou abandonar: na próxima entrada do box vai pra garagem */
+  retireAtBox?: boolean;
   /** guindaste retirando o carro: tempo (s), duração e se ele está em cima da pista (segura o safety car) */
   recover?: { t: number; dur: number; onTrack: boolean } | null;
   position: number;
