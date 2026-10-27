@@ -19,7 +19,7 @@ import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen, isCovered } from "./transition";
-import { PRESETS, gfx, setGfx, type CarStyle, type Gfx, type Lv } from "../render/gfx";
+import { PRESETS, gfx, setGfx, type CarStyle, type Cam3d, type Gfx, type Lv } from "../render/gfx";
 import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -487,7 +487,8 @@ function gfxHtml() {
       .map((k) => `<button data-preset="${k}">${{ minimo: "MÍNIMO", baixo: "BAIXO", medio: "MÉDIO", alto: "ALTO" }[k]}</button>`)
       .join("")}</div></div>` +
     fld("Carros na pista", seg("carStyle", [["2d", "2D"], ["sprite", "2D ESTILIZADO"], ["real", "3D"]], g.carStyle), "2D é o mais leve; 2D estilizado usa imagens do modelo 3D; 3D desenha o carro em 3D de verdade.") +
-    fld("Pista em 3D", onoff("track3d", g.track3d), "Em teste: no modo 3D, o autódromo inteiro em 3D com o entorno real (prédios, arquibancadas, árvores). Por enquanto só em Interlagos.") +
+    fld("Câmera do 3D", seg("cam3d", [["cima", "DE CIMA"], ["lado", "DE LADO"], ["tras", "ATRÁS DO CARRO"]], g.cam3d), "Só no modo 3D. De lado: arraste com o botão direito do mouse pra girar. Na corrida, a tecla V troca a câmera.") +
+    fld("Pista em 3D", onoff("track3d", g.track3d), "Em teste: no modo 3D, o autódromo inteiro em 3D em qualquer pista: arquibancadas, boxes, alambrado e árvores (e o entorno real onde já tem, como Interlagos).") +
     fld("Antisserrilhado (3D)", onoff("aa", g.aa, "LIGADO", "DESLIGADO"), "Sem pneus e bordas serrilhados, em resolução cheia (pede mais da placa de vídeo).") +
     fld("Sombras", lv("shadows"), "Baixo: mancha simples. Médio e alto: sombra de verdade (no 3D), alto mais suave.") +
     fld("Faíscas", lv("sparks")) +
@@ -517,6 +518,7 @@ function saveGfx(m: HTMLElement) {
     skids: l("skids"),
     onboard: b("onboard"),
     track3d: b("track3d"),
+    cam3d: (v("cam3d") || g.cam3d) as Cam3d,
     podium3d: b("podium3d"),
     fpsCap: (() => {
       const n = Number(m.querySelector<HTMLInputElement>("[data-fpscap]")?.value || 0);

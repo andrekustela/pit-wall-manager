@@ -1,4 +1,4 @@
-import { LV_AMOUNT, gfx } from "./gfx";
+import { LV_AMOUNT, gfx, setGfx, type Cam3d } from "./gfx";
 import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
 import type { Race } from "../sim/race";
@@ -15,6 +15,31 @@ import { TRACK_WIDTH, angDiff } from "../sim/track";
  */
 /** pronto do modelo 3D (vem junto do módulo dos carros 3D, carregado sob demanda) */
 let realCarsReadyFn: (() => boolean) | null = null;
+/** teste: `?camera=tv` (atrás do carro) ou `?camera=iso` (de lado) começa a corrida nessa câmera */
+const TILT_CAM = typeof location !== "undefined" && new URLSearchParams(location.search).get("camera");
+/** câmera inclinada agora: a do link (?camera=) manda; senão a das configurações (só no modo 3D) */
+function tiltMode(): "tv" | "iso" | null {
+  // (o link só vale pra começar: trocou a câmera nas configurações ou na tecla V, vale a escolhida)
+  // (carros 2D ou 2D estilizado: só a de cima)
+  if (car3dPref.style !== "real") return null;
+  if (urlCam && gfx().cam3d === camAtStart) return urlCam;
+  const c = gfx().cam3d;
+  return c === "lado" ? "iso" : c === "tras" ? "tv" : null;
+}
+/** "tv" (atrás do carro) ou "iso" (de lado e de cima) */
+const TILT_URL = TILT_CAM === "tv" || TILT_CAM === "iso" ? TILT_CAM : null;
+const camAtStart = gfx().cam3d;
+let urlCam: "tv" | "iso" | null = TILT_URL;
+/** a câmera do 3D que está valendo agora */
+export function currentCam3d(): Cam3d {
+  const t = tiltMode();
+  return t === "iso" ? "lado" : t === "tv" ? "tras" : "cima";
+}
+/** troca a câmera do 3D (a tecla V): passa a valer a escolhida, mesmo vindo do link */
+export function setCam3d(c: Cam3d) {
+  urlCam = null;
+  setGfx({ cam3d: c });
+}
 let realPropReady: ((k: "sc" | "crane") => boolean) | null = null;
 
 /** nuvem macia de água (desenhada uma vez): o spray é feito delas */
@@ -47,11 +72,33 @@ export class Renderer {
   private zoom = 0;
   followId: string;
 
+  /** giro da câmera de lado (rad; 0 = norte pra cima, como no 2D) */
+  private isoYaw = 0;
+  /** no quadro anterior estava numa câmera inclinada (pra deslizar de volta pra de cima) */
+  private wasTilt = false;
+  /** já usou uma câmera inclinada nesta corrida */
+  private usedTilt = false;
   constructor(private canvas: HTMLCanvasElement, private race: Race, followId: string, onPick: (id: string) => void) {
     this.octx = canvas.getContext("2d")!;
     canvas.style.imageRendering = "auto";
     this.world = new WorldTiles(race.opts.trackIndex);
     this.followId = followId;
+    // câmera de lado: arrastar com o botão direito gira em volta do carro
+    {
+      let dragX: number | null = null;
+      canvas.addEventListener("contextmenu", (e) => {
+        if (tiltMode() === "iso") e.preventDefault();
+      });
+      canvas.addEventListener("pointerdown", (e) => {
+        if (e.button === 2 && tiltMode() === "iso") dragX = e.clientX;
+      });
+      window.addEventListener("pointermove", (e) => {
+        if (dragX === null) return;
+        this.isoYaw -= (e.clientX - dragX) * 0.008;
+        dragX = e.clientX;
+      });
+      window.addEventListener("pointerup", () => (dragX = null));
+    }
     this.resize();
     window.addEventListener("resize", this.resize);
     // na hora que aperta (o carro anda entre apertar e soltar); área de toque generosa
@@ -224,6 +271,10 @@ export class Renderer {
   }
 
   draw(realDt: number, speed: number) {
+    // voltando pra câmera de cima: a cena 3D continua até a câmera terminar de deslizar
+    const want = tiltMode();
+    const TILT: "tv" | "iso" | "cima" | null = want ?? (car3dPref.style === "real" && (this.wasTilt || this.real3d?.transitioning()) ? "cima" : null);
+    this.wasTilt = !!want;
     const race = this.race;
     const L = race.track.L;
     const W = window.innerWidth, H = window.innerHeight;
@@ -292,9 +343,13 @@ export class Renderer {
     // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
     void speed;
     // modo 3D com a pista 3D ligada: o autódromo em 3D (enquanto monta, a pista 2D)
-    const real3 = car3dPref.style === "real" && gfx().track3d ? this.realCars() : null;
+    // (usou as câmeras 3D nesta corrida: a de cima também fica com o autódromo 3D, senão o mapa trocava de cor)
+    if (TILT) this.usedTilt = true;
+    const real3 = car3dPref.style === "real" && (gfx().track3d || TILT || this.usedTilt) ? this.realCars() : null;
     let drew3d = false;
-    if (real3) {
+    // câmera inclinada (protótipo): a cena 3D cobre tudo, a pista 2D nem é desenhada
+    if (real3 && TILT && real3.ensureTrack(race.track)) drew3d = true;
+    else if (real3) {
       o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       drew3d = real3.drawTrack(o, W, H, m, viewX, viewY, race.track);
       o.setTransform(1, 0, 0, 1, 0, 0);
@@ -329,15 +384,32 @@ export class Renderer {
       d.x += d.vx * dt;
       d.y += d.vy * dt;
       d.h += d.spin * dt;
-      const air = d.t < 0.6 ? 1 + 0.35 * Math.sin((d.t / 0.6) * Math.PI) : 1; // no ar parece maior
-      const { x, y } = toCss(d);
-      this.drawCar(o, x, y, d.h, d.img, m * air, d.t > 11 ? (14 - d.t) / 3 : 1);
     }
+    // câmera inclinada: a cena 3D cobre a tela toda, então marcas, faíscas, fumaça, spray e pedaços vão
+    // depois dela, com cada ponto do mundo levado pra tela pela câmera 3D (em vez do toCss de cima)
+    const tiltOn = !!(TILT && drew3d && real3);
+    const later: ((cv: typeof toCss, mm: number) => void)[] = [];
+    /** direção na tela de quem está em p virado pra h */
+    const hOn = (cv: typeof toCss, p: { x: number; y: number }, h: number) => {
+      const a = cv(p), b = cv({ x: p.x + Math.cos(h), y: p.y + Math.sin(h) });
+      return Math.atan2(b.y - a.y, b.x - a.x);
+    };
+    const drawDebris = (cv: typeof toCss, mm: number) => {
+      for (const d of this.debris) {
+        const air = d.t < 0.6 ? 1 + 0.35 * Math.sin((d.t / 0.6) * Math.PI) : 1; // no ar parece maior
+        const { x, y } = cv(d);
+        this.drawCar(o, x, y, hOn(cv, d, d.h), d.img, mm * air, d.t > 11 ? (14 - d.t) / 3 : 1);
+      }
+    };
     this.fx.step(dt);
-    this.fx.drawGround(o, toCss, m);
-    this.mistStep(o, dt, toCss, m);
-    // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
-    this.fx.drawAir(o, toCss, m, true);
+    const under = (cv: typeof toCss, mm: number) => {
+      drawDebris(cv, mm);
+      this.fx.drawGround(o, cv, mm);
+      this.mistStep(o, dt, cv, mm);
+      // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
+      this.fx.drawAir(o, cv, mm, true);
+    };
+    if (!tiltOn) under(toCss, m);
     // 3D de verdade: os carros vão pra camada do Three.js (desenhada de uma vez depois do laço)
     const real = car3dPref.style === "real" ? this.realCars() : null;
     const realList: CarDraw[] = [];
@@ -346,10 +418,19 @@ export class Renderer {
     for (const c of sorted) {
       const p = pos.get(c.id)!;
       let { x, y } = toCss(p);
-      const margin = CAR_LEN_M * m * (c.recover ? 12 : 1);
+      // (câmera inclinada: aparece bem mais que a tela do 2D, principalmente pra cima)
+      const margin = TILT ? Math.max(W, H) * 1.6 : CAR_LEN_M * m * (c.recover ? 12 : 1);
       if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
       this.screenPos.set(c.id, { x, y });
-      if (race.wet > 0.25 && c.v > 25 && gfx().rain !== "off") this.spray(o, x, y, p.h, race.wet * LV_AMOUNT[gfx().rain], m, p, c.v, dt);
+      if (race.wet > 0.25 && c.v > 25 && gfx().rain !== "off") {
+        const wet = race.wet * LV_AMOUNT[gfx().rain], v = c.v;
+        if (tiltOn)
+          later.push((cv, mm) => {
+            const q = cv(p);
+            this.spray(o, q.x, q.y, hOn(cv, p, p.h), wet, mm, p, v, dt);
+          });
+        else this.spray(o, x, y, p.h, wet, m, p, v, dt);
+      }
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
       const crashed = this.fx.crashed(c);
@@ -382,7 +463,14 @@ export class Renderer {
         realList.push({ id: c.id, team: c.team, x: x / m + viewX, y: y / m + viewY, h: hh, scale: mm / m, look, v: c.v, compound: c.compound, lift: lift ? (lift.scale - 1) / 0.18 : 0 });
       } else if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, mm, alpha, look, rainLight, performance.now() / 1000)))
         this.drawCar(o, x, y, hh, carImage(c.team, rainLight), mm, alpha);
-      if (!lift && c.retired) this.smoke(o, x, y, m);
+      if (!lift && c.retired) {
+        if (tiltOn)
+          later.push((cv, mm) => {
+            const q = cv(p);
+            this.smoke(o, q.x, q.y, mm);
+          });
+        else this.smoke(o, x, y, m);
+      }
     }
     if (scPos) {
       const { x, y } = toCss(scPos);
@@ -410,9 +498,31 @@ export class Renderer {
         o.restore();
       } else this.drawCar(o, x, y, scPos.h, carImage(race.cars[0].team, blink, true), m, 1);
     }
-    if (real) real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
+    if (real) {
+      // câmera inclinada: segue o carro seguido (ou o safety car)
+      const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
+      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: "tv" as const } : null;
+      real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
+    }
+    // câmera inclinada: os efeitos por cima da cena 3D, e as posições na tela (etiquetas, clique) pela câmera 3D
+    let cvAir: typeof toCss = toCss, mAir = m;
+    if (tiltOn && real) {
+      if (race.wet > 0.02) {
+        o.fillStyle = `rgba(20,40,75,${(race.wet * 0.3).toFixed(3)})`;
+        o.fillRect(0, 0, W, H);
+      }
+      cvAir = (q) => real.project(q.x, q.y);
+      const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
+      mAir = fp ? real.scaleAt(fp.x, fp.y) : m;
+      under(cvAir, mAir);
+      for (const f of later) f(cvAir, mAir);
+      for (const id of [...this.screenPos.keys()]) {
+        const q = id === "SC" ? scPos : pos.get(id);
+        if (q) this.screenPos.set(id, real.project(q.x, q.y, 1.2));
+      }
+    }
 
-    this.fx.drawAir(o, toCss, m, false);
+    this.fx.drawAir(o, cvAir, mAir, false);
 
     // túnel: o teto cobre os carros (as etiquetas continuam aparecendo)
     if (race.track.tunnel) {
@@ -435,7 +545,7 @@ export class Renderer {
 
     // etiquetas: carro seguido, carros dos jogadores e safety car (empilham quando se sobrepõem)
     const placed: { x: number; y: number; w: number }[] = [];
-    const lift = Math.max(14, 1.6 * m);
+    const lift = Math.max(14, 1.6 * mAir);
     if (scPos) {
       const sp = this.screenPos.get("SC")!;
       this.label(o, sp.x, sp.y - lift, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111", placed);

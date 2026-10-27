@@ -3,6 +3,7 @@ import { toggleFullscreen } from "./ui/help";
 import { showRaceMenu } from "./ui/raceMenu";
 import { showSettings } from "./ui/menu";
 import { gfx } from "./render/gfx";
+import { car3dPref } from "./render/car3d";
 import { showFpsResult } from "./ui/fpsTest";
 import "./fonts.css";
 import "./styles.css";
@@ -31,7 +32,7 @@ import { music } from "./audio/music";
 import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
 import { LocalConnection, WsConnection, type Connection } from "./net/connection";
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
-import { Minimap, Renderer } from "./render/renderer";
+import { Minimap, Renderer, currentCam3d, setCam3d } from "./render/renderer";
 import { Race, setChaos, type RaceOptions } from "./sim/race";
 import { COMPOUNDS, ENGINE, PACE, type EngineMode, type PaceMode } from "./sim/types";
 import type { QualiResult } from "./sim/weekend";
@@ -596,6 +597,15 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       if (n >= 1 && n <= SPEEDS.length) setSpeed(SPEEDS[n - 1]);
       if (e.key === "m" || e.key === "M") view.hud.toggleCompact();
       if (e.key === "p" || e.key === "P") view.hud.toggleBoard();
+      // V: troca a câmera do 3D (de cima, de lado, atrás do carro)
+      if (e.key === "v" || e.key === "V") {
+        // (carros 2D ou 2D estilizado: só a câmera de cima, a tecla não faz nada)
+        if (car3dPref.style === "real") {
+          const next = ({ cima: "lado", lado: "tras", tras: "cima" } as const)[currentCam3d()];
+          setCam3d(next);
+          toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro" }[next]}`);
+        }
+      }
       if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
       if (e.key === "-" || e.key === "_") view.renderer.zoomOut();
       // atalhos do piloto seguido: B box, Q/W/E ritmo, Z/X/C motor
