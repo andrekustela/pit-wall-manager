@@ -42,7 +42,7 @@ export function showEditor(onDone: () => void) {
   };
   const render = () => {
     m.innerHTML = `<div class="helpbox panel profbox edbox">
-      <div class="helphead"><b>EDITOR</b><button class="btn small" data-x>✕</button></div>
+      <div class="helphead"><b>EDITOR</b><span class="row-btns" style="margin:0"><button class="btn small primary" data-ted title="Mexer nas arquibancadas, boxes, pneus, árvores... de cada pista em 3D">AUTÓDROMO 3D</button><button class="btn small" data-x>✕</button></span></div>
       <p class="hint" style="margin:0 0 10px">Troque os nomes das pistas e dos pilotos do seu jeito (vazio = nome original) e escolha a voz de cada piloto no rádio. Fica salvo só aqui; dá pra exportar e mandar o pacote pros amigos.</p>
       <div class="seg edtabs">${(["pistas", "lendas", "pilotos", "vozes"] as Tab[]).map((t) => `<button data-tab="${t}" class="${t === tab ? "on" : ""}">${{ pistas: "PISTAS", lendas: "LENDAS", pilotos: "PILOTOS FICTÍCIOS", vozes: "VOZES DO RÁDIO" }[t]}</button>`).join("")}</div>
       ${tab === "vozes" ? "" : `<input class="txt edsearch" data-q placeholder="Buscar..." value="${esc(q)}">`}
@@ -95,6 +95,12 @@ export function showEditor(onDone: () => void) {
   m.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t === m || t.closest("[data-x]")) return close();
+    // autódromo 3D: tela própria (o Three.js só é baixado aqui)
+    if (t.closest("[data-ted]")) {
+      close();
+      void import("./trackEditor3d").then((md) => md.showTrackEditor3d(onDone));
+      return;
+    }
     const tb = t.closest<HTMLElement>("[data-tab]");
     if (tb) {
       collect();

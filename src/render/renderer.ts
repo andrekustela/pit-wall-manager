@@ -1,4 +1,5 @@
 import { LV_AMOUNT, gfx, setGfx, type Cam3d } from "./gfx";
+import { BakedWorld, mapSlug } from "./bakedWorld";
 import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
 import type { Race } from "../sim/race";
@@ -76,6 +77,8 @@ export class Renderer {
   private isoYaw = 0;
   /** no quadro anterior estava numa câmera inclinada (pra deslizar de volta pra de cima) */
   private wasTilt = false;
+  /** mapa 2D gerado do 3D desta pista (se tiver) */
+  private baked: BakedWorld | null = null;
   /** já usou uma câmera inclinada nesta corrida */
   private usedTilt = false;
   constructor(private canvas: HTMLCanvasElement, private race: Race, followId: string, onPick: (id: string) => void) {
@@ -130,6 +133,7 @@ export class Renderer {
   destroy() {
     window.removeEventListener("resize", this.resize);
     this.world.destroy();
+    this.baked?.destroy();
   }
 
   /** zoom em passos de 25% */
@@ -354,7 +358,13 @@ export class Renderer {
       drew3d = real3.drawTrack(o, W, H, m, viewX, viewY, race.track);
       o.setTransform(1, 0, 0, 1, 0, 0);
     }
-    if (!drew3d) this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, 1);
+    if (!drew3d) {
+      // 2D gerado do 3D (Editor > Autódromo 3D > GERAR 2D): se esta pista tiver, usa as imagens dele
+      const bw = (this.baked ??= new BakedWorld(mapSlug(race.track.name)));
+      const vec = () => this.world.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, 1);
+      if (bw.ready) bw.draw(o, viewX, viewY, W / m, H / m, m * this.dpr, vec);
+      else vec();
+    }
     o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = "medium";
@@ -502,6 +512,7 @@ export class Renderer {
       // câmera inclinada: segue o carro seguido (ou o safety car)
       const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
       real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: "tv" as const } : null;
+      real.liveScreen(race);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
     }
     // câmera inclinada: os efeitos por cima da cena 3D, e as posições na tela (etiquetas, clique) pela câmera 3D

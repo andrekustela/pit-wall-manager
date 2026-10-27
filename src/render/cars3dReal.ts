@@ -7,6 +7,9 @@ import { buildTrack3d } from "./track3d";
 import type { Track } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
 import * as THREE from "three";
+import { updateLiveScreen } from "./liveScreen";
+import type { Terrain } from "./terrain";
+import type { Race } from "../sim/race";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -381,7 +384,7 @@ export class RealCars {
       }
       p.seen = this.frame;
       p.root.visible = true;
-      p.root.position.set(d.x, this.groundY, d.y);
+      p.root.position.set(d.x, this.groundY + this.hAt(d.x, d.y), d.y);
       p.root.rotation.y = Math.PI / 2 - d.h;
       if (d.kind === "sc") {
         for (const l of p.lights) {
@@ -409,6 +412,9 @@ export class RealCars {
   tilt: { x: number; y: number; h: number; iso?: boolean; span?: number; yaw?: number; kind?: "iso" | "tv" | "cima" } | null = null;
   // troca de câmera: desliza da pose de antes até a nova (de cima vira uma câmera olhando reto pra baixo)
   private lastKind: string | null = null;
+  /** câmera de trás: direção amortecida e o relógio de verdade */
+  private tvH: number | null = null;
+  private lastNow = 0;
   private curPose: { pos: THREE.Vector3; look: THREE.Vector3; fov: number } | null = null;
   private trans: { from: { pos: THREE.Vector3; look: THREE.Vector3; fov: number }; t0: number } | null = null;
   /** ainda deslizando de uma câmera pra outra? (o renderer segura a cena 3D até acabar) */
@@ -417,13 +423,16 @@ export class RealCars {
   }
   /** altura do chão dos carros (inclinada: em cima do asfalto 3D, que fica uns centímetros acima do chão) */
   private groundY = 0;
+  /** relevo do autódromo (null: plano) */
+  private terrain: Terrain | null = null;
+  private hAt = (x: number, z: number) => (this.terrain ? this.terrain.heightAt(x, z) : 0);
   private projW = 0;
   private projH = 0;
   private tmpV = new THREE.Vector3();
 
   /** câmera inclinada: ponto do mundo (no chão, ou a hgt metros) -> pixel da tela (do último quadro) */
   project(x: number, y: number, hgt = 0) {
-    const v = this.tmpV.set(x, this.groundY + hgt, y).project(this.persp);
+    const v = this.tmpV.set(x, this.groundY + this.hAt(x, y) + hgt, y).project(this.persp);
     if (v.z > 1) return { x: -1e5, y: -1e5 };
     return { x: ((v.x + 1) / 2) * this.projW, y: ((1 - v.y) / 2) * this.projH };
   }
@@ -452,6 +461,7 @@ export class RealCars {
       if (this.trackLoading !== track.name) {
         this.trackLoading = track.name;
         void buildTrack3d(track, this.realShadow).then((res) => {
+          this.terrain = res.relief ? res.terrain : null;
           if (!res) return;
           const { group, tris, real } = res;
           const sc = new THREE.Scene();
@@ -583,7 +593,7 @@ export class RealCars {
       c.root.visible = true;
       // pendurado no guindaste: sobe de verdade (1,6 m, no gancho da lança estendida; mais alto a sombra caía longe); no 3D não aumenta de tamanho
       const up = d.lift ?? 0;
-      c.root.position.set(d.x, this.groundY + (up > 0 ? up * 1.6 : (d.scale - 1) * 3), d.y);
+      c.root.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + (up > 0 ? up * 1.6 : (d.scale - 1) * 3), d.y);
       const blob = c.root.getObjectByName("blob");
       if (blob) {
         blob.visible = !!tf && up <= 0 && this.realShadow;
@@ -626,23 +636,32 @@ export class RealCars {
         this.scene.fog = new THREE.Fog(sky, 500, 2400);
       }
       const kind = tf.kind ?? (tf.iso ? "iso" : "tv");
+      const now = performance.now();
+      const rdt = Math.min(0.1, (now - (this.lastNow || now)) / 1000);
+      this.lastNow = now;
+      if (kind !== "tv") this.tvH = null;
       const ISO_FOV = 34, span = tf.span ?? 100;
       const pose = (k: string) => {
         if (k === "tv") {
-          // atrás e acima do carro, olhando um pouco à frente dele (amortecido: segue o carro com atraso)
-          const fx = Math.cos(tf.h), fz = Math.sin(tf.h);
-          const want = new THREE.Vector3(tf.x - fx * 26, 11, tf.y - fz * 26);
-          this.camPos = this.camPos ? this.camPos.lerp(want, Math.min(1, dt * 3)) : want;
-          return { pos: this.camPos.clone(), look: new THREE.Vector3(tf.x + fx * 14, 1.2, tf.y + fz * 14), fov: 42 };
+          // atrás e acima do carro, olhando um pouco à frente dele. A direção é amortecida (a do carro balança
+          // a cada correção de volante e a câmera ia e voltava pros lados), e no tempo real (não no do jogo)
+          if (this.tvH == null) this.tvH = tf.h;
+          let dh = tf.h - this.tvH;
+          dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+          this.tvH += dh * Math.min(1, rdt * 2.2);
+          const fx = Math.cos(this.tvH), fz = Math.sin(this.tvH);
+          const want = new THREE.Vector3(tf.x - fx * 26, 11 + this.hAt(tf.x, tf.y), tf.y - fz * 26);
+          this.camPos = this.camPos ? this.camPos.lerp(want, Math.min(1, rdt * 4)) : want;
+          return { pos: this.camPos.clone(), look: new THREE.Vector3(tf.x + fx * 14, 1.2 + this.hAt(tf.x + fx * 14, tf.y + fz * 14), tf.y + fz * 14), fov: 42 };
         }
         // de lado: ângulo fixo de ~41° (gira pelo yaw); de cima: quase reto pra baixo, cobrindo o mesmo que o 2D
         // (o centro já vem suavizado pela câmera do 2D; amortecer de novo fazia o carro ir e voltar na tela)
         const top = k === "cima";
         const EL = top ? 1.5695 : 0.72, yaw = top ? 0 : (tf.yaw ?? 0);
         const D = (span / 2 / Math.tan(((ISO_FOV / 2) * Math.PI) / 180)) * (top ? 1 : 1.1);
-        return { pos: new THREE.Vector3(tf.x + Math.sin(yaw) * Math.cos(EL) * D, Math.sin(EL) * D, tf.y + Math.cos(yaw) * Math.cos(EL) * D), look: new THREE.Vector3(tf.x, 0, tf.y), fov: ISO_FOV };
+        const gh = this.hAt(tf.x, tf.y);
+        return { pos: new THREE.Vector3(tf.x + Math.sin(yaw) * Math.cos(EL) * D, gh + Math.sin(EL) * D, tf.y + Math.cos(yaw) * Math.cos(EL) * D), look: new THREE.Vector3(tf.x, gh, tf.y), fov: ISO_FOV };
       };
-      const now = performance.now();
       if (kind !== this.lastKind) {
         // começou a trocar: parte de onde estava (ou da vista de cima, vindo do 2D/de cima normal)
         this.trans = { from: this.curPose ?? pose("cima"), t0: now };
@@ -687,6 +706,11 @@ export class RealCars {
       r.render(this.scene, cam);
     }
     o.drawImage(r.domElement, 0, 0, W, H);
+  }
+
+  /** telões do autódromo: a classificação ao vivo */
+  liveScreen(race: Race) {
+    updateLiveScreen(race);
   }
 
   dispose() {

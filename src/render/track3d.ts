@@ -4,10 +4,13 @@
 // Mundo da pista (x, y) -> Three (X = x, Z = y), Y pra cima (igual aos carros).
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { asphaltTexture, rubberTexture, rng, angDiff, Grid, inPoly, obb, C, standModule, blob, houseGeos, garageTex, fenceTex, grassTex, vwall, towerGeo, motorhomeGeo, tentGeo, tyreStackGeo, pineGeo, billboardGeos, billboardTex, BRANDS } from "./trackParts";
+import { asphaltTexture, rubberTexture, rng, angDiff, Grid, inPoly, obb, grassTex, BRANDS } from "./trackParts";
+import { PieceLayer, loadPaths, loadPieces, loadTerrain, pathsFromJson, piecesFromJson, terrainFromJson, type Piece, type PieceKind } from "./pieces";
+import { Terrain, applyTerrain, shadeGround } from "./terrain";
+import { PathLayer, type PathItem } from "./paths3d";
 import { PIT_LATERAL, TRACK_WIDTH, type Track } from "../sim/track";
 
-type Kind = "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
+type Kind = "costa" | "cais" | "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
 interface Item { k: Kind; p: [number, number][]; h?: number; fechado?: boolean; w?: number }
 
 /** nome da pista -> arquivo (sem acento, minúsculo) */
@@ -40,24 +43,6 @@ function ribbon(pts: [number, number][], w: number, y: number): THREE.BufferGeom
   return g;
 }
 
-
-/** polígono no chão (ou prédio com altura) */
-function shapeOf(pts: [number, number][]) {
-  // (no plano XY e depois deitado: o y do mundo vira -y da forma)
-  return new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, -y)));
-}
-const flat = (pts: [number, number][], y: number) => {
-  const g = new THREE.ShapeGeometry(shapeOf(pts));
-  g.rotateX(-Math.PI / 2);
-  g.translate(0, y, 0);
-  return g;
-};
-const extrude = (pts: [number, number][], h: number) => {
-  const g = new THREE.ExtrudeGeometry(shapeOf(pts), { depth: h, bevelEnabled: false });
-  g.rotateX(-Math.PI / 2);
-  return g;
-};
-
 const merge = (gs: (THREE.BufferGeometry | null)[]) => {
   const ok = gs.filter((g): g is THREE.BufferGeometry => !!g).map((g) => (g.index ? g.toNonIndexed() : g));
   for (const g of ok) {
@@ -69,8 +54,6 @@ const merge = (gs: (THREE.BufferGeometry | null)[]) => {
 
 
 
-/** como merge, mas guardando o UV (alambrado) */
-const mergeUV = (gs: THREE.BufferGeometry[]) => (gs.length ? mergeGeometries(gs.map((g) => (g.index ? g.toNonIndexed() : g))) : null);
 
 
 /** zebras por pista (as outras: vermelho e branco) */
@@ -80,7 +63,7 @@ const KERBS: Record<string, string[]> = { interlagos: ["#159447", "#f4f4f4", "#f
  * Monta o autódromo. `shadows`: prédios, árvores e arquibancadas fazem sombra (pede mais da placa de vídeo).
  * Devolve o grupo e quanto tem (pra medir o peso).
  */
-export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ group: THREE.Group; tris: number; real: boolean } | null> {
+export async function buildTrack3d(track: Track, shadows: boolean, opts: { pieces?: Piece[] | null; terrain?: boolean } = {}): Promise<{ group: THREE.Group; tris: number; real: boolean; auto: Piece[]; autoPaths: PathItem[]; layer: PieceLayer; paths: PathLayer; terrain: Terrain; relief: boolean }> {
   const group = new THREE.Group();
   let items: Item[] = [];
   try {
@@ -92,9 +75,10 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   // (sem o entorno real, só as peças em volta da pista)
   const rnd = rng(7);
   const W2 = TRACK_WIDTH / 2;
+  const street = !!track.def.street;
   const FENCE = W2 + 12; // alambrado (dos dois lados)
   const STAND = W2 + 14; // frente das arquibancadas
-  const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+  const UP = new THREE.Vector3(0, 1, 0);
   const add = (g: THREE.BufferGeometry | null, m: THREE.Material | THREE.Material[], cast = false) => {
     if (!g) return null;
     const mesh = new THREE.Mesh(g, m);
@@ -103,13 +87,12 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     group.add(mesh);
     return mesh;
   };
-  const inst = (g: THREE.BufferGeometry, m: THREE.Material | THREE.Material[], n: number) => {
-    const im = new THREE.InstancedMesh(g, m, Math.max(1, n));
-    im.count = n;
-    im.castShadow = shadows;
-    im.receiveShadow = shadows;
-    group.add(im);
-    return im;
+  // peças editáveis (arquibancadas, boxes, árvores...): o automático monta a lista, o editor pode trocar
+  const P: Piece[] = [];
+  /** peça na posição e no giro de uma matriz da beira da pista */
+  const fromM = (k: PieceKind, m: THREE.Matrix4, extra: Partial<Piece> = {}) => {
+    const e = m.elements;
+    P.push({ k, x: e[12], z: e[14], r: Math.atan2(-e[2], e[0]), ...extra });
   };
 
   // ---- onde a pista passa (pra nada nascer em cima dela) ----
@@ -143,13 +126,17 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   };
 
   // ---- chão: grama de desenho ----
-  const size = Math.max(x1 - x0, z1 - z0) + 2000;
-  const gt = grassTex("#3b6421", "#2d5119", "#4b772a");
+  // (chão só até ~600 m além da pista: mais que isso era grama vazia que ninguém vê)
+  const size = Math.max(x1 - x0, z1 - z0) + 1200;
+  // (circuito de rua: o chão da cidade é calçada; os parques do mapa continuam verdes por cima)
+  const gt = street ? grassTex("#b3ab9c", "#a39b8c", "#c2baab") : grassTex("#3b6421", "#2d5119", "#4b772a");
   gt.repeat.set(size / 200, size / 200);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat("#ffffff", 1, { map: gt }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.set((x0 + x1) / 2, -0.05, (z0 + z1) / 2);
   ground.receiveShadow = shadows;
+  // (a base: pintada antes de todas as camadas de chão)
+  ground.renderOrder = -2000;
   group.add(ground);
 
   // ---- boxes: prédio de dois andares (portas amarelas embaixo, janelas em cima), torre de controle e paddock atrás ----
@@ -164,19 +151,12 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     const c = track.pose(track.wrap(s), PIT_LATERAL + pitW / 2 + 8);
     taken.add(c.x, c.y, 9);
   }
+  for (const m of garages) fromM("box", m);
   if (garages.length) {
-    const g = new THREE.BoxGeometry(6.2, 11, 14).translate(0, 5.5, 7);
-    const white = mat("#f4f4f2", 0.8), door = mat("#ffffff", 0.7, { map: garageTex() });
-    const im = inst(g, [white, white, white, white, white, door], garages.length);
-    garages.forEach((m, i) => im.setMatrixAt(i, m));
-    // telhado marrom passando um pouco da frente
-    const rim = inst(new THREE.BoxGeometry(6.25, 0.7, 16).translate(0, 11.35, 7), mat("#a5653b", 0.85), garages.length);
-    garages.forEach((m, i) => rim.setMatrixAt(i, m));
     // torre de controle antes do primeiro box
     const tm = new THREE.Matrix4();
     const tp = sideMatrix(track.pitEntryS + 70 - 7, PIT_LATERAL + pitW / 2 + 1.5, 1, tm).p;
-    const tower = add(towerGeo(), mat("#ffffff", 0.8, { vertexColors: true, flatShading: true }), true)!;
-    tower.applyMatrix4(tm);
+    fromM("torre", tm);
     taken.add(tp.x, tp.y, 9);
   }
   // paddock: tendas na frente e motorhomes em fila atrás dos boxes
@@ -205,18 +185,9 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     const e = new THREE.Vector3().setFromMatrixPosition(m);
     taken.add(e.x, e.z, 4.5);
   }
-  if (tents.length) {
-    const im = inst(tentGeo(), mat("#ffffff", 0.8, { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), tents.length);
-    tents.forEach((m, i) => im.setMatrixAt(i, m));
-  }
-  if (homes.length) {
-    const im = inst(motorhomeGeo(), mat("#ffffff", 0.7, { vertexColors: true }), homes.length);
-    const hc = ["#ffffff", "#f3f1ea", "#e6cf96", "#d9dde2"].map(C);
-    homes.forEach((m, i) => {
-      im.setMatrixAt(i, m);
-      im.setColorAt(i, hc[Math.floor(rnd() * hc.length)]);
-    });
-  }
+  for (const m of tents) fromM("tenda", m);
+  const hc = ["#ffffff", "#f3f1ea", "#e6cf96", "#d9dde2"];
+  for (const m of homes) fromM("motorhome", m, { c: hc[Math.floor(rnd() * hc.length)] });
 
   // ---- arquibancadas: módulos de 14 m na reta (lado oposto ao box) e por fora das curvas ----
   const stands: THREE.Matrix4[] = [];
@@ -242,10 +213,7 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   }
   corners.sort((a, b) => Math.abs(b.k) - Math.abs(a.k));
   for (const c of corners) tryStand(c.s, c.k > 0 ? -1 : 1);
-  if (stands.length) {
-    const im = inst(standModule(), mat("#ffffff", 0.8, { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), stands.length);
-    stands.forEach((m, i) => im.setMatrixAt(i, m));
-  }
+  for (const m of stands) fromM("arquibancada", m);
 
   // ---- alambrado com mureta, dos dois lados (some onde outra parte da pista passa perto e no box) ----
   const runs: [number, number][][] = [];
@@ -273,14 +241,9 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     }
     flush();
   }
-  add(merge(runs.map((r) => vwall(r, 0, 1.0))), mat("#e2e4e6", 0.8, { side: THREE.DoubleSide }), true);
-  const ft = fenceTex();
-  add(mergeUV(runs.map((r) => vwall(r, 1.0, 4.2))), mat("#ffffff", 0.6, { map: ft, alphaTest: 0.35, side: THREE.DoubleSide }));
-  if (posts.length) {
-    const im = inst(new THREE.BoxGeometry(0.16, 4.4, 0.16).translate(0, 2.2, 0), mat("#6d737a", 0.6), posts.length);
-    posts.forEach(([x, z], i) => im.setMatrixAt(i, m4.makeTranslation(x, 0, z)));
-    im.castShadow = false;
-  }
+  // (vira linha editável: um ponto a cada ~15 m, e a curva suave passa por eles)
+  const autoPaths: PathItem[] = runs.map((r) => ({ t: "alambrado" as const, p: r.filter((_, i) => i % 5 === 0 || i === r.length - 1) }));
+  void posts;
 
   // ---- entorno real (OpenStreetMap) ----
   const by = (k: Kind) => items.filter((i) => i.k === k);
@@ -291,11 +254,64 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     ["agua", "#3aaabf", 0.04],
     ["piscina", "#6fd6ef", 0.05],
   ];
-  for (const [k, col, y] of areas) add(merge(by(k).filter((i) => i.fechado && i.p.length > 3).map((i) => flat(i.p.slice(0, -1), y))), mat(col, k === "agua" || k === "piscina" ? 0.25 : 0.95));
-  add(merge(by("rua").map((i) => ribbon(i.p, i.w ?? 6, 0.06))), mat("#7b7d78", 0.95));
-  add(merge(by("caminho").map((i) => ribbon(i.p, 2, 0.065))), mat("#bba77e", 0.95));
-  add(merge(by("kart").map((i) => ribbon(i.p, 8, 0.07))), mat("#3a3b40", 0.9));
-  add(merge(by("muro").map((i) => vwall(i.p, 0, 1.3))), mat("#d8d6cf", 0.9, { side: THREE.DoubleSide }), true);
+  // (tudo vira linha ou área editável no editor; um ponto a cada ~6 m, sem curva: igual ao mapa)
+  const thin = (p: [number, number][], d = 6) => {
+    const out: [number, number][] = [p[0]];
+    for (let k = 1; k < p.length - 1; k++) if (Math.hypot(p[k][0] - out[out.length - 1][0], p[k][1] - out[out.length - 1][1]) >= d) out.push(p[k]);
+    if (p.length > 1) out.push(p[p.length - 1]);
+    return out;
+  };
+  const mapPaths: PathItem[] = [];
+  const AREA_OF: Partial<Record<Kind, PathItem["t"]>> = { grama: "grama", bosque: "grama", estacionamento: "concreto", agua: "agua", piscina: "agua" };
+  for (const [k, col] of areas)
+    for (const i of by(k)) {
+      if (!i.fechado || i.p.length < 4) continue;
+      const p = thin(i.p.slice(0, -1), 3);
+      if (p.length >= 3) mapPaths.push({ t: AREA_OF[k]!, p, c: col, reto: true, src: "mapa" });
+    }
+  // mar: a linha da costa (no mapa, a terra fica à esquerda dela) fechada bem longe, pro lado da água
+  {
+    const chains: [number, number][][] = by("costa").map((i) => i.p.slice());
+    // emenda os pedaços da costa ponta com ponta
+    for (let again = true; again; ) {
+      again = false;
+      for (let a = 0; a < chains.length && !again; a++)
+        for (let b = 0; b < chains.length && !again; b++) {
+          if (a === b) continue;
+          const A = chains[a], B = chains[b], ea = A[A.length - 1], sb = B[0];
+          if (Math.hypot(ea[0] - sb[0], ea[1] - sb[1]) < 2) {
+            chains[a] = [...A, ...B.slice(1)];
+            chains.splice(b, 1);
+            again = true;
+          }
+        }
+    }
+    const seas: [number, number][][] = [];
+    for (const c of chains) {
+      if (c.length < 2 || Math.hypot(c[0][0] - c[c.length - 1][0], c[0][1] - c[c.length - 1][1]) < 2) continue;
+      // (normal pro lado do mar: com o y do mapa invertido, é (-dz, dx))
+      let nx = 0, nz = 0;
+      for (let k = 1; k < c.length; k++) {
+        nx += -(c[k][1] - c[k - 1][1]);
+        nz += c[k][0] - c[k - 1][0];
+      }
+      const nl = Math.hypot(nx, nz) || 1;
+      nx = (nx / nl) * 4000;
+      nz = (nz / nl) * 4000;
+      const e = c[c.length - 1], b0 = c[0];
+      seas.push([...c, [e[0] + nx, e[1] + nz], [b0[0] + nx, b0[1] + nz]]);
+    }
+    // (o mar fica por baixo de todo o resto do chão)
+    for (const pl of seas) mapPaths.push({ t: "agua", p: thin(pl, 8), c: "#2f7fb5", reto: true, src: "mapa", o: -1 });
+    for (const i of by("cais")) {
+      if (!i.fechado) mapPaths.push({ t: "cais", p: thin(i.p, 4), w: 5, reto: true, src: "mapa" });
+      else if (i.p.length > 3) mapPaths.push({ t: "concreto", p: thin(i.p.slice(0, -1), 3), c: "#b9b4a8", reto: true, src: "mapa" });
+    }
+  }
+  for (const i of by("rua")) mapPaths.push({ t: "rua", p: thin(i.p), w: i.w ?? 6, reto: true, src: "mapa" });
+  for (const i of by("caminho")) mapPaths.push({ t: "caminho", p: thin(i.p), w: 2, reto: true, src: "mapa" });
+  for (const i of by("kart")) mapPaths.push({ t: "rua", p: thin(i.p), w: 8, c: "#3a3b40", reto: true, src: "mapa" });
+  for (const i of by("muro")) mapPaths.push({ t: "muro", p: thin(i.p), reto: true, src: "mapa" });
 
   // prédios: os baixos viram casinhas (parede clara, telhado laranja), os outros blocos com altura
   const houses: { x: number; z: number; a: number; l: number; w: number; h: number }[] = [];
@@ -306,28 +322,35 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     const o = obb(pts);
     if (o.l < 2.5 || o.w < 2) continue;
     // (perto da pista do jogo não fica nada: é onde o desenho da pista e o mapa real menos batem)
-    if (trk.near(o.cx, o.cz, 34) < 34 || taken.near(o.cx, o.cz, o.l / 2 + 1) < o.l / 2) continue;
-    const h = i.h ?? 6;
-    if (i.k === "predio" && h <= 9 && o.l < 40) houses.push({ x: o.cx, z: o.cz, a: o.a, l: o.l, w: o.w, h: h <= 6 ? 3.2 + rnd() * 1.6 : h });
+    // (circuito de rua: os prédios ficam na beira da pista, só não em cima dela)
+    const keep = street ? W2 + 6 + o.w / 2 : 34;
+    if (trk.near(o.cx, o.cz, keep) < keep || taken.near(o.cx, o.cz, o.l / 2 + 1) < o.l / 2) continue;
+    // (longe demais da pista: some, pesa e quase não aparece)
+    if (trk.near(o.cx, o.cz, 450) >= 450) continue;
+    const h = i.h ?? (street ? 12 + Math.floor(rnd() * 5) * 3 : 6);
+    if (i.h == null && street) i.h = h;
+    if (!street && i.k === "predio" && h <= 9 && o.l < 40) houses.push({ x: o.cx, z: o.cz, a: o.a, l: o.l, w: o.w, h: h <= 6 ? 3.2 + rnd() * 1.6 : h });
     else towers.push(i);
     taken.add(o.cx, o.cz, Math.hypot(o.l, o.w) / 2);
   }
-  if (houses.length) {
-    const { walls, roof } = houseGeos();
-    const wm = inst(walls, mat("#ffffff", 0.85), houses.length);
-    const rm = inst(roof, mat("#ffffff", 0.75, { flatShading: true }), houses.length);
-    const wallCols = ["#f5f1e8", "#fbfaf6", "#efe4cf", "#e9eef0"].map(C);
-    const roofCols = ["#e46a24", "#ec7d32", "#d45e1e", "#f08c3c"].map(C);
-    houses.forEach((h, i) => {
-      q4.setFromAxisAngle(UP, -h.a);
-      wm.setMatrixAt(i, m4.compose(v3.set(h.x, 0, h.z), q4, s3.set(h.l, h.h, h.w)));
-      const rh = Math.min(3, 0.4 * h.w);
-      rm.setMatrixAt(i, m4.compose(v3.set(h.x, h.h, h.z), q4, s3.set(h.l * 1.06, rh, h.w * 1.14)));
-      wm.setColorAt(i, wallCols[Math.floor(rnd() * wallCols.length)]);
-      rm.setColorAt(i, roofCols[Math.floor(rnd() * roofCols.length)]);
-    });
+  {
+    const wallCols = ["#f5f1e8", "#fbfaf6", "#efe4cf", "#e9eef0"];
+    const roofCols = ["#e46a24", "#ec7d32", "#d45e1e", "#f08c3c"];
+    for (const h of houses)
+      P.push({ k: "casa", x: h.x, z: h.z, r: -h.a, sx: h.l, sy: h.h, sz: h.w, c: wallCols[Math.floor(rnd() * wallCols.length)], c2: roofCols[Math.floor(rnd() * roofCols.length)] });
   }
-  add(merge(towers.map((i) => extrude(i.p.slice(0, -1), i.h ?? 14))), mat("#ecdcb4", 0.85), true);
+  // os outros prédios do mapa viram construções modulares (caixa do tamanho do prédio): dá pra mover, mudar
+  // andares, cor e vidro no editor
+  {
+    const facade = street ? ["#e8b98a", "#f0c27a", "#e9a58f", "#f3dcb0", "#d9c3a0", "#f6e7c8", "#e7a77a", "#cfd6da", "#f2d0b8"] : ["#f1e2c6", "#f3d9b1", "#e9c9a7", "#f5efe2", "#e7d3b5", "#f0c9a8", "#dfe3e6", "#efe0cf"];
+    const roofs = ["#c9c2b4", "#b9b4a8", "#d8d2c4", "#a9a49a"];
+    for (const i of towers) {
+      const o = obb(i.p.slice(0, -1));
+      const floors = Math.max(1, Math.round((i.h ?? 12) / 3));
+      P.push({ k: "edificio", x: o.cx, z: o.cz, r: -o.a, sx: Math.round(o.l * 2) / 2, sy: floors * 3, sz: Math.round(o.w * 2) / 2, c: facade[Math.floor(rnd() * facade.length)], c2: roofs[Math.floor(rnd() * roofs.length)], v: rnd() < 0.12 ? 1 : undefined });
+    }
+  }
+
 
   // ruas: árvore não nasce em cima
   for (const i of by("rua"))
@@ -375,41 +398,16 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   };
   fill("bosque", 7, 1);
   fill("grama", 22, 0.35);
-  for (let n = 0; n < 7000; n++) {
+  for (let n = 0; n < (street ? 0 : 7000); n++) {
     const s = rnd() * track.L, lat = (W2 + 16 + Math.pow(rnd(), 1.6) * 230) * (rnd() < 0.5 ? -1 : 1);
     const p = track.pose(s, lat);
     tryTree(p.x, p.y);
   }
-  if (trees.length) {
-    const leaf = mat("#ffffff", 0.9, { flatShading: true });
-    const near = trees.filter((t) => t.near), far = trees.filter((t) => !t.near);
-    const cols = ["#4a8a2c", "#3d7a26", "#5a9634", "#2f6a22", "#2a5e20", "#679f3a"].map(C);
-    const trunk = inst(new THREE.CylinderGeometry(0.16, 0.26, 1, 5, 1, true).translate(0, 0.5, 0), mat("#7a5a3c", 0.9), trees.length);
-    trees.forEach((t, i) => {
-      const th = t.s * (t.tall ? 1.1 : 0.8);
-      trunk.setMatrixAt(i, m4.compose(v3.set(t.x, 0, t.z), q4.identity(), s3.set(t.s * 0.9, th + t.s * 0.3, t.s * 0.9)));
-    });
-    trunk.castShadow = false;
-    // as altas viram pinheiros
-    const pines = trees.filter((t) => t.tall);
-    if (pines.length) {
-      const pm = inst(pineGeo(), leaf, pines.length);
-      pines.forEach((t, i) => {
-        pm.setMatrixAt(i, m4.compose(v3.set(t.x, t.s * 0.5, t.z), q4.setFromAxisAngle(UP, rnd() * 6.3), s3.set(t.s * 0.95, t.s * 2.2, t.s * 0.95)));
-        pm.setColorAt(i, rnd() < 0.5 ? C("#24561f") : C("#2f6627"));
-      });
-    }
-    for (const [all, detail] of [[near, 1], [far, 0]] as const) {
-      const list = all.filter((t) => !t.tall);
-      if (!list.length) continue;
-      const im = inst(blob(detail), leaf, list.length);
-      list.forEach((t, i) => {
-        const th = t.s * (t.tall ? 1.1 : 0.8);
-        q4.setFromAxisAngle(UP, rnd() * Math.PI * 2);
-        im.setMatrixAt(i, m4.compose(v3.set(t.x, th + t.s * 0.75, t.z), q4, s3.set(t.s, t.s * (t.tall ? 1.55 : 1), t.s)));
-        im.setColorAt(i, t.tall ? cols[4] : cols[Math.floor(rnd() * cols.length)]);
-      });
-    }
+  {
+    const cols = ["#4a8a2c", "#3d7a26", "#5a9634", "#2f6a22", "#2a5e20", "#679f3a"];
+    // as altas viram pinheiros; longe da pista, a árvore mais simples (pesa menos)
+    for (const t of trees)
+      P.push(t.tall ? { k: "pinheiro", x: t.x, z: t.z, r: rnd() * 6.3, s: t.s, c: rnd() < 0.5 ? "#24561f" : "#2f6627" } : { k: "arvore", x: t.x, z: t.z, r: rnd() * 6.3, s: t.s, c: cols[Math.floor(rnd() * cols.length)], v: t.near ? undefined : 1 });
   }
 
   // ---- a pista do jogo: asfalto, faixas brancas, zebras e escape nas curvas, box e largada ----
@@ -516,28 +514,8 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   add(merge(runoff), mat("#7d8086", 0.9, { side: THREE.DoubleSide }));
   add(merge(paint), mat("#2f9e56", 0.85, { side: THREE.DoubleSide, ...over(1) }));
   add(merge(gravel), mat("#e08a3c", 1, { side: THREE.DoubleSide }));
-  if (tyres.length) {
-    const im = inst(tyreStackGeo(), mat("#ffffff", 0.9), tyres.length);
-    const bw = [C("#1c1c1c"), C("#f2f2f2")];
-    tyres.forEach(([x, z, c], i) => {
-      im.setMatrixAt(i, m4.makeTranslation(x, 0, z));
-      im.setColorAt(i, bw[c]);
-    });
-  }
-  const bg = billboardGeos();
-  const postsN = boards.reduce((a, b) => a + b.length, 0);
-  if (postsN) {
-    const pm = inst(bg.posts, mat("#59606a", 0.7), postsN);
-    let k = 0;
-    boards.forEach((list, bi) => {
-      if (!list.length) return;
-      const fm = inst(bg.face, mat("#ffffff", 0.6, { map: billboardTex(bi) }), list.length);
-      list.forEach((m, i) => {
-        fm.setMatrixAt(i, m);
-        pm.setMatrixAt(k++, m);
-      });
-    });
-  }
+  for (const [x, z, c] of tyres) P.push({ k: "pneu", x, z, r: 0, c: c ? "#f2f2f2" : "#1c1c1c" });
+  boards.forEach((list, bi) => list.forEach((m) => fromM("placa", m, { v: bi })));
   // box: faixa de asfalto do pit lane
   const pitPts: [number, number][] = [];
   const ps = track.pitEntryS, pe = track.pitExitS + track.L;
@@ -550,6 +528,43 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
   const chk: THREE.BufferGeometry[] = [];
   for (let q = 0; q < 12; q++) chk.push(band(-W2 + (q * TRACK_WIDTH) / 12, -W2 + ((q + 1) * TRACK_WIDTH) / 12, 0.14, q % 2 ? 0 : 1.5, q % 2 ? 1.5 : 3, 1.5));
   add(merge(chk), mat("#f0f0f0", 0.6, { side: THREE.DoubleSide, ...over(3) }));
+
+  let shipped: Piece[] | null = null, shippedPaths: PathItem[] = [], shippedTerrain: Terrain | null = null;
+  if (!opts.pieces && !loadPieces(slugOf(track.name)))
+    try {
+      const r = await fetch(`/autodromos/${slugOf(track.name)}.pecas.json`);
+      if (r.ok) {
+        const txt = await r.text();
+        shipped = piecesFromJson(txt);
+        shippedPaths = pathsFromJson(txt);
+        shippedTerrain = terrainFromJson(txt);
+      }
+    } catch {
+      /* sem as do projeto */
+    }
+  // (ordem: as do editor neste navegador, as que vêm no jogo, o automático)
+  const layer = new PieceLayer(opts.pieces ?? loadPieces(slugOf(track.name)) ?? shipped ?? P, shadows);
+  group.add(layer.group);
+  // (ordem: as do editor neste navegador, as que vêm no jogo, o alambrado automático)
+  // o chão do mapa real entra no automático; quem salvou antes dele existir ganha ele por baixo do que salvou
+  autoPaths.unshift(...mapPaths);
+  let savedPaths = loadPaths(slugOf(track.name)) ?? (shipped ? shippedPaths : null);
+  if (savedPaths && mapPaths.length && !savedPaths.some((it) => it.src === "mapa")) savedPaths = [...mapPaths, ...savedPaths];
+  const paths = new PathLayer(savedPaths ?? autoPaths.map((it) => ({ ...it, p: it.p.slice() })), shadows);
+  group.add(paths.group);
+  // relevo: o salvo, o que vem no jogo, ou plano (plano não liga nada: não pesa)
+  const saved = loadTerrain(slugOf(track.name));
+  const terrain = (saved !== undefined ? saved : shippedTerrain) ?? Terrain.around(x0, z0, x1, z1);
+  const relief = !!opts.terrain || !terrain.flat;
+  if (relief) {
+    // chão com um ponto por célula da grade (pra subir e descer junto)
+    ground.geometry.dispose();
+    const w = terrain.nx * terrain.cell, d = terrain.nz * terrain.cell;
+    // (2 pontos por célula: o chão segue o relevo quase igual à pista, que pega a altura a cada 2 m)
+    ground.geometry = new THREE.PlaneGeometry(w, d, (terrain.nx - 1) * 2, (terrain.nz - 1) * 2);
+    ground.position.set(terrain.x0 - terrain.cell / 2 + w / 2, -0.05, terrain.z0 - terrain.cell / 2 + d / 2);
+    gt.repeat.set(w / 200, d / 200);
+  }
 
   for (const o of group.children) {
     const im = o as THREE.InstancedMesh;
@@ -568,5 +583,9 @@ export async function buildTrack3d(track: Track, shadows: boolean): Promise<{ gr
     tris += (m as THREE.InstancedMesh).isInstancedMesh ? n * (m as THREE.InstancedMesh).count : n;
   });
   console.info(`pista 3D: ${stands.length} módulos de arquibancada, ${houses.length} casas, ${trees.length} árvores (${nNear} perto)`);
-  return { group, tris: Math.round(tris), real: items.length > 0 };
+  if (relief) {
+    applyTerrain(group, terrain);
+    shadeGround(ground.material as THREE.Material, terrain);
+  }
+  return { group, tris: Math.round(tris), real: items.length > 0, auto: P, autoPaths, layer, paths, terrain, relief };
 }

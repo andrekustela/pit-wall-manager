@@ -75,8 +75,10 @@ function warp([x, y]: [number, number]): [number, number] {
 }
 
 // ---- o que vale desenhar, e como ----
-type Kind = "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
+type Kind = "cais" | "costa" | "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
 function kindOf(t: Record<string, string>): Kind | null {
+  if (t.natural === "coastline") return "costa";
+  if (t.man_made === "pier" || t.man_made === "breakwater") return "cais" as Kind;
   if (t.highway === "raceway") return t.sport === "karting" ? "kart" : "pista";
   if (t.building === "grandstand" || t.leisure === "stadium") return "arquibancada";
   if (t.building) return "predio";
@@ -103,7 +105,8 @@ for (const e of osm.elements) {
   if (!pts.some(([x, y]) => game.some((g, i) => i % 20 === 0 && (g[0] - x) ** 2 + (g[1] - y) ** 2 < RAIO * RAIO))) continue;
   const g = e.geometry;
   const fechado = g.length > 3 && g[0].lat === g.at(-1)!.lat && g[0].lon === g.at(-1)!.lon;
-  const item: (typeof out)[number] = { k: kind, p: pts.map(warp) };
+  // (a costa e os píeres sem o encaixe: perto da pista ele pula de trecho e a costa virava serrote)
+  const item: (typeof out)[number] = { k: kind, p: kind === "costa" || kind === ("cais" as Kind) ? pts.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10] as [number, number]) : pts.map(warp) };
   if (fechado) item.fechado = true;
   if (kind === "predio" || kind === "arquibancada") {
     const lv = Number(e.tags["building:levels"]) || 0;

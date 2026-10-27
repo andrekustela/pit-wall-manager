@@ -39,7 +39,7 @@ ws.on("message", (raw) => {
     pending.get(m.id)!(m);
     pending.delete(m.id);
   }
-  if (m.method === "Runtime.exceptionThrown") logs.push(`EXCEÇÃO: ${m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text}`);
+  if (m.method === "Runtime.exceptionThrown") logs.push(`EXCEÇÃO: ${m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text}`.slice(0, 1200));
   if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") logs.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description).join(" ")}`);
 });
 const cmd = (method: string, params: object = {}) =>
