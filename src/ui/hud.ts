@@ -1,4 +1,5 @@
 import { confirmDialog } from "./confirm";
+import { keyName } from "./keys";
 import { fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
 import { mountWavingFlag } from "./checkerFlag";
 import {
@@ -137,7 +138,8 @@ export class Hud {
     this.applyCompact();
   }
 
-  private compact = storeGet("pwm.compact") === "1";
+  /** painel dos pilotos (tecla M): 0 completo, 1 compacto (com a onboard e os botões), 2 só o nome (posição, nome, frente/atrás) */
+  private level = Math.max(0, Math.min(2, Number(storeGet("pwm.compact")) || 0));
   private boardMini = storeGet("pwm.boardmini") === "1";
 
   /** tabela de posições minimizada: só posição, sigla e gap */
@@ -173,8 +175,8 @@ export class Hud {
   }
 
   toggleCompact() {
-    this.compact = !this.compact;
-    storeSet("pwm.compact", this.compact ? "1" : "0");
+    this.level = (this.level + 1) % 3;
+    storeSet("pwm.compact", String(this.level));
     this.applyCompact(true);
   }
 
@@ -182,8 +184,9 @@ export class Hud {
    * cada quadro fazia o navegador recalcular a página inteira e a corrida engasgava) */
   private applyCompact(animate = false) {
     const team = this.el.querySelector<HTMLElement>(".team")!;
-    this.el.querySelector(".teamtoggle")!.textContent = this.compact ? "▲ EXPANDIR PAINEL (M)" : "▼ MINIMIZAR PAINEL (M)";
-    team.classList.toggle("compact", this.compact);
+    this.el.querySelector(".teamtoggle")!.textContent = ["▼ MINIMIZAR PAINEL (M)", "▼ SÓ OS NOMES (M)", "▲ EXPANDIR PAINEL (M)"][this.level];
+    team.classList.toggle("compact", this.level === 1);
+    team.classList.toggle("names", this.level === 2);
     if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
       team.animate([{ opacity: 0.25, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(.23, 1, .32, 1)" });
   }
@@ -360,10 +363,10 @@ export class Hud {
         <div class="ctabs"><button data-tab="race" title="Ritmo, motor e ordens de equipe: atacar, defender, poupar">⚔ PILOTAGEM</button><button data-tab="box" title="Pneu, combustível, peças e plano de paradas">🔧 BOX</button></div>
         <div class="pane" data-pane="race">
         <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
-          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${"QWE"[i]} (no piloto seguido)">${PACE[m].label}<kbd>${"QWE"[i]}</kbd></button>`).join("")}
+          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${keyName((["ritmoAtacar", "ritmoNormal", "ritmoPoupar"] as const)[i])} (no piloto seguido)">${PACE[m].label}<kbd>${keyName((["ritmoAtacar", "ritmoNormal", "ritmoPoupar"] as const)[i])}</kbd></button>`).join("")}
         </div></div>
         <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
-          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${"ZXC"[i]} (no piloto seguido)">${ENGINE[m].label}<kbd>${"ZXC"[i]}</kbd></button>`).join("")}
+          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${keyName((["motorRica", "motorNormal", "motorPobre"] as const)[i])} (no piloto seguido)">${ENGINE[m].label}<kbd>${keyName((["motorRica", "motorNormal", "motorPobre"] as const)[i])}</kbd></button>`).join("")}
         </div></div>
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>

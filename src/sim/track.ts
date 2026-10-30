@@ -40,12 +40,17 @@ export interface TrackDef {
   lineKey?: string;
   /** guardada (fora do sorteio, do seletor e do menu); o índice fica pra saves e recordes antigos */
   standby?: boolean;
+  /** pista "não oficial" feita no editor de traçado (só no solo; fora do sorteio) */
+  mod?: boolean;
+  /** traçado mexido no editor de traçado (neste navegador) */
+  edited?: boolean;
 }
 
 import { turtle } from "./trackShape";
 import { REAL_CIRCUITS } from "./realCircuits";
 import { REAL_TRACKS } from "./realTracks";
 import { LINE_STEP, RACING_LINES } from "./racingLines";
+import { loadEdits, loadMods } from "./trackMods";
 
 export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
@@ -175,10 +180,38 @@ const HANDMADE: TrackDef[] = [
 /** todas as pistas, na ordem dos índices (saves e recordes guardam o índice: só acrescentar no fim) */
 export const CIRCUITS: TrackDef[] = [...HANDMADE.map((t) => ({ ...t, standby: true })), ...REAL_TRACKS].map((t) => ({ ...t, lineKey: t.name }));
 /** índices das pistas em uso (sorteio, seletor, menu, ranking) */
-export const ACTIVE_TRACKS: number[] = CIRCUITS.flatMap((t, i) => (t.standby ? [] : [i]));
-/** uma pista em uso, sorteada (sem repetir a pista "evitar", se der) */
+export const ACTIVE_TRACKS: number[] = [];
+/** as pistas do jogo como vieram (o editor de traçado mexe por cima, e "voltar ao original" volta pra estas) */
+export const ORIGINAL_CIRCUITS: readonly TrackDef[] = CIRCUITS.slice();
+/**
+ * aplica o que o editor de traçado guardou neste navegador: pistas do jogo com traçado mexido e pistas
+ * "não oficiais" no fim da lista. Chamado ao carregar e de novo quando o editor salva (sem recarregar).
+ */
+export function applyTrackMods() {
+  CIRCUITS.length = 0;
+  CIRCUITS.push(...ORIGINAL_CIRCUITS);
+  const edits = loadEdits();
+  CIRCUITS.forEach((t, i) => {
+    const e = edits[t.name];
+    if (!e) return;
+    // (traçado novo: a linha ideal antiga não serve mais; a do editor, se calculou, entra no lugar)
+    const key = `editado:${t.name}`;
+    if (e.line) RACING_LINES[key] = { o: e.line, gain: 0, lap: 0 };
+    CIRCUITS[i] = { ...t, points: e.points, targetLength: e.targetLength, lineKey: key, edited: true, marks: undefined };
+  });
+  for (const m of loadMods()) {
+    const key = `mod:${m.id}`;
+    if (m.line) RACING_LINES[key] = { o: m.line, gain: 0, lap: 0 };
+    CIRCUITS.push({ name: m.name, blurb: m.blurb, points: m.points, targetLength: m.targetLength, minHeight: m.minHeight, balance: m.balance, rainChance: m.rainChance, grass: m.grass, street: m.street, night: m.night, overtake: m.overtake, realStart: true, lineKey: key, mod: true });
+  }
+  ACTIVE_TRACKS.length = 0;
+  CIRCUITS.forEach((t, i) => !t.standby && ACTIVE_TRACKS.push(i));
+  trackCache?.clear();
+}
+/** uma pista em uso, sorteada (sem repetir a pista "evitar", se der; as não oficiais ficam de fora) */
 export function randomTrack(rnd: () => number = Math.random, avoid = -1): number {
-  const pool = ACTIVE_TRACKS.length > 1 ? ACTIVE_TRACKS.filter((i) => i !== avoid) : ACTIVE_TRACKS;
+  const official = ACTIVE_TRACKS.filter((i) => !CIRCUITS[i].mod);
+  const pool = official.length > 1 ? official.filter((i) => i !== avoid) : official;
   return pool[Math.floor(rnd() * pool.length)];
 }
 
@@ -204,6 +237,12 @@ function sampleSpline(ctrl: Vec[], stepsPerSeg = 200): Vec[] {
     for (let k = 0; k < stepsPerSeg; k++) out.push(catmull(p0, p1, p2, p3, k / stepsPerSeg));
   }
   return out;
+}
+
+/** a curva da pista pelos pontos de controle, a cada `step` m, e o comprimento (o editor de traçado usa) */
+export function trackCurve(points: [number, number][], step = 4): { pts: Vec[]; length: number } {
+  const sp = sampleSpline(points.map(([x, y]) => ({ x, y })), 24);
+  return { pts: resample(sp, step), length: polyLength(sp) };
 }
 
 function polyLength(pts: Vec[]): number {
@@ -569,7 +608,9 @@ export class Track {
   }
 }
 
-const trackCache = new Map<number, Track>();
+// eslint-disable-next-line prefer-const
+var trackCache: Map<number, Track> = new Map();
+applyTrackMods();
 /** a pista já foi montada (está no cache)? */
 export function isTrackBuilt(index: number): boolean {
   return trackCache.has(index);

@@ -1,5 +1,34 @@
 import { bindSoundPanel, soundPanelHtml } from "./soundPanel";
-import { esc, storeGet, storeSet } from "./common";
+import { DISPLAY_DEF, display, setDisplay, type Display } from "../render/display";
+import { ACTIONS, keyName, resetKeys, setKey, type Action } from "./keys";
+
+/** aba ATALHOS: cada ação e a tecla dela (clique e aperte a nova) */
+function keysHtml(wait: Action | null = null) {
+  let g = "";
+  return `<div class="sndpanel">${ACTIONS.map((a) => {
+    const head = a.group !== g ? `<div class="sndsub">${(g = a.group).toUpperCase()}</div>` : "";
+    return `${head}<div class="sndline"><span>${a.label}</span><button class="btn small ${wait === a.id ? "primary" : ""}" data-key="${a.id}" style="min-width:110px">${wait === a.id ? "aperte a tecla..." : keyName(a.id)}</button></div>`;
+  }).join("")}
+    <div class="row-btns" style="margin-top:8px"><button class="btn small" data-keyreset>RESTAURAR O PADRÃO</button></div>
+    <p class="hint">Clique na tecla e aperte a nova (Esc cancela). Se outra ação usava a mesma tecla, as duas trocam. Muda na hora.</p>
+  </div>`;
+}
+
+/** aba TELA: brilho, contraste, saturação e tom (mudam na hora, sem SALVAR) */
+function displayHtml() {
+  const d = display();
+  const row = (k: keyof Display, label: string, min: number, max: number, unit: string, hint: string) =>
+    `<label class="sndrow"><span>${label}</span><input type="range" min="${min}" max="${max}" data-tela="${k}" value="${d[k]}"><b data-telav="${k}">${d[k]}${unit}</b></label><p class="hint gfxhint" style="margin:0 0 8px">${hint}</p>`;
+  return `<div class="sndpanel">
+    ${row("brilho", "Brilho", 50, 150, "%", "Mais claro ou mais escuro (bom pra tela escura ou ambiente claro).")}
+    ${row("contraste", "Contraste", 50, 150, "%", "Diferença entre o claro e o escuro.")}
+    ${row("saturacao", "Saturação", 0, 200, "%", "Cores mais vivas ou mais apagadas (0 = preto e branco).")}
+    ${row("tom", "Tom de cor", -100, 100, "", "Negativo: mais frio (azulado). Positivo: mais quente (alaranjado).")}
+    <div class="row-btns" style="margin-top:6px"><button class="btn small" data-telareset>RESTAURAR O PADRÃO</button></div>
+    <p class="hint">Vale pros desenhos do jogo (corrida, 3D, onboard, pódio); os textos e botões ficam iguais. Muda na hora.</p>
+  </div>`;
+}
+import { esc, storeGet, storeSet, toast } from "./common";
 import type { ChampSave } from "../net/room";
 import { CIRCUITS, randomTrack } from "../sim/track";
 import { account } from "../net/account";
@@ -487,7 +516,8 @@ function gfxHtml() {
       .map((k) => `<button data-preset="${k}">${{ minimo: "MÍNIMO", baixo: "BAIXO", medio: "MÉDIO", alto: "ALTO" }[k]}</button>`)
       .join("")}</div></div>` +
     fld("Carros na pista", seg("carStyle", [["2d", "2D"], ["sprite", "2D ESTILIZADO"], ["real", "3D"]], g.carStyle), "2D é o mais leve; 2D estilizado usa imagens do modelo 3D; 3D desenha o carro em 3D de verdade.") +
-    fld("Câmera do 3D", seg("cam3d", [["cima", "DE CIMA"], ["lado", "DE LADO"], ["tras", "ATRÁS DO CARRO"]], g.cam3d), "Só no modo 3D. De lado: arraste com o botão direito do mouse pra girar. Na corrida, a tecla V troca a câmera.") +
+    fld("Câmera do 3D", seg("cam3d", [["cima", "DE CIMA"], ["lado", "DE LADO"], ["tras", "ATRÁS DO CARRO"], ["piloto", "PILOTO"]], g.cam3d), "Só no modo 3D. De lado: arraste com o botão direito do mouse pra girar. Piloto: em cima da cabeça do piloto, vendo o halo e as rodas. Na corrida: F1 (de cima), F2 (de lado), F3 (atrás) e F4 (piloto).") +
+    fld("Detalhe dos carros 3D", seg("carQ", [["baixo", "BAIXO"], ["medio", "MÉDIO"], ["alto", "ALTO"]], g.carQ), "Baixo: modelo bem leve (PC fraco). Médio: o normal. Alto: o modelo detalhado em todos os carros (pede mais da placa de vídeo). Na câmera piloto, o seu carro é sempre o detalhado. Vale na próxima corrida.") +
     fld("Pista em 3D", onoff("track3d", g.track3d), "Em teste: no modo 3D, o autódromo inteiro em 3D em qualquer pista: arquibancadas, boxes, alambrado e árvores (e o entorno real onde já tem, como Interlagos).") +
     fld("Antisserrilhado (3D)", onoff("aa", g.aa, "LIGADO", "DESLIGADO"), "Sem pneus e bordas serrilhados, em resolução cheia (pede mais da placa de vídeo).") +
     fld("Sombras", lv("shadows"), "Baixo: mancha simples. Médio e alto: sombra de verdade (no 3D), alto mais suave.") +
@@ -495,7 +525,7 @@ function gfxHtml() {
     fld("Fumaça e poeira", lv("smoke")) +
     fld("Chuva (spray dos carros e gotas)", lv("rain")) +
     fld("Marcas de pneu", lv("skids"), "Quanto mais alto, mais tempo elas ficam no asfalto.") +
-    fld("Câmera onboard nos cards", onoff("onboard", g.onboard)) +
+    fld("Câmera onboard nos cards", seg("onboardMode", [["off", "DESLIGADA"], ["2d", "2D"], ["3d", "3D"]], !g.onboard ? "off" : g.onboard3d ? "3d" : "2d"), "3D: a pista 3D de verdade vista de dentro do carro (só com os carros e a pista em 3D; pede mais da placa de vídeo). 2D: o desenho, mais leve.") +
     fld("Pódio", seg("podium3d", [["1", "3D"], ["0", "DESENHADO"]], g.podium3d ? "1" : "0")) +
     fld("Limite de FPS", `<input class="txt fpsin" data-fpscap type="number" min="15" max="360" step="1" placeholder="sem limite" value="${g.fpsCap || ""}"> <small class="hint">vazio = sem limite</small>`, "Com limite o FPS fica constante (sem subir e descer) e o notebook esquenta menos. Mais liso: um valor que divide a taxa do monitor (ex.: 72 ou 144 num de 144 Hz; 60 num de 60 Hz).") +
     `<button class="m2btn small" data-fpstest><b>▶ TESTE DE FPS</b><span>Uma corrida de demonstração de 20 s com estas opções: mostra o FPS e o que dá pra baixar</span><i>▶</i></button>`
@@ -516,7 +546,9 @@ function saveGfx(m: HTMLElement) {
     smoke: l("smoke"),
     rain: l("rain"),
     skids: l("skids"),
-    onboard: b("onboard"),
+    onboard: v("onboardMode") ? v("onboardMode") !== "off" : g.onboard,
+    onboard3d: v("onboardMode") ? v("onboardMode") === "3d" : g.onboard3d,
+    carQ: (v("carQ") || g.carQ) as "baixo" | "medio" | "alto",
     track3d: b("track3d"),
     cam3d: (v("cam3d") || g.cam3d) as Cam3d,
     podium3d: b("podium3d"),
@@ -539,14 +571,16 @@ function applyPreset(m: HTMLElement, k: keyof typeof PRESETS) {
 }
 
 /** Configurações: abas GRÁFICOS e SONS (outras seções entram aqui depois) */
-export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "sons" = "graficos") {
+export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "sons" | "tela" | "atalhos" = "graficos") {
   const m = document.createElement("div");
   m.className = "helpmodal";
   m.innerHTML = `<div class="helpbox panel profbox setbox">
       <div class="helphead"><b>⚙ CONFIGURAÇÕES</b><button class="btn small" data-x>✕</button></div>
-      <div class="seg settabs"><button data-tab="graficos" class="${tab === "graficos" ? "on" : ""}">GRÁFICOS</button><button data-tab="sons" class="${tab === "sons" ? "on" : ""}">SONS</button></div>
+      <div class="seg settabs"><button data-tab="graficos" class="${tab === "graficos" ? "on" : ""}">GRÁFICOS</button><button data-tab="sons" class="${tab === "sons" ? "on" : ""}">SONS</button><button data-tab="tela" class="${tab === "tela" ? "on" : ""}">TELA</button><button data-tab="atalhos" class="${tab === "atalhos" ? "on" : ""}">ATALHOS</button></div>
       <div class="setpane" data-pane="graficos" ${tab === "graficos" ? "" : "hidden"}>${gfxHtml()}<p class="hint">Algumas mudanças (como o modo dos carros) valem a partir da próxima corrida.</p></div>
       <div class="setpane" data-pane="sons" ${tab === "sons" ? "" : "hidden"}></div>
+      <div class="setpane" data-pane="tela" ${tab === "tela" ? "" : "hidden"}>${displayHtml()}</div>
+      <div class="setpane" data-pane="atalhos" ${tab === "atalhos" ? "" : "hidden"}>${keysHtml()}</div>
       <div class="row-btns" style="justify-content:flex-end;margin-top:14px"><button class="btn" data-x>CANCELAR</button><button class="btn primary" data-save>SALVAR</button></div>
     </div>`;
   document.body.appendChild(m);
@@ -555,11 +589,52 @@ export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "s
   const renderSnd = () => (snd.innerHTML = soundPanelHtml());
   renderSnd();
   bindSoundPanel(snd, renderSnd);
+  const tela = m.querySelector<HTMLElement>('[data-pane="tela"]')!;
+  tela.addEventListener("input", (e) => {
+    const r = e.target as HTMLInputElement, k = r.dataset.tela as keyof Display | undefined;
+    if (!k) return;
+    setDisplay({ [k]: Number(r.value) });
+    const o = tela.querySelector(`[data-telav="${k}"]`);
+    if (o) o.textContent = `${r.value}${k === "tom" ? "" : "%"}`;
+  });
+  tela.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest("[data-telareset]")) return;
+    setDisplay({ ...DISPLAY_DEF });
+    tela.innerHTML = displayHtml();
+  });
+  // atalhos: esperando a tecla nova de uma ação
+  const kp = m.querySelector<HTMLElement>('[data-pane="atalhos"]')!;
+  let waitKey: Action | null = null;
+  kp.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-keyreset]")) {
+      resetKeys();
+      waitKey = null;
+      kp.innerHTML = keysHtml();
+      return;
+    }
+    const b = t.closest<HTMLElement>("[data-key]");
+    if (!b) return;
+    waitKey = b.dataset.key as Action;
+    kp.innerHTML = keysHtml(waitKey);
+  });
   const close = () => {
     m.remove();
     window.removeEventListener("keydown", onKey, true);
   };
   const onKey = (e: KeyboardEvent) => {
+    if (waitKey) {
+      // (a tecla vai pro atalho e não faz mais nada: nem fecha a janela, nem muda a corrida)
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key !== "Escape" && !["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"].includes(e.code)) {
+        const other = setKey(waitKey, e.code);
+        if (other) toast(`A tecla ${keyName(waitKey)} era de "${ACTIONS.find((x) => x.id === other)!.label}": agora essa ficou com ${keyName(other)}`);
+      }
+      waitKey = null;
+      kp.innerHTML = keysHtml();
+      return;
+    }
     if (e.key === "Escape") {
       e.stopPropagation();
       close();
@@ -617,11 +692,39 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
         <div class="row-btns" style="margin:0"><button class="btn" data-x>CANCELAR</button><button class="btn primary" data-save>SALVAR</button></div>
       </div></div>`;
   document.body.appendChild(m);
+  // atalhos: esperando a tecla nova de uma ação
+  const kp = m.querySelector<HTMLElement>('[data-pane="atalhos"]')!;
+  let waitKey: Action | null = null;
+  kp.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-keyreset]")) {
+      resetKeys();
+      waitKey = null;
+      kp.innerHTML = keysHtml();
+      return;
+    }
+    const b = t.closest<HTMLElement>("[data-key]");
+    if (!b) return;
+    waitKey = b.dataset.key as Action;
+    kp.innerHTML = keysHtml(waitKey);
+  });
   const close = () => {
     m.remove();
     window.removeEventListener("keydown", onKey, true);
   };
   const onKey = (e: KeyboardEvent) => {
+    if (waitKey) {
+      // (a tecla vai pro atalho e não faz mais nada: nem fecha a janela, nem muda a corrida)
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key !== "Escape" && !["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"].includes(e.code)) {
+        const other = setKey(waitKey, e.code);
+        if (other) toast(`A tecla ${keyName(waitKey)} era de "${ACTIONS.find((x) => x.id === other)!.label}": agora essa ficou com ${keyName(other)}`);
+      }
+      waitKey = null;
+      kp.innerHTML = keysHtml();
+      return;
+    }
     if (e.key === "Escape") {
       e.stopPropagation();
       close();

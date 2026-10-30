@@ -27,9 +27,17 @@ export interface WeatherPlan {
   forecast: Forecast | null;
 }
 
+/** teste (?chuva): a corrida inteira com chuva forte */
+let forceRain = false;
+export const setForceRain = (on: boolean) => (forceRain = on);
+
 export function makeWeather(seed: number, laps: number, rainChance: number): WeatherPlan {
   const rng = new Rng(seed ^ 0x9e3779b9);
   const spells: RainSpell[] = [];
+  if (forceRain) {
+    spells.push({ start: -1, end: laps + 1, intensity: 0.85 });
+    return { spells, practiceWet: 0.6, qualiWet: 0.7, startWet: 0.85, forecast: { chance: 95, from: 1, to: laps, label: "chuva forte" } };
+  }
   const rains = rng.chance(rainChance);
   if (rains) {
     const n = rng.chance(0.3) ? 2 : 1;

@@ -1522,3 +1522,14 @@ body.inrace .helpbtns { display: none; }
 .driver .colstats { margin: 0; font-size: 10px; gap: 0 6px; }
 .driver .colstats b { font-size: 11px; }
 .driver { align-content: start; }
+.floatgear { position: fixed; left: 14px; bottom: 14px; z-index: 9500; width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1; opacity: .85; }
+.racecorner .floatgear { position: static; width: auto; height: auto; padding: inherit; font-size: inherit; line-height: inherit; opacity: 1; min-width: 34px; align-self: stretch; }
+.floatgear:hover { opacity: 1; }
+
+/* painel dos pilotos só com os nomes (tecla M): a linha de cima (posição, nome, frente/atrás) */
+.team.names .driver { display: block; width: 330px; padding: 6px 8px; }
+.team.names .driver > *:not(.top) { display: none !important; }
+.team.names .driver .top { margin: 0; }
+
+/* na corrida o aviso desce: em cima ficam os botões de velocidade */
+body.inrace .toast { top: 70px; }

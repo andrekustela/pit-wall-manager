@@ -3,10 +3,19 @@
 // com as cores da equipe. A pista continua 2D: a camada 3D é desenhada por cima dela, na mesma escala
 // e no mesmo enquadramento (câmera ortogonal olhando pra baixo). O Three.js só é baixado se o modo
 // "3D" estiver ligado.
-import { buildTrack3d } from "./track3d";
+import { gearOf } from "./gear";
+import { buildSafetyCar } from "./safetyCar";
+import { takeTrack3d } from "./track3d";
+import { samplePath, type PathKind } from "./paths3d";
+import type { PieceKind } from "./pieces";
+
+/** linhas e peças que são barreira de verdade (a corrida bate nelas) */
+const WALL_PATHS = new Set<PathKind>(["guardrail", "muro", "jersey", "pneus", "blocopneus", "alambrado"]);
+const WALL_PIECES = new Set<PieceKind>(["pneu", "blocopneus", "barreira", "guardrail", "muro", "jersey"]);
 import type { Track } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { updateLiveScreen } from "./liveScreen";
 import type { Terrain } from "./terrain";
 import type { Race } from "../sim/race";
@@ -42,11 +51,54 @@ export interface CarDraw {
   compound: Compound;
 }
 
-interface CarObj { root: THREE.Group; parts: Record<Part, THREE.Object3D>; key: string; spin: number; seen: number; tyre: string; covers: THREE.Mesh[]; rings: THREE.Mesh[] }
+interface CarObj {
+  root: THREE.Group;
+  parts: Record<Part, THREE.Object3D>;
+  key: string;
+  spin: number;
+  seen: number;
+  tyre: string;
+  covers: THREE.Mesh[];
+  rings: THREE.Mesh[];
+  /** volante e braços do piloto (giram com o esterço, em volta do centro do volante) e capacete (inclina) */
+  steer?: THREE.Object3D;
+  arms?: THREE.Object3D;
+  head?: THREE.Object3D;
+  /** peças do freio da frente que só esterçam (não giram) */
+  brakes?: THREE.Object3D[];
+  /** piloto com as poses do volante virado (art/export_carro_glb.py: morph "giro_mais" e "giro_menos") */
+  driver?: THREE.Mesh[];
+  /** telinha do volante: marcha e velocidade (só no carro detalhado da câmera piloto) */
+  screen?: { g: CanvasRenderingContext2D; tex: THREE.CanvasTexture; t: number };
+}
 
 let model: THREE.Group | null = null;
 let loading = false;
 let fit = 1;
+// versão detalhada (public/car3d/carro_hd.glb, art/export_carro_glb.py com PWM_HD=1): só o carro seguido
+// na câmera piloto, que fica a centímetros da câmera (o normal, simplificado pra 20 carros, ficava facetado)
+let modelHd: THREE.Group | null = null;
+let fitHd = 1;
+let loadingHd = false;
+function loadHd() {
+  if (loadingHd) return;
+  loadingHd = true;
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  loader
+    .loadAsync("/car3d/carro_hd.glb")
+    .then((g) => {
+      const box = new THREE.Box3().setFromObject(g.scene);
+      fitHd = SHOW_LEN / (box.max.z - box.min.z);
+      paintUV(g.scene, box);
+      modelHd = g.scene;
+    })
+    .catch(() => {
+      /* sem o arquivo: fica o normal */
+    });
+}
+/** capacete no carro montado (m): à frente do meio (+), altura do topo dele e do topo do carro (tomada de ar) */
+let helmet: { z: number; top: number; car: number } | null = null;
 
 function load() {
   if (loading) return;
@@ -54,7 +106,7 @@ function load() {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   loader
-    .loadAsync("/car3d/carro.glb")
+    .loadAsync(`/car3d/${{ baixo: "carro_lo", medio: "carro", alto: "carro_hd" }[gfx().carQ]}.glb`)
     .then((g) => {
       const box = new THREE.Box3().setFromObject(g.scene);
       fit = SHOW_LEN / (box.max.z - box.min.z);
@@ -67,7 +119,8 @@ function load() {
 }
 
 // desenho da pintura (faixas, xadrez...): projetado de cima na carroceria, igual ao do 2D estilizado
-const PAD = 0.15, TEX_PX = 64;
+// (128 px por metro: de perto, na câmera piloto, 64 ficava borrado)
+const PAD = 0.15, TEX_PX = 128;
 let paintBox = { cx: 0, cz: 0, L: 1, W: 1 };
 /** coordenadas de textura da carroceria pintada vindo de cima (frente = x da imagem, lado direito = y) */
 function paintUV(root: THREE.Object3D, box: THREE.Box3) {
@@ -119,6 +172,13 @@ function paintTexture(team: Team): THREE.CanvasTexture {
   return t;
 }
 
+/** tracinhos brancos da lateral do pneu (um material só pra todos) */
+let markM: THREE.MeshLambertMaterial | null = null;
+const markMat = () => (markM ??= new THREE.MeshLambertMaterial({ color: "#f2f2f2" }));
+/** recortes da tampa da roda */
+let slotM: THREE.MeshLambertMaterial | null = null;
+const slotMat = () => (slotM ??= new THREE.MeshLambertMaterial({ color: "#16181c" }));
+
 /** safety car e guindaste (public/props/*.glb, art/export_props_glb.py): frente pra +Z, centro no meio */
 export interface PropDraw {
   kind: "sc" | "crane";
@@ -134,6 +194,11 @@ const propAsked = new Set<string>();
 /** começa a baixar o objeto; true quando pronto */
 export function propReady(kind: PropDraw["kind"]): boolean {
   if (propModels.has(kind)) return true;
+  // safety car: o do jogo, montado aqui (src/render/safetyCar.ts); o .glb antigo não é mais usado
+  if (kind === "sc") {
+    propModels.set(kind, buildSafetyCar());
+    return true;
+  }
   if (!propAsked.has(kind)) {
     propAsked.add(kind);
     const loader = new GLTFLoader();
@@ -249,7 +314,7 @@ export class RealCars {
     const key = `${team.id}|${liveryKey(lv)}|${team.color}|${team.accent}`;
     let m = this.mats.get(key);
     if (!m) {
-      const colors: Record<string, string> = { pintura: lv?.base ?? team.color, asa: lv?.wing ?? lv?.accent ?? team.accent, capacete: lv?.helmet ?? team.accent };
+      const colors: Record<string, string> = { pintura: lv?.base ?? team.color, asa: lv?.wing ?? lv?.accent ?? team.accent, capacete: lv?.helmet ?? team.accent, macacao: lv?.suit ?? team.color };
       m = {};
       model!.traverse((o) => {
         const mesh = o as THREE.Mesh;
@@ -257,6 +322,8 @@ export class RealCars {
         for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
           if (m![mat.name]) continue;
           const c = (mat as THREE.MeshStandardMaterial).clone();
+          // (de perto, superfície muito lisa fazia o brilho do sol piscar: um pouco mais fosco)
+          if (c.roughness != null) c.roughness = Math.max(c.roughness, 0.5);
           if (c.name === "pintura") {
             // cor e desenho vêm da textura
             c.map = paintTexture(team);
@@ -271,18 +338,77 @@ export class RealCars {
     return { key, m };
   }
 
+  /** cópia do material que desenha os dois lados, e o de dentro (de trás) preto */
+  private backMats = new Map<THREE.Material, THREE.Material>();
+  private backBlack(m: THREE.Material): THREE.Material {
+    if (m.userData.backBlack) return m;
+    let b = this.backMats.get(m);
+    if (b) return b;
+    b = m.clone();
+    b.userData.backBlack = true;
+    b.side = THREE.DoubleSide;
+    b.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n  if (!gl_FrontFacing) gl_FragColor = vec4(0.015, 0.015, 0.02, 1.0);");
+    };
+    b.customProgramCacheKey = () => "costas-pretas";
+    this.backMats.set(m, b);
+    return b;
+  }
+
+  /** capacete de cada piloto: uma cor tirada do nome dele (fixa, sempre a mesma), longe da cor do carro */
+  private helmets = new Map<string, THREE.Material>();
+  private helmetMat(id: string, team: Team): THREE.Material {
+    let mt = this.helmets.get(id);
+    if (mt) return mt;
+    const base = this.teamMats(team).m.capacete as THREE.MeshStandardMaterial | undefined;
+    mt = base ? base.clone() : new THREE.MeshStandardMaterial({ roughness: 0.5 });
+    mt.name = "capacete";
+    // (paleta de capacete; pula as parecidas com a pintura do carro)
+    // (sem branco/prata: pareciam o capacete cinza de antes)
+    const pal = ["#f6d21a", "#e32222", "#1f5fbf", "#18b04f", "#f07a1a", "#8a2be2", "#ff6fa8", "#2ec4c4", "#111111", "#7fd0ff", "#c0392b", "#ffb300"];
+    let h = 2166136261;
+    for (const ch of id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+    const carCol = new THREE.Color(team.livery?.base ?? team.color);
+    let i = (h >>> 0) % pal.length;
+    for (let k = 0; k < pal.length; k++, i = (i + 1) % pal.length) {
+      const c = new THREE.Color(pal[i]);
+      if (Math.abs(c.r - carCol.r) + Math.abs(c.g - carCol.g) + Math.abs(c.b - carCol.b) > 0.6) break;
+    }
+    (mt as THREE.MeshStandardMaterial).color.set(pal[i]);
+    this.helmets.set(id, mt);
+    return mt;
+  }
+
+  /** carro seguido (a câmera piloto usa o modelo detalhado nele) */
+  followId = "";
+  /** safety car na pista (marchas no modo SC na telinha do volante) */
+  scMode = false;
+
   private carFor(d: CarDraw): CarObj {
-    let c = this.cars.get(d.id);
+    // (câmera piloto: o carro seguido vira o detalhado, guardado com outra chave; o normal some sozinho)
+    const hd = this.tilt?.kind === "piloto" && d.id === this.followId;
+    if (hd && !modelHd) loadHd();
+    const useHd = hd && !!modelHd;
+    const cid = useHd ? `${d.id}#hd` : d.id;
+    let c = this.cars.get(cid);
     const { key, m } = this.teamMats(d.team);
     if (!c) {
       const root = new THREE.Group();
-      const inner = model!.clone(true);
-      inner.scale.setScalar(fit);
+      const inner = (useHd ? modelHd! : model!).clone(true);
+      inner.scale.setScalar(useHd ? fitHd : fit);
       if (this.realShadow) inner.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = true) : null));
       // o modelo vem com o centro no meio do carro? centraliza pela caixa
       const box = new THREE.Box3().setFromObject(inner);
       inner.position.sub(box.getCenter(new THREE.Vector3()).setY(box.min.y));
       root.add(inner);
+      if (!helmet) {
+        root.updateMatrixWorld(true);
+        // (pelo nó do capacete, igual nos três modelos; pelo material pegava malhas que só têm um pedaço dele)
+        const hn = inner.getObjectByName("capacete");
+        const hb = hn ? new THREE.Box3().setFromObject(hn) : new THREE.Box3();
+        const cb = new THREE.Box3().setFromObject(inner);
+        helmet = hb.isEmpty() ? { z: -0.3, top: 0.95, car: 1.1 } : { z: hb.getCenter(new THREE.Vector3()).z, top: hb.max.y, car: cb.max.y };
+      }
       // sombra de contato (só nas câmeras inclinadas: lá o mapa de sombra cobre muito chão e a do carro sumia)
       const blob = new THREE.Mesh(blobGeo(), blobMat());
       blob.name = "blob";
@@ -300,8 +426,14 @@ export class RealCars {
         const part = parts[w];
         if (!part.parent) continue;
         // (o pivô fica direto no modelo: o nó da roda tem a escala da compressão e distorcia as contas)
-        const wb = new THREE.Box3().setFromObject(part);
-        const size = wb.getSize(new THREE.Vector3()).divideScalar(fit);
+        // (pelo pneu só: a roda leva junto o duto de freio, que tiraria o centro do eixo)
+        const wb = new THREE.Box3();
+        part.traverse((o) => {
+          const ms = o as THREE.Mesh;
+          if (ms.isMesh && (Array.isArray(ms.material) ? ms.material : [ms.material]).some((mt) => mt.name.includes("Tyre"))) wb.expandByObject(ms);
+        });
+        if (wb.isEmpty()) wb.setFromObject(part);
+        const size = wb.getSize(new THREE.Vector3()).divideScalar(useHd ? fitHd : fit);
         const pivot = new THREE.Object3D();
         inner.add(pivot);
         pivot.position.copy(inner.worldToLocal(wb.getCenter(new THREE.Vector3())));
@@ -309,12 +441,97 @@ export class RealCars {
         pivot.attach(part);
         parts[w] = pivot;
         // faixa colorida do composto na borda de fora do pneu (de cima a lateral não aparece)
-        const ring = new THREE.Mesh(new THREE.TorusGeometry((size.y / 2) * 0.78, 0.035, 6, 28));
+        const ringR = (size.y / 2) * 0.78;
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(ringR, 0.024, 6, 28));
         ring.rotation.y = Math.PI / 2;
         const out = w === "roda_fe" || w === "roda_te" ? 1 : -1; // (o lado esquerdo do carro é +X)
-        ring.position.set(out * Math.min(size.x / 2 + 0.01, 0.23), 0, 0);
+        // (rente à lateral do pneu, um tiquinho pra dentro: saindo pra fora parecia um aro solto)
+        ring.position.set(out * Math.min(size.x / 2 - 0.012, 0.21), 0, 0);
         pivot.add(ring);
         rings.push(ring);
+        // três tracinhos brancos na lateral (giram com a roda: liso, o pneu parecia parado; sem marca nenhuma)
+        const marks = new THREE.Mesh(mergeGeometries([0, 1, 2].map((k) => new THREE.BoxGeometry(0.008, 0.04, 0.15).translate(0, ringR * 0.86, 0).rotateX((k * 2 * Math.PI) / 3))), markMat());
+        marks.position.copy(ring.position);
+        pivot.add(marks);
+        // recortes escuros na tampa da roda (o disco liso girando parecia parado): 5 furos alongados, giram junto
+        const slots = new THREE.Mesh(mergeGeometries([0, 1, 2, 3, 4].map((k) => new THREE.BoxGeometry(0.006, 0.05, 0.022).translate(0, ringR * 0.5, 0).rotateX((k * 2 * Math.PI) / 5))), slotMat());
+        slots.position.set(out * Math.min(size.x / 2 - 0.004, 0.215), 0, 0);
+        pivot.add(slots);
+      }
+      // (a tampa preta da entrada de ar vem no modelo: peça "tampa", art/export_carro_glb.py)
+      // volante, braços e capacete: cada um num pivô (o nó do arquivo tem a escala da compressão);
+      // os braços giram em volta do centro do volante, junto com ele
+      const pivotOf = (o: THREE.Object3D | undefined, at?: THREE.Vector3) => {
+        if (!o) return undefined;
+        const pv = new THREE.Object3D();
+        inner.add(pv);
+        pv.position.copy(inner.worldToLocal((at ?? new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3())).clone()));
+        pv.updateMatrixWorld(true);
+        pv.attach(o);
+        return pv;
+      };
+      root.updateMatrixWorld(true);
+      const vol = inner.getObjectByName("volante");
+      const volC = vol ? new THREE.Box3().setFromObject(vol).getCenter(new THREE.Vector3()) : undefined;
+      const steer = pivotOf(vol), arms = pivotOf(inner.getObjectByName("bracos"), volC), head = pivotOf(inner.getObjectByName("capacete"));
+      // a tela do volante é peça própria: vai junto com o volante
+      const tel = inner.getObjectByName("telinha");
+      if (tel && steer) steer.attach(tel);
+      // piloto: as malhas com as poses do volante (os braços acompanham o volante misturando as poses)
+      const driver: THREE.Mesh[] = [];
+      // (piloto, volante e telinha têm as mesmas poses: misturadas juntas, a mão não atravessa o volante)
+      for (const n of ["piloto", "volante", "telinha"])
+        inner.getObjectByName(n)?.traverse((o) => {
+          const ms = o as THREE.Mesh;
+          if (ms.isMesh && ms.morphTargetDictionary && "giro_p3" in ms.morphTargetDictionary) driver.push(ms);
+        });
+      // telinha: no carro detalhado, um desenho que o jogo atualiza (coordenadas de textura pela caixa dela)
+      let screen: CarObj["screen"];
+      if (useHd && tel)
+        tel.traverse((o) => {
+          const ms = o as THREE.Mesh;
+          if (screen || !ms.isMesh || (ms.material as THREE.Material).name !== "telinha") return;
+          const g2 = ms.geometry, pos = g2.attributes.position;
+          // (a tela é um retângulo inclinado: o desenho vai pelo plano dela — horizontal pra direita do piloto,
+          // que no modelo é -X, e vertical pra cima —, cobrindo de canto a canto; pela caixa em volta distorcia)
+          const P = (i: number) => new THREE.Vector3().fromBufferAttribute(pos, i);
+          const n = new THREE.Vector3().subVectors(P(1), P(0)).cross(new THREE.Vector3().subVectors(P(2), P(0))).normalize();
+          const right = new THREE.Vector3(-1, 0, 0);
+          const h = right.clone().addScaledVector(n, -n.dot(right)).normalize();
+          const w = new THREE.Vector3().crossVectors(n, h);
+          if (w.y < 0) w.negate();
+          const us: number[] = [], vs: number[] = [];
+          for (let i = 0; i < pos.count; i++) {
+            const q = P(i);
+            us.push(q.dot(h));
+            vs.push(q.dot(w));
+          }
+          const u0 = Math.min(...us), u1 = Math.max(...us), v0 = Math.min(...vs), v1 = Math.max(...vs);
+          const uv = new Float32Array(pos.count * 2);
+          for (let i = 0; i < pos.count; i++) {
+            uv[i * 2] = (us[i] - u0) / Math.max(1e-6, u1 - u0);
+            uv[i * 2 + 1] = (vs[i] - v0) / Math.max(1e-6, v1 - v0);
+          }
+          g2.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+          const cv = document.createElement("canvas");
+          cv.width = 160;
+          cv.height = 80;
+          const tex = new THREE.CanvasTexture(cv);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          ms.material = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+          screen = { g: cv.getContext("2d")!, tex, t: 0 };
+        });
+      // freio da frente (proteção, aletas, dutos): pivô no centro da roda, só esterça junto com ela
+      const brakes: THREE.Object3D[] = [];
+      for (const [fn, rn] of [["freio_fe", "roda_fe"], ["freio_fd", "roda_fd"]] as const) {
+        const node = inner.getObjectByName(fn);
+        if (!node) continue;
+        const pv = new THREE.Object3D();
+        inner.add(pv);
+        pv.position.copy(parts[rn].position);
+        pv.updateMatrixWorld(true);
+        pv.attach(node);
+        brakes.push(pv);
       }
       // capas das rodas (pintadas com a cor do composto)
       const covers: THREE.Mesh[] = [];
@@ -323,9 +540,9 @@ export class RealCars {
           const mesh = o as THREE.Mesh;
           if (mesh.isMesh && (mesh.material as THREE.Material).name.includes("wheel_cover")) covers.push(mesh);
         });
-      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings };
+      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings, steer, arms, head, screen, driver, brakes };
       this.scene.add(root);
-      this.cars.set(d.id, c);
+      this.cars.set(cid, c);
     }
     if (c.key !== key) {
       c.root.traverse((o) => {
@@ -335,6 +552,23 @@ export class RealCars {
       });
       c.key = key;
       c.tyre = ""; // (a troca de materiais da equipe tira a cor do composto: refaz)
+      // capacete: cor de cada piloto (dois da mesma equipe não ficam iguais)
+      const hm = this.helmetMat(d.id, d.team);
+      // câmera piloto (carro detalhado): o lado de dentro das peças é desenhado preto (a câmera fica dentro
+      // da entrada de ar e enxergava através da parede)
+      // (carroceria desenhada dos dois lados, o de dentro escuro: a entrada de ar e os dutos mostram o interior
+      // em vez de ficarem vazados; no carro da câmera piloto, todas as peças)
+      const hd = cid.endsWith("#hd");
+      const shell = (n: string) => n === "pintura" || n === "asa" || n.startsWith("m_Carbon");
+      const swap = (x: THREE.Material) => {
+        const y = x.name === "capacete" ? hm : x;
+        return hd || shell(y.name) ? this.backBlack(y) : y;
+      };
+      c.root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+      });
     }
     return c;
   }
@@ -343,7 +577,7 @@ export class RealCars {
    * Desenha os carros na camada 3D e cola por cima do canvas 2D. `viewX/viewY` = canto de cima-esquerda
    * da tela em metros, `m` = px por metro (o mesmo enquadramento do 2D).
    */
-  private propObjs = new Map<string, { root: THREE.Object3D; seen: number; lights: THREE.Mesh[]; glow: THREE.PointLight | null }>();
+  private propObjs = new Map<string, { root: THREE.Object3D; seen: number; lights: THREE.Mesh[]; glow: THREE.PointLight | null; wheels?: THREE.Object3D[]; spin?: number; lx?: number; ly?: number }>();
 
   /** safety car e guindaste na mesma cena dos carros (sombra e luz de verdade) */
   private drawProps(list: PropDraw[]) {
@@ -378,12 +612,23 @@ export class RealCars {
           glow.position.set(0, 1.7, 0.25);
           root.add(glow);
         }
-        p = { root, seen: 0, lights, glow };
+        // rodas que giram (safety car): grupos roda_*
+        const wheels: THREE.Object3D[] = [];
+        root.traverse((x) => x.name.startsWith("roda_") && wheels.push(x));
+        p = { root, seen: 0, lights, glow, wheels, spin: 0, lx: d.x, ly: d.y };
         this.scene.add(root);
         this.propObjs.set(d.id, p);
       }
       p.seen = this.frame;
       p.root.visible = true;
+      // rodas: giram pelo quanto andou desde o quadro anterior (raio 0,34 m)
+      if (p.wheels?.length) {
+        const dist = Math.hypot(d.x - (p.lx ?? d.x), d.y - (p.ly ?? d.y));
+        if (dist < 20) p.spin = (p.spin ?? 0) + dist / 0.34;
+        p.lx = d.x;
+        p.ly = d.y;
+        for (const w of p.wheels) w.rotation.x = p.spin ?? 0;
+      }
       p.root.position.set(d.x, this.groundY + this.hAt(d.x, d.y), d.y);
       p.root.rotation.y = Math.PI / 2 - d.h;
       if (d.kind === "sc") {
@@ -409,7 +654,7 @@ export class RealCars {
   private trackLoading = "";
 
   /** câmera inclinada (protótipo, `?camera=tv`): atrás e acima deste ponto, olhando pra frente dele */
-  tilt: { x: number; y: number; h: number; iso?: boolean; span?: number; yaw?: number; kind?: "iso" | "tv" | "cima" } | null = null;
+  tilt: { x: number; y: number; h: number; iso?: boolean; span?: number; yaw?: number; kind?: "iso" | "tv" | "cima" | "piloto" } | null = null;
   // troca de câmera: desliza da pose de antes até a nova (de cima vira uma câmera olhando reto pra baixo)
   private lastKind: string | null = null;
   /** câmera de trás: direção amortecida e o relógio de verdade */
@@ -425,6 +670,71 @@ export class RealCars {
   private groundY = 0;
   /** relevo do autódromo (null: plano) */
   private terrain: Terrain | null = null;
+  // ---- câmera onboard 3D: a cena vista do olho do piloto, numa imagem pequena (lida da placa de vídeo) ----
+  private obTarget: THREE.WebGLRenderTarget | null = null;
+  private obCam = new THREE.PerspectiveCamera(52, 16 / 9, 0.3, 1600);
+  private obCache = new Map<string, { cv: HTMLCanvasElement; t: number }>();
+  private obBuf: Uint8Array | null = null;
+
+  /** desenha a vista de dentro do carro `id` (em x, y olhando pra h) em g; false se o autódromo não está pronto */
+  drawOnboard(g: CanvasRenderingContext2D, W: number, H: number, id: string, x: number, y: number, h: number): boolean {
+    if (!this.trackGroup || !this.trackScene) return false;
+    const now = performance.now();
+    let c = this.obCache.get(id);
+    if (!c) this.obCache.set(id, (c = { cv: document.createElement("canvas"), t: 0 }));
+    // (umas 20 vezes por segundo: no meio, repete a última imagem)
+    if (now - c.t > 48) {
+      c.t = now;
+      // (tela cheia: imagem maior; nos cards, pequena e leve)
+      const w = Math.min(W > 700 ? 1100 : 480, Math.round(W)), hh = Math.max(1, Math.round((w * H) / W));
+      if (!this.obTarget || this.obTarget.width !== w || this.obTarget.height !== hh) {
+        this.obTarget?.dispose();
+        this.obTarget = new THREE.WebGLRenderTarget(w, hh, { samples: 0 });
+        this.obTarget.texture.colorSpace = THREE.SRGBColorSpace;
+        this.obBuf = new Uint8Array(w * hh * 4);
+      }
+      const cam = this.obCam, fx = Math.cos(h), fz = Math.sin(h), gh = this.hAt(x, y);
+      cam.aspect = w / hh;
+      cam.updateProjectionMatrix();
+      cam.position.set(x + fx * 0.3, gh + 1.0, y + fz * 0.3);
+      cam.lookAt(x + fx * 30, this.hAt(x + fx * 30, y + fz * 30) + 0.7, y + fz * 30);
+      // o próprio carro some (a câmera está dentro dele); céu e neblina só nesta foto
+      const me = this.cars.get(id)?.root ?? this.cars.get(`${id}#hd`)?.root, wasVis = me?.visible ?? false;
+      if (me) me.visible = false;
+      const r = this.renderer, tilt = this.trackGroup.parent === this.scene;
+      const first = tilt ? this.scene : this.trackScene;
+      const bg = first.background, fog = first.fog, sky = new THREE.Color("#74c6f2");
+      first.background = sky;
+      first.fog = new THREE.Fog(sky, 250, 1400);
+      r.setRenderTarget(this.obTarget);
+      r.clear();
+      r.render(first, cam);
+      if (!tilt) {
+        const ac = r.autoClear;
+        r.autoClear = false;
+        r.render(this.scene, cam);
+        r.autoClear = ac;
+      }
+      r.readRenderTargetPixels(this.obTarget, 0, 0, w, hh, this.obBuf!);
+      r.setRenderTarget(null);
+      first.background = bg;
+      first.fog = fog;
+      if (me) me.visible = wasVis;
+      // (a placa de vídeo entrega de baixo pra cima: vira)
+      if (c.cv.width !== w || c.cv.height !== hh) {
+        c.cv.width = w;
+        c.cv.height = hh;
+      }
+      const img = new ImageData(w, hh), row = w * 4;
+      for (let j = 0; j < hh; j++) img.data.set(this.obBuf!.subarray((hh - 1 - j) * row, (hh - j) * row), j * row);
+      c.cv.getContext("2d")!.putImageData(img, 0, 0);
+    }
+    g.drawImage(c.cv, 0, 0, W, H);
+    return true;
+  }
+
+  /** barreiras do autódromo montado (pontos a cada ~1 m), pra corrida bater nelas (Race.setWalls) */
+  wallPts: [number, number][] | null = null;
   private hAt = (x: number, z: number) => (this.terrain ? this.terrain.heightAt(x, z) : 0);
   private projW = 0;
   private projH = 0;
@@ -460,7 +770,7 @@ export class RealCars {
     if (this.trackFor !== track.name) {
       if (this.trackLoading !== track.name) {
         this.trackLoading = track.name;
-        void buildTrack3d(track, this.realShadow).then((res) => {
+        void takeTrack3d(track, this.realShadow).then((res) => {
           this.terrain = res.relief ? res.terrain : null;
           if (!res) return;
           const { group, tris, real } = res;
@@ -480,6 +790,15 @@ export class RealCars {
           this.trackScene = sc;
           this.trackSun = sun;
           this.trackFor = track.name;
+          // barreiras: as linhas (amostradas a cada 1 m) e as peças (o meio e as pontas, ~4 m)
+          const wp: [number, number][] = [];
+          for (const it of res.paths.items) if (WALL_PATHS.has(it.t)) wp.push(...samplePath(it, 1));
+          for (const p of res.layer.pieces)
+            if (WALL_PIECES.has(p.k)) {
+              const h = 2 * (p.s ?? 1), cx = Math.cos(p.r) * h, cz = -Math.sin(p.r) * h;
+              wp.push([p.x, p.z], [p.x + cx, p.z + cz], [p.x - cx, p.z - cz]);
+            }
+          this.wallPts = wp;
           console.info(`pista 3D: ${track.name}, ${tris.toLocaleString("pt-BR")} triângulos${real ? ", com o entorno real" : ""}`);
           (window as unknown as { __pista3d: unknown }).__pista3d = { tris, real };
         });
@@ -555,7 +874,12 @@ export class RealCars {
     cam.lookAt(cx, 0, cz);
     if (this.shadowFloor) {
       // sombra só na parte da pista que aparece (o mapa de sombra cobre a tela; inclinada: em volta do carro)
-      const sh = tf ? (tf.iso ? Math.max(90, (tf.span ?? 100) * 0.95) : 90) : Math.max(hw, hh);
+      // (câmera piloto: o carro fica a centímetros; sombra em 40 m em volta, 2x mais nítida que os 90 da de trás)
+      const pil = tf?.kind === "piloto";
+      const sh = tf ? (tf.iso ? Math.max(90, (tf.span ?? 100) * 0.95) : pil ? 40 : 90) : Math.max(hw, hh);
+      // (de perto a sombra se desenhava na própria carroceria em listras: afasta mais da superfície)
+      this.sun.shadow.normalBias = pil ? 0.045 : 0.02;
+      this.sun.shadow.bias = pil ? -0.0012 : -0.0005;
       // (inclinada: o chão do autódromo já recebe a sombra; o chão de sombra por cima escurecia um quadrado)
       this.shadowFloor.visible = !tf;
       this.shadowFloor.position.set(cx, 0.01, cz);
@@ -617,6 +941,51 @@ export class RealCars {
         p.rotation.y = i < 2 ? -L.steer : 0;
         p.rotation.x = c.spin;
       });
+      for (const b of c.brakes ?? []) b.rotation.y = -L.steer;
+      // volante: umas 4x o ângulo das rodas (direção de F1, ~1 volta de batente a batente); braços junto;
+      // capacete inclina um tiquinho pra dentro da curva
+      // (2,5x o ângulo das rodas: mais que isso as mãos descolavam no punho)
+      // (teste: window.__volante força o esterço, pra conferir volante e braços parados numa foto)
+      const stv = (window as unknown as { __volante?: number }).__volante ?? L.steer;
+      // (com as poses, o volante gira pelas poses; sem elas — modelo antigo — gira o pivô)
+      if (c.steer && !c.driver?.length) c.steer.rotation.z = stv * 2.5;
+      if (c.arms && !c.driver?.length) c.arms.rotation.z = stv * 2.5;
+      // (o capacete do arquivo vem inclinado pra trás, olhando pro céu: 22° pra frente deixa a viseira reta)
+      if (c.head) {
+        c.head.rotation.order = "ZXY";
+        c.head.rotation.x = 0.384;
+        c.head.rotation.z = L.steer * 0.35;
+      }
+      // braços: a pose do volante virado pro lado certo, na medida do giro (as poses são de 50°)
+      if (c.driver?.length) {
+        const sw = stv * 2.5, GIRO = (50 * Math.PI) / 180;
+        for (const ms of c.driver) {
+          const d2 = ms.morphTargetDictionary!, inf = ms.morphTargetInfluences!;
+          // (no Blender o volante gira em +Y; no jogo isso é -Z: "giro_mais" = volante virado pro lado negativo)
+          // (poses a cada 1/3 do giro, pra cada lado: mistura só as duas vizinhas; "p" = volante pro lado negativo)
+          const f = Math.min(3, (Math.abs(sw) / GIRO) * 3), lado = sw < 0 ? "p" : "m";
+          for (const sd of ["p", "m"]) for (let i = 1; i <= 3; i++) inf[d2[`giro_${sd}${i}`]] = sd !== lado ? 0 : Math.max(0, 1 - Math.abs(f - i));
+        }
+      }
+      // telinha: marcha e velocidade (10 vezes por segundo)
+      if (c.screen && performance.now() - c.screen.t > 100) {
+        const sc2 = c.screen, g = sc2.g, kmh = Math.round(d.v * 3.6);
+        sc2.t = performance.now();
+        const { gear } = gearOf(d.id, kmh, this.scMode);
+        g.fillStyle = "#06090f";
+        g.fillRect(0, 0, 160, 80);
+        g.textAlign = "center";
+        g.fillStyle = "#ffffff";
+        g.font = "800 54px 'Titillium Web', sans-serif";
+        g.fillText(gear, 44, 62);
+        g.fillStyle = "#7fd0ff";
+        g.font = "700 34px 'Titillium Web', sans-serif";
+        g.fillText(String(kmh), 116, 50);
+        g.font = "600 13px sans-serif";
+        g.fillStyle = "#9aa3ab";
+        g.fillText("KM/H", 116, 68);
+        sc2.tex.needsUpdate = true;
+      }
     }
     // quem não apareceu neste quadro some (fora da tela, na garagem)
     for (const [id, c] of this.cars) {
@@ -639,9 +1008,26 @@ export class RealCars {
       const now = performance.now();
       const rdt = Math.min(0.1, (now - (this.lastNow || now)) / 1000);
       this.lastNow = now;
-      if (kind !== "tv") this.tvH = null;
+      if (kind !== "tv" && kind !== "piloto") this.tvH = null;
       const ISO_FOV = 34, span = tf.span ?? 100;
       const pose = (k: string) => {
+        if (k === "piloto") {
+          // em cima e um pouco atrás da cabeça do piloto, presa no carro (vê o halo, o bico e as rodas da
+          // frente); a direção só um tiquinho amortecida pra não tremer com cada correção de volante
+          if (this.tvH == null) this.tvH = tf.h;
+          let dh = tf.h - this.tvH;
+          dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+          this.tvH += dh * Math.min(1, rdt * 14);
+          // (botão direito vira a câmera em volta do carro)
+          const a = this.tvH + (tf.yaw ?? 0);
+          const fx = Math.cos(a), fz = Math.sin(a), gh = this.hAt(tf.x, tf.y);
+          // (como a câmera de verdade: em cima da tomada de ar, logo atrás e acima do capacete, que aparece
+          // embaixo no meio; o halo, o bico e as rodas da frente na frente)
+          const hz = helmet?.z ?? -0.3;
+          // (colada atrás e acima do capacete, pela altura dele; o corte de perto da câmera é 0,15 m)
+          const back = hz - 0.15;
+          return { pos: new THREE.Vector3(tf.x + fx * back, gh + (helmet?.top ?? 0.95) + 0.35, tf.y + fz * back), look: new THREE.Vector3(tf.x + fx * 6, gh - 1.2, tf.y + fz * 6), fov: 70 };
+        }
         if (k === "tv") {
           // atrás e acima do carro, olhando um pouco à frente dele. A direção é amortecida (a do carro balança
           // a cada correção de volante e a câmera ia e voltava pros lados), e no tempo real (não no do jogo)
@@ -681,7 +1067,11 @@ export class RealCars {
       this.projW = W;
       this.projH = H;
       p.fov = cp.fov;
-      p.far = Math.max(3000, cp.pos.y * 4);
+      // (câmera piloto: o carro está a centímetros; nas outras, corte em 1,5 m pra a pintura do asfalto não serrilhar)
+      // (perto demais com a distância longe dá briga de profundidade no carro: 0,3 a 1600 m na piloto)
+      const pil = kind === "piloto" && !this.trans;
+      p.near = pil ? 0.15 : 1.5;
+      p.far = pil ? 1600 : Math.max(3000, cp.pos.y * 4);
       p.updateProjectionMatrix();
       p.position.copy(cp.pos);
       p.lookAt(cp.look);
@@ -690,7 +1080,8 @@ export class RealCars {
       if (fog) {
         const dist = cp.pos.distanceTo(cp.look);
         fog.near = Math.max(300, dist * 1.1);
-        fog.far = Math.max(1800, dist * 6);
+        // (a borda do mapa, a ~480 m da pista, some no céu em vez de aparecer cortada)
+        fog.far = Math.max(1100, dist * 5);
       }
       r.render(this.scene, p);
     } else {

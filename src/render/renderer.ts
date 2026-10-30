@@ -1,4 +1,5 @@
 import { LV_AMOUNT, gfx, setGfx, type Cam3d } from "./gfx";
+import { gearOf } from "./gear";
 import { BakedWorld, mapSlug } from "./bakedWorld";
 import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
@@ -6,6 +7,7 @@ import type { Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
 import { CarFx } from "./carFx";
+import { OnboardCam } from "./onboard";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH, angDiff } from "../sim/track";
 
@@ -19,24 +21,24 @@ let realCarsReadyFn: (() => boolean) | null = null;
 /** teste: `?camera=tv` (atrás do carro) ou `?camera=iso` (de lado) começa a corrida nessa câmera */
 const TILT_CAM = typeof location !== "undefined" && new URLSearchParams(location.search).get("camera");
 /** câmera inclinada agora: a do link (?camera=) manda; senão a das configurações (só no modo 3D) */
-function tiltMode(): "tv" | "iso" | null {
-  // (o link só vale pra começar: trocou a câmera nas configurações ou na tecla V, vale a escolhida)
+function tiltMode(): "tv" | "iso" | "piloto" | null {
+  // (o link só vale pra começar: trocou a câmera nas configurações ou nas teclas F1-F4, vale a escolhida)
   // (carros 2D ou 2D estilizado: só a de cima)
   if (car3dPref.style !== "real") return null;
   if (urlCam && gfx().cam3d === camAtStart) return urlCam;
   const c = gfx().cam3d;
-  return c === "lado" ? "iso" : c === "tras" ? "tv" : null;
+  return c === "lado" ? "iso" : c === "tras" ? "tv" : c === "piloto" ? "piloto" : null;
 }
 /** "tv" (atrás do carro) ou "iso" (de lado e de cima) */
-const TILT_URL = TILT_CAM === "tv" || TILT_CAM === "iso" ? TILT_CAM : null;
+const TILT_URL = TILT_CAM === "tv" || TILT_CAM === "iso" || TILT_CAM === "piloto" ? TILT_CAM : null;
 const camAtStart = gfx().cam3d;
-let urlCam: "tv" | "iso" | null = TILT_URL;
+let urlCam: "tv" | "iso" | "piloto" | null = TILT_URL;
 /** a câmera do 3D que está valendo agora */
 export function currentCam3d(): Cam3d {
   const t = tiltMode();
-  return t === "iso" ? "lado" : t === "tv" ? "tras" : "cima";
+  return t === "iso" ? "lado" : t === "tv" ? "tras" : t === "piloto" ? "piloto" : "cima";
 }
-/** troca a câmera do 3D (a tecla V): passa a valer a escolhida, mesmo vindo do link */
+/** troca a câmera do 3D (teclas F1-F4): passa a valer a escolhida, mesmo vindo do link */
 export function setCam3d(c: Cam3d) {
   urlCam = null;
   setGfx({ cam3d: c });
@@ -67,7 +69,9 @@ export class Renderer {
     return this.world.ready;
   }
   private cam = { x: 0, y: 0, ready: false };
-  private drops: { x: number; y: number; l: number }[] = [];
+  private drops: { x: number; y: number; l: number; v: number; z: number }[] = [];
+  /** rajada de vento da chuva (muda o ângulo aos poucos) */
+  private gust = 0;
   private screenPos = new Map<string, { x: number; y: number }>();
   private dpr = 1;
   private zoom = 0;
@@ -86,18 +90,22 @@ export class Renderer {
     canvas.style.imageRendering = "auto";
     this.world = new WorldTiles(race.opts.trackIndex);
     this.followId = followId;
-    // câmera de lado: arrastar com o botão direito gira em volta do carro
+    // câmera de lado e câmera piloto: arrastar com o botão direito gira em volta do carro
     {
       let dragX: number | null = null;
+      const turns = () => tiltMode() === "iso" || tiltMode() === "piloto";
       canvas.addEventListener("contextmenu", (e) => {
-        if (tiltMode() === "iso") e.preventDefault();
+        if (turns()) e.preventDefault();
       });
       canvas.addEventListener("pointerdown", (e) => {
-        if (e.button === 2 && tiltMode() === "iso") dragX = e.clientX;
+        if (e.button === 2 && turns()) dragX = e.clientX;
+        // (câmera piloto: clique esquerdo volta pra frente)
+        if (e.button === 0 && tiltMode() === "piloto") this.pilotYaw = 0;
       });
       window.addEventListener("pointermove", (e) => {
         if (dragX === null) return;
-        this.isoYaw -= (e.clientX - dragX) * 0.008;
+        if (tiltMode() === "piloto") this.pilotYaw -= (e.clientX - dragX) * 0.006;
+        else this.isoYaw -= (e.clientX - dragX) * 0.008;
         dragX = e.clientX;
       });
       window.addEventListener("pointerup", () => (dragX = null));
@@ -261,6 +269,11 @@ export class Renderer {
   private lookSeen = new Map<string, CarLook>();
   /** rodada, batida, fumaça, poeira, faíscas, marcas de pneu, tremor */
   private fx = new CarFx();
+  private wallsFor = "";
+  /** lateral desenhada (suavizada) e quanto o carro tinha andado, por carro */
+  private latSm = new Map<string, { lat: number; d: number }>();
+  /** câmera piloto: quanto ela está virada (botão direito; volta pra frente ao trocar de câmera) */
+  private pilotYaw = 0;
   /** pedaços de asa voando / caídos na pista (metros do mundo) */
   private debris: { img: CarImage; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
@@ -277,7 +290,8 @@ export class Renderer {
   draw(realDt: number, speed: number) {
     // voltando pra câmera de cima: a cena 3D continua até a câmera terminar de deslizar
     const want = tiltMode();
-    const TILT: "tv" | "iso" | "cima" | null = want ?? (car3dPref.style === "real" && (this.wasTilt || this.real3d?.transitioning()) ? "cima" : null);
+    if (want !== "piloto") this.pilotYaw = 0;
+    const TILT: "tv" | "iso" | "piloto" | "cima" | null = want ?? (car3dPref.style === "real" && (this.wasTilt || this.real3d?.transitioning()) ? "cima" : null);
     this.wasTilt = !!want;
     const race = this.race;
     const L = race.track.L;
@@ -291,20 +305,24 @@ export class Renderer {
     for (const c of race.cars) {
       const smp = this.sample(this.hist.get(c.id), rt);
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
-      const lat = smp ? smp.lat : c.lateral;
+      // troca de faixa em curva de S, não em linha reta: a lateral desenhada persegue a da simulação com
+      // atraso curto (a simulação muda a velocidade lateral de uma vez, e o carro "escorregava" de lado).
+      // Pulo grande (box, batida, volta pra pista) ou carro rodando: vai direto
+      const latSim = smp ? smp.lat : c.lateral;
+      const ls = this.latSm.get(c.id);
+      let lat = latSim;
+      if (ls && c.spin <= 0 && !c.recover && Math.abs(latSim - ls.lat) < 4) lat = ls.lat + (latSim - ls.lat) * (1 - Math.exp(-Math.max(0, realDt) * Math.max(1, speed) / 0.16));
       const q = this.px(s, lat);
       // o bico aponta pra onde o carro está indo (seguindo o traçado ele atravessa a pista: com o ângulo
       // da linha do meio parecia drift). Direção = corda entre a posição de um instante atrás e a de
       // agora, mais metade do quanto a pista girou nesse trecho (a corda de um arco aponta pro meio
       // dele). Funciona igual em grampo, por dentro ou por fora
-      const prev = smp && this.sample(this.hist.get(c.id), rt - 0.1);
+      // (bico: inclinação da lateral suavizada em relação ao quanto andou; não passa de 35° do rumo da pista)
+      const dD = smp && ls ? smp.d - ls.d : 0;
       let off = 0;
-      if (smp && prev && c.spin <= 0 && smp.d - prev.d > 0.8) {
-        const p0 = this.px(((prev.d % L) + L) % L, prev.lat);
-        const chord = Math.atan2(q.y - p0.y, q.x - p0.x);
-        // não deixa passar de 35° do rumo da pista (amostra ruim, pit, batida)
-        off = Math.max(-0.6, Math.min(0.6, angDiff(q.h, chord + angDiff(p0.h, q.h) / 2)));
-      }
+      if (ls && c.spin <= 0 && dD > 0.05 && dD < 30) off = Math.max(-0.6, Math.min(0.6, Math.atan2(lat - ls.lat, dD)));
+      else if (ls && c.spin <= 0 && dD <= 0.05) off = this.yawOff.get(c.id) ?? 0;
+      this.latSm.set(c.id, { lat, d: smp ? smp.d : c.s });
       // carro de verdade não gira de uma vez: quando ele muda de lado de repente (começa a ultrapassar,
       // desvia), o bico acompanha em ~0,06 s em vez de pular
       const was = this.yawOff.get(c.id) ?? off;
@@ -351,6 +369,13 @@ export class Renderer {
     if (TILT) this.usedTilt = true;
     const real3 = car3dPref.style === "real" && (gfx().track3d || TILT || this.usedTilt) ? this.realCars() : null;
     let drew3d = false;
+    // onboard em 3D de verdade quando o autódromo 3D está pronto (senão, o desenho de sempre)
+    OnboardCam.world3d = real3?.wallPts && gfx().onboard3d ? (g, W, H, id, x, y, h) => real3.drawOnboard(g, W, H, id, x, y, h) : null;
+    // a corrida bate nas barreiras do autódromo 3D (quando ele fica pronto)
+    if (real3?.wallPts && this.wallsFor !== race.track.name) {
+      this.wallsFor = race.track.name;
+      race.setWalls(real3.wallPts);
+    }
     // câmera inclinada (protótipo): a cena 3D cobre tudo, a pista 2D nem é desenhada
     if (real3 && TILT && real3.ensureTrack(race.track)) drew3d = true;
     else if (real3) {
@@ -412,12 +437,12 @@ export class Renderer {
       }
     };
     this.fx.step(dt);
-    const under = (cv: typeof toCss, mm: number) => {
+    const under = (cv: typeof toCss, mm: number, soft = 1, scaleAt?: (x: number, y: number) => number, skipNear?: { x: number; y: number } | null) => {
       drawDebris(cv, mm);
       this.fx.drawGround(o, cv, mm);
-      this.mistStep(o, dt, cv, mm);
+      this.mistStep(o, dt, cv, mm, scaleAt, skipNear);
       // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
-      this.fx.drawAir(o, cv, mm, true);
+      this.fx.drawAir(o, cv, mm, true, soft);
     };
     if (!tiltOn) under(toCss, m);
     // 3D de verdade: os carros vão pra camada do Three.js (desenhada de uma vez depois do laço)
@@ -511,7 +536,9 @@ export class Renderer {
     if (real) {
       // câmera inclinada: segue o carro seguido (ou o safety car)
       const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
-      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: "tv" as const } : null;
+      real.followId = this.followId;
+      real.scMode = race.sc.active;
+      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" && TILT !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: TILT, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw } : null;
       real.liveScreen(race);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
     }
@@ -524,8 +551,12 @@ export class Renderer {
       }
       cvAir = (q) => real.project(q.x, q.y);
       const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
-      mAir = fp ? real.scaleAt(fp.x, fp.y) : m;
-      under(cvAir, mAir);
+      // (câmera piloto: o carro está colado na câmera; o tamanho dos efeitos é o de 15 m à frente, senão
+      // faísca e spray cobriam a tela)
+      const pil = TILT === "piloto" && fp;
+      mAir = fp ? (pil ? real.scaleAt(fp.x + Math.cos(fp.h) * 15, fp.y + Math.sin(fp.h) * 15) : real.scaleAt(fp.x, fp.y)) : m;
+      // (câmeras 3D: faísca fina e brilho pequeno, senão parecia o motor explodindo)
+      under(cvAir, mAir, pil ? 0.2 : 0.35, (x, y) => real.scaleAt(x, y), pil ? fp : null);
       for (const f of later) f(cvAir, mAir);
       for (const id of [...this.screenPos.keys()]) {
         const q = id === "SC" ? scPos : pos.get(id);
@@ -566,12 +597,37 @@ export class Renderer {
       if (!sp) continue;
       const mine = c.isHuman;
       if (!mine && c.id !== this.followId) continue;
+      // (câmera piloto: a etiqueta do próprio carro ficaria em cima da câmera)
+      if (c.id === this.followId && tiltMode() === "piloto") continue;
       const eng = this.showEngineers && c.isHuman ? ` (${race.engineers[c.team.id]?.name ?? ""})` : "";
       const txt = (c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`) + eng;
       this.label(o, sp.x, sp.y - lift, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
     }
 
-    if (race.rain > 0) this.drawRain(o, W, H, realDt, race.rain);
+    if (race.rain > 0) {
+      const fcr = race.cars.find((c) => c.id === this.followId);
+      // (de cima cai pro chão, de lado desce a tela, de trás e piloto vem na direção da câmera)
+      // (câmera piloto virada pra trás: a chuva não vem mais na direção da câmera, só cai)
+      const back = TILT === "piloto" && Math.cos(((window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw)) < 0;
+      const rm = (TILT === "tv" || TILT === "piloto") && !back ? "fwd" : TILT === "iso" || back ? "iso" : "top";
+      this.drawRain(o, W, H, realDt, race.rain, rm, fcr ? fcr.v * 3.6 : 0);
+    }
+    // câmeras 3D: gotas na lente (aparecem, umas escorrem, secam); some aos poucos quando a chuva para
+    if (TILT && TILT !== "cima") {
+      const fc = race.cars.find((c) => c.id === this.followId);
+      // (pausado: as gotas param; acelerado: andam no tempo real, não 16x)
+      // (o vento só joga as gotas pras bordas olhando pra frente)
+      const look = TILT === "piloto" ? Math.max(0, Math.cos(((window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw))) : 1;
+      this.drawLens(o, W, H, speed > 0 ? realDt : 0, race.rain, fc ? fc.v * 3.6 * look : 0, real3?.canvas);
+    } else {
+      this.lens.length = 0;
+      this.rivulets.length = 0;
+    }
+    // câmera piloto: velocímetro do carro seguido
+    if (TILT === "piloto" && real3) {
+      const fc = race.cars.find((c) => c.id === this.followId);
+      if (fc) this.drawGauge(o, fc, H, realDt);
+    }
     if (race.phase === "lights") this.drawLights(o, W);
   }
 
@@ -597,7 +653,10 @@ export class Renderer {
       // ângulo proporcional: raio 300 m ≈ 5°, 100 m ≈ 14°, grampo = batente (exagerado de propósito pra ler de cima)
       let k = 0;
       for (const d of [2, 5, 8, 11]) k += tr.curvature[Math.floor(tr.wrap(c.s + d)) % tr.L] ?? 0;
-      target = Math.max(-0.5, Math.min(0.5, (0.45 * (k / 4) + 0.55 * kPath) * 25));
+      // (nas câmeras 3D de lado e de trás o exagero lia errado: lá o ângulo fica perto do de verdade, batente ~20°)
+      // (carros 3D: ângulo real em todas as câmeras; o exagero era pros carros 2D vistos de cima)
+      const tilt = !!tiltMode() || car3dPref.style === "real", gain = tilt ? 8 : 25, cap = tilt ? 0.24 : 0.5;
+      target = Math.max(-cap, Math.min(cap, (0.45 * (k / 4) + 0.55 * kPath) * gain));
     }
     // suave: o volante não pula de uma posição pra outra
     const now = performance.now();
@@ -642,6 +701,77 @@ export class Renderer {
     o.rotate(h);
     o.globalAlpha = alpha;
     o.drawImage(img.canvas, (-img.wM / 2) * m, (-img.hM / 2) * m, img.wM * m, img.hM * m);
+    o.restore();
+  }
+
+  /** acelerador e freio do velocímetro (de quanto a velocidade sobe ou desce), suavizados */
+  private ped = { v: 0, thr: 0, brk: 0 };
+  /** velocímetro da câmera piloto (desenho do jogo): anel da velocidade com marcas, marcha no meio, giro em
+   * cima e as barras de acelerador (verde) e freio (vermelho) do lado */
+  private drawGauge(o: CanvasRenderingContext2D, car: Race["cars"][number], H: number, dt: number) {
+    const p = this.ped, kmh = Math.max(0, car.v * 3.6);
+    if (dt > 0) {
+      const acc = (car.v - p.v) / dt;
+      p.thr += ((acc > 0.4 ? 1 : acc > -1 ? 0.35 : 0) - p.thr) * Math.min(1, dt * 8);
+      p.brk += ((acc < -6 ? 1 : acc < -2 ? 0.5 : 0) - p.brk) * Math.min(1, dt * 10);
+      p.v = car.v;
+    }
+    const { gear, rev } = gearOf(car.id, kmh, this.race.sc.active);
+    const r = Math.max(52, Math.min(80, H * 0.075)), cx = 28 + r, cy = H - 92 - r;
+    const a0 = Math.PI * 0.8, a1 = Math.PI * 2.2, at = (f: number) => a0 + (a1 - a0) * Math.max(0, Math.min(1, f));
+    o.save();
+    // fundo
+    o.fillStyle = "rgba(10,14,22,.78)";
+    o.beginPath();
+    o.arc(cx, cy, r + 8, 0, Math.PI * 2);
+    o.fill();
+    // marcas a cada 20 km/h (0 a 360)
+    o.strokeStyle = "rgba(255,255,255,.55)";
+    for (let k = 0; k <= 360; k += 20) {
+      const a = at(k / 360), big = k % 60 === 0;
+      o.lineWidth = big ? 2 : 1;
+      o.beginPath();
+      o.moveTo(cx + Math.cos(a) * (r - (big ? 9 : 5)), cy + Math.sin(a) * (r - (big ? 9 : 5)));
+      o.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      o.stroke();
+    }
+    // anel da velocidade
+    o.lineCap = "round";
+    o.lineWidth = 5;
+    o.strokeStyle = "rgba(255,255,255,.12)";
+    o.beginPath();
+    o.arc(cx, cy, r + 2, a0, a1);
+    o.stroke();
+    o.strokeStyle = kmh > 300 ? "#ff5a3c" : "#2ec4ff";
+    o.beginPath();
+    o.arc(cx, cy, r + 2, a0, at(kmh / 360));
+    o.stroke();
+    // giro: risquinho fino por dentro
+    o.lineWidth = 3;
+    o.strokeStyle = rev > 0.85 ? "#ff3b3b" : "#ffd21a";
+    o.beginPath();
+    o.arc(cx, cy, r - 14, a0, at(rev));
+    o.stroke();
+    // marcha e velocidade
+    o.textAlign = "center";
+    o.fillStyle = "#fff";
+    o.font = `800 ${Math.round(r * 0.62)}px "Titillium Web", "Segoe UI", sans-serif`;
+    o.fillText(gear, cx, cy + r * 0.12);
+    o.font = `700 ${Math.round(r * 0.3)}px "Titillium Web", "Segoe UI", sans-serif`;
+    o.fillText(String(Math.round(kmh)), cx, cy + r * 0.5);
+    o.font = `600 ${Math.round(r * 0.14)}px sans-serif`;
+    o.fillStyle = "rgba(255,255,255,.6)";
+    o.fillText("KM/H", cx, cy + r * 0.68);
+    // acelerador e freio: duas barras do lado
+    const bh = r * 1.5, bx = cx + r + 16, by = cy - bh / 2;
+    const bar = (x: number, f: number, col: string) => {
+      o.fillStyle = "rgba(10,14,22,.78)";
+      o.fillRect(x - 1, by - 1, 10, bh + 2);
+      o.fillStyle = col;
+      o.fillRect(x, by + bh * (1 - f), 8, bh * f);
+    };
+    bar(bx, p.thr, "#2fd36b");
+    bar(bx + 13, p.brk, "#ff3b3b");
     o.restore();
   }
 
@@ -702,7 +832,11 @@ export class Renderer {
   }
 
   /** anda e desenha a água no ar (antes dos carros: ela fica atrás deles) */
-  private mistStep(o: CanvasRenderingContext2D, dt: number, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number) {
+  /**
+   * `scaleAt`: nas câmeras 3D, o tamanho de cada nuvem pela distância dela (perto grande, longe pequena; um
+   * tamanho só pra tela toda bugava); `skipNear`: câmera piloto, o spray que nasce no próprio carro não aparece
+   */
+  private mistStep(o: CanvasRenderingContext2D, dt: number, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, scaleAt?: (x: number, y: number) => number, skipNear?: { x: number; y: number } | null) {
     if (!this.mist.length) return;
     o.save();
     for (const d of this.mist) {
@@ -715,7 +849,10 @@ export class Renderer {
       d.r += dt * 2.6;
       const q = d.t / d.life;
       if (q >= 1) continue;
-      const c = toCss(d), r = d.r * m;
+      if (skipNear && Math.hypot(d.x - skipNear.x, d.y - skipNear.y) < 7) continue;
+      // (nunca maior que um quarto da tela: perto da câmera virava uma parede branca)
+      const c = toCss(d), r = Math.min(o.canvas.height * 0.25, d.r * (scaleAt ? scaleAt(d.x, d.y) : m));
+      if (!Number.isFinite(c.x) || !Number.isFinite(r) || r <= 0) continue;
       o.globalAlpha = d.a * (1 - q) * (q < 0.15 ? q / 0.15 : 1);
       o.drawImage(puff(), c.x - r, c.y - r, r * 2, r * 2);
     }
@@ -799,25 +936,249 @@ export class Renderer {
     }
   }
 
-  private drawRain(o: CanvasRenderingContext2D, W: number, H: number, dt: number, rain: number) {
+  /**
+   * chuva caindo. Vista de cima: cada pingo com velocidade e tamanho próprios e o vento mudando o ângulo
+   * aos poucos. Câmeras 3D (`perspective`): a chuva vem na direção da câmera, saindo do ponto de fuga e se
+   * abrindo pras bordas, mais rápida e comprida quanto mais rápido o carro anda
+   */
+  private drawRain(o: CanvasRenderingContext2D, W: number, H: number, dt: number, rain: number, mode: "top" | "iso" | "fwd" = "top", kmh = 0) {
+    const perspective = mode === "fwd";
     const want = Math.round(rain * 420 * (W * H) / (1600 * 1000));
-    while (this.drops.length < want) this.drops.push({ x: Math.random() * W, y: Math.random() * H, l: 8 + Math.random() * 10 });
-    if (this.drops.length > want) this.drops.length = want;
-    o.strokeStyle = "rgba(180,200,235,0.45)";
-    o.lineWidth = 1.2;
-    o.beginPath();
-    for (const d of this.drops) {
-      d.x -= 160 * dt;
-      d.y += 800 * dt;
-      if (d.y > H) {
-        d.y = -10;
-        d.x = Math.random() * (W + 80);
+    const vx0 = W / 2, vy0 = H * 0.42;
+    const spawn = (d?: { x: number; y: number; l: number; v: number; z: number }) => {
+      const nd = d ?? { x: 0, y: 0, l: 0, v: 0, z: 0 };
+      nd.z = Math.random();
+      if (perspective) {
+        // perto do ponto de fuga, num leque
+        const a = Math.random() * Math.PI * 2, r = Math.random() * Math.min(W, H) * 0.35;
+        nd.x = vx0 + Math.cos(a) * r;
+        nd.y = vy0 + Math.sin(a) * r * 0.7;
+      } else {
+        // (de cima: em qualquer lugar da tela, cai pro chão; de lado: entra por cima)
+        nd.x = Math.random() * (W + 160) - 80;
+        nd.y = mode === "top" || !d ? Math.random() * H : -20;
+        (nd as { t?: number }).t = 0;
       }
-      if (d.x < -10) d.x = W + 10;
-      o.moveTo(d.x, d.y);
-      o.lineTo(d.x - d.l * 0.2, d.y + d.l);
+      nd.l = 6 + Math.random() * 14;
+      nd.v = 0.7 + Math.random() * 0.6;
+      return nd;
+    };
+    while (this.drops.length < want) this.drops.push(spawn());
+    if (this.drops.length > want) this.drops.length = want;
+    this.gust += ((Math.sin(performance.now() / 2300) + Math.sin(performance.now() / 870) * 0.4) * 140 - this.gust) * Math.min(1, dt * 2);
+    const go = Math.min(1, kmh / 280);
+    o.lineCap = "round";
+    // (três camadas: os de trás finos e fracos, os da frente grossos)
+    for (const layer of [0, 1, 2]) {
+      o.strokeStyle = `rgba(185,205,235,${(0.22 + layer * 0.12).toFixed(2)})`;
+      o.lineWidth = 0.8 + layer * 0.55;
+      o.beginPath();
+      for (const d of this.drops) {
+        if (Math.min(2, Math.floor(d.z * 3)) !== layer) continue;
+        let dx: number, dy: number;
+        if (perspective) {
+          // sai do ponto de fuga e acelera pra fora (quanto mais longe do meio, mais rápido), e cai um pouco
+          const ox = d.x - vx0, oy = d.y - vy0;
+          const k = (0.9 + go * 2.4) * d.v;
+          dx = ox * k + this.gust * 0.3;
+          dy = oy * k + 380 * d.v;
+        } else if (mode === "iso") {
+          // câmera inclinada pra baixo: cai descendo a tela, juntando um pouco num ponto bem abaixo dela
+          const tx = W / 2 - d.x, ty = H * 3 - d.y, tl = Math.hypot(tx, ty) || 1;
+          dx = (tx / tl) * 820 * d.v + this.gust * 0.4;
+          dy = (ty / tl) * 820 * d.v;
+        } else {
+          // de cima: o pingo cai pra longe da câmera, então anda pro meio da tela e some no chão
+          dx = (W / 2 - d.x) * 1.6 * d.v + this.gust * 0.15;
+          dy = (H / 2 - d.y) * 1.6 * d.v;
+          const dd = d as { t?: number };
+          dd.t = (dd.t ?? 0) + dt;
+          if (dd.t > 0.25 + d.v * 0.2) {
+            spawn(d);
+            continue;
+          }
+        }
+        d.x += dx * dt;
+        d.y += dy * dt;
+        if (d.y > H + 20 || d.x < -40 || d.x > W + 40 || d.y < -40) {
+          spawn(d);
+          continue;
+        }
+        // risco na direção do movimento, do tamanho da velocidade
+        const sp = Math.hypot(dx, dy) || 1, len = d.l * (0.6 + d.z * 0.8) * (perspective ? 0.6 + sp / 900 : mode === "top" ? 0.5 : 1);
+        o.moveTo(d.x, d.y);
+        o.lineTo(d.x - (dx / sp) * len, d.y - (dy / sp) * len);
+      }
+      o.stroke();
     }
-    o.stroke();
+  }
+
+
+  /**
+   * gotas na lente: posição, raio, idade, vida, velocidade (escorrer e vento), forma (ovalada e girada) e
+   * de onde soltou a última gotinha do rastro
+   */
+  private lens: { x: number; y: number; r: number; t: number; life: number; vx: number; vy: number; ax: number; rot: number; lx: number; ly: number; slide: boolean; dead?: boolean }[] = [];
+  /** filetes compridos de água escorrendo (chuva forte) */
+  private rivulets: { x: number; y: number; len: number; w: number; t: number; life: number; v: number }[] = [];
+  /**
+   * gotas na lente das câmeras 3D, como em vidro: quase transparentes, formas irregulares, um brilho pequeno e
+   * a borda escura só de um lado. Gotas que se encostam viram uma maior (que escorre); quem escorre deixa
+   * gotinhas pelo caminho. Com o carro rápido o vento empurra tudo pras bordas. Chuva forte: véu e filetes
+   */
+  /** foto pequena da cena 3D deste quadro (cada gota grande mostra o pedaço de trás dela, invertido) */
+  private snap: HTMLCanvasElement | null = null;
+  private drawLens(o: CanvasRenderingContext2D, W: number, H: number, dt: number, rain: number, kmh = 0, scene?: HTMLCanvasElement) {
+    const k = H / 1000, cx = W / 2, cy = H * 0.45;
+    // (um terço do tamanho: barato e a gota é pequena)
+    let snap: HTMLCanvasElement | null = null;
+    if (scene && scene.width > 0 && this.lens.some((d) => d.r >= 2.4 * k)) {
+      snap = this.snap ??= document.createElement("canvas");
+      const sw = Math.max(1, Math.round(W / 3)), sh = Math.max(1, Math.round(H / 3));
+      if (snap.width !== sw || snap.height !== sh) {
+        snap.width = sw;
+        snap.height = sh;
+      }
+      try {
+        snap.getContext("2d")!.drawImage(scene, 0, 0, scene.width, scene.height, 0, 0, sw, sh);
+      } catch {
+        snap = null;
+      }
+    }
+    // (chuva normal, ~55%: ~280 gotas; forte, 85%: ~430; fraca, menos)
+    const amt = rain / 0.55;
+    const max = Math.min(450, 280 * amt);
+    const born = dt * (90 + kmh * 1.6) * 0.55 * amt;
+    const add = (x: number, y: number, r: number, life: number, slide: boolean) =>
+      this.lens.push({ x, y, r, t: 0, life, vx: 0, vy: 0, ax: 0.72 + Math.random() * 0.28, rot: Math.random() * Math.PI, lx: x, ly: y, slide });
+    for (let n = Math.floor(born) + (Math.random() < born % 1 ? 1 : 0); n > 0 && this.lens.length < max; n--) {
+      const roll = Math.random();
+      const r = (roll < 0.62 ? 1.2 + Math.random() * 2.6 : roll < 0.95 ? 3.8 + Math.random() * 6 : 9.5 + Math.random() * 9) * k;
+      add(Math.random() * W, Math.random() * H, r, 1.5 + Math.random() * (r > 5 * k ? 5 : 2.5), false);
+    }
+    const wind = Math.min(1, kmh / 250);
+    // gotas que se encostam viram uma só (área somada) e a maior começa a escorrer
+    for (let i = 0; i < this.lens.length; i++) {
+      const A = this.lens[i];
+      if (A.dead || A.r < 2 * k) continue;
+      for (let j = i + 1; j < this.lens.length; j++) {
+        const B = this.lens[j];
+        if (B.dead || B.r < 2 * k) continue;
+        if (Math.hypot(A.x - B.x, A.y - B.y) < (A.r + B.r) * 0.8) {
+          const big = A.r >= B.r ? A : B, small = big === A ? B : A;
+          big.r = Math.min(24 * k, Math.hypot(big.r, small.r));
+          big.slide = big.r > 4 * k;
+          big.life = Math.max(big.life, big.t + 3);
+          small.dead = true;
+        }
+      }
+    }
+    o.save();
+    if (rain > 0.3) {
+      o.fillStyle = `rgba(175,190,210,${(0.06 * rain).toFixed(3)})`;
+      o.fillRect(0, 0, W, H);
+    }
+    const trail: [number, number, number][] = [];
+    for (const d of this.lens) {
+      if (d.dead) continue;
+      d.t += dt;
+      const ox = (d.x - cx) / W, oy = (d.y - cy) / H;
+      d.vx += (ox * 420 * wind - d.vx) * Math.min(1, dt * 3);
+      const fall = d.slide && d.t > 0.3 ? 30 + d.r * 7 : 0;
+      d.vy += (oy * 330 * wind + fall - d.vy) * Math.min(1, dt * 3);
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      // rastro: quem anda solta gotinhas pelo caminho (e vai encolhendo um tiquinho)
+      if (d.r > 2 * k && Math.hypot(d.x - d.lx, d.y - d.ly) > d.r * 1.3) {
+        trail.push([d.lx + (Math.random() - 0.5) * d.r * 0.6, d.ly, (0.5 + Math.random() * 0.6) * k]);
+        d.lx = d.x;
+        d.ly = d.y;
+        d.r *= 0.985;
+      }
+      const fade = Math.min(1, d.t * 8) * Math.max(0, 1 - Math.max(0, d.t - d.life + 0.8) / 0.8);
+      if (fade <= 0) continue;
+      const sp = Math.hypot(d.vx, d.vy), stretch = 1 + Math.min(1.6, sp / 280);
+      o.save();
+      o.translate(d.x, d.y);
+      // (esticada pra onde anda; parada, ovalada no próprio ângulo)
+      o.rotate(sp > 20 ? Math.atan2(d.vy, d.vx) : d.rot);
+      o.scale(sp > 20 ? stretch : 1, (sp > 20 ? 1 / Math.sqrt(stretch) : 1) * d.ax);
+      if (d.r < 2 * k) {
+        o.fillStyle = `rgba(225,235,250,${(0.38 * fade).toFixed(3)})`;
+        o.beginPath();
+        o.arc(0, 0, d.r, 0, Math.PI * 2);
+        o.fill();
+      } else {
+        // a gota é uma lente: mostra, invertido e encolhido, o que está atrás dela (as luzes viram pontinhos
+        // dentro da gota)
+        if (snap) {
+          o.save();
+          o.beginPath();
+          o.arc(0, 0, d.r, 0, Math.PI * 2);
+          o.clip();
+          o.scale(1, -1);
+          const R = d.r * 4.5;
+          o.globalAlpha = 0.9 * fade;
+          o.drawImage(snap, (d.x - R) / 3, (d.y - R) / 3, (2 * R) / 3, (2 * R) / 3, -d.r, -d.r, 2 * d.r, 2 * d.r);
+          o.restore();
+        }
+        // vidro molhado: quase transparente no meio, um pouco mais claro na borda
+        const g = o.createRadialGradient(0, d.r * 0.2, d.r * 0.15, 0, 0, d.r);
+        g.addColorStop(0, `rgba(55,70,92,${(0.15 * fade).toFixed(3)})`);
+        g.addColorStop(0.7, `rgba(170,188,210,${(0.13 * fade).toFixed(3)})`);
+        g.addColorStop(1, `rgba(225,236,250,${(0.32 * fade).toFixed(3)})`);
+        o.fillStyle = g;
+        o.beginPath();
+        o.arc(0, 0, d.r, 0, Math.PI * 2);
+        o.fill();
+        // borda escura embaixo (a gota escurece onde a luz não passa) e o brilho em cima
+        o.strokeStyle = `rgba(10,15,25,${(0.38 * fade).toFixed(3)})`;
+        o.lineWidth = Math.max(0.7, d.r * 0.16);
+        o.beginPath();
+        o.arc(0, 0, d.r * 0.9, Math.PI * 0.15, Math.PI * 0.85);
+        o.stroke();
+        o.fillStyle = `rgba(255,255,255,${(0.7 * fade).toFixed(3)})`;
+        o.beginPath();
+        o.arc(-d.r * 0.32, -d.r * 0.36, Math.max(0.6, d.r * 0.14), 0, Math.PI * 2);
+        o.fill();
+      }
+      o.restore();
+    }
+    for (const [x, y, r] of trail) add(x, y, r, 0.8 + Math.random() * 1.4, false);
+    // filetes (chuva forte e devagar; rápido o vento leva): fino, ondulado, some em cima
+    if (rain > 0.45 && wind < 0.5 && this.rivulets.length < 6 * rain && Math.random() < dt * 1.2 * rain)
+      this.rivulets.push({ x: Math.random() * W, y: -20, len: (60 + Math.random() * 160) * k, w: (1.2 + Math.random() * 2) * k, t: 0, life: 3 + Math.random() * 3, v: (60 + Math.random() * 120) * k });
+    for (const f of this.rivulets) {
+      f.t += dt;
+      f.y += f.v * dt;
+      f.x += Math.sin(f.t * 3 + f.len) * 6 * k * dt;
+      const al = Math.min(1, f.t * 3) * Math.max(0, 1 - f.t / f.life);
+      const gr = o.createLinearGradient(f.x, f.y - f.len, f.x, f.y);
+      gr.addColorStop(0, "rgba(210,225,245,0)");
+      gr.addColorStop(1, `rgba(220,232,250,${(0.2 * al).toFixed(3)})`);
+      o.strokeStyle = gr;
+      o.lineWidth = f.w;
+      o.lineCap = "round";
+      // (torto, em zigue-zague, com uma borda escura e o miolo claro, como água escorrendo no vidro)
+      const pts: [number, number][] = [];
+      for (let q = 0; q <= 8; q++) pts.push([f.x + Math.sin(q * 1.7 + f.len) * 7 * k + Math.sin(q * 0.6 + f.t) * 3 * k, f.y - f.len + (f.len * q) / 8]);
+      const line = () => {
+        o.beginPath();
+        pts.forEach(([x, y], q) => (q ? o.lineTo(x, y) : o.moveTo(x, y)));
+      };
+      o.lineJoin = "round";
+      line();
+      o.strokeStyle = `rgba(10,15,25,${(0.22 * al).toFixed(3)})`;
+      o.lineWidth = f.w + 1.5 * k;
+      o.stroke();
+      line();
+      o.strokeStyle = gr;
+      o.lineWidth = f.w;
+      o.stroke();
+    }
+    o.restore();
+    this.lens = this.lens.filter((d) => !d.dead && d.t < d.life && d.y > -40 && d.y < H + 40 && d.x > -40 && d.x < W + 40);
+    this.rivulets = this.rivulets.filter((f) => f.t < f.life && f.y - f.len < H);
   }
 
   private drawLights(o: CanvasRenderingContext2D, W: number) {

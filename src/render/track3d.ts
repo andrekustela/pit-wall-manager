@@ -5,10 +5,11 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { asphaltTexture, rubberTexture, rng, angDiff, Grid, inPoly, obb, grassTex, BRANDS } from "./trackParts";
-import { PieceLayer, loadPaths, loadPieces, loadTerrain, pathsFromJson, piecesFromJson, terrainFromJson, type Piece, type PieceKind } from "./pieces";
+import { PieceLayer, standV, loadPaths, loadPieces, loadTerrain, pathsFromJson, piecesFromJson, terrainFromJson, type Piece, type PieceKind } from "./pieces";
 import { Terrain, applyTerrain, shadeGround } from "./terrain";
-import { PathLayer, type PathItem } from "./paths3d";
-import { PIT_LATERAL, TRACK_WIDTH, type Track } from "../sim/track";
+import { PATHS, PathLayer, type PathItem } from "./paths3d";
+import { BOX_SHIFT, PIT_LATERAL, TRACK_WIDTH, type Track } from "../sim/track";
+import { TEAMS } from "../sim/data";
 
 type Kind = "costa" | "cais" | "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
 interface Item { k: Kind; p: [number, number][]; h?: number; fechado?: boolean; w?: number }
@@ -57,7 +58,27 @@ const merge = (gs: (THREE.BufferGeometry | null)[]) => {
 
 
 /** zebras por pista (as outras: vermelho e branco) */
+/** até onde vai o autódromo em volta da pista (chão, mapa real, árvores): além disso ninguém vê e só pesa */
+const MAP_MARGIN = 480;
+
 const KERBS: Record<string, string[]> = { interlagos: ["#159447", "#f4f4f4", "#f5d10f", "#f4f4f4"] };
+
+type Built = Awaited<ReturnType<typeof buildTrack3d>>;
+const preloaded = new Map<string, Promise<Built>>();
+/**
+ * começa a montar o autódromo antes da corrida (nas telas do fim de semana), pra a corrida não engasgar
+ * quando começa; a corrida pega o pronto com takeTrack3d
+ */
+export function preloadTrack3d(track: Track, shadows: boolean) {
+  const key = `${track.name}|${shadows}`;
+  if (!preloaded.has(key)) preloaded.set(key, buildTrack3d(track, shadows));
+}
+/** o autódromo pré-carregado (uma vez só: o grupo vai pra cena da corrida) ou monta agora */
+export function takeTrack3d(track: Track, shadows: boolean): Promise<Built> {
+  const key = `${track.name}|${shadows}`, p = preloaded.get(key);
+  preloaded.delete(key);
+  return p ?? buildTrack3d(track, shadows);
+}
 
 /**
  * Monta o autódromo. `shadows`: prédios, árvores e arquibancadas fazem sombra (pede mais da placa de vídeo).
@@ -125,15 +146,60 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
     return { p, X, Z };
   };
 
-  // ---- chão: grama de desenho ----
-  // (chão só até ~600 m além da pista: mais que isso era grama vazia que ninguém vê)
-  const size = Math.max(x1 - x0, z1 - z0) + 1200;
+  // ---- chão: grama de desenho, só até MAP_MARGIN da pista (fora disso não existe: não pesa) ----
   // (circuito de rua: o chão da cidade é calçada; os parques do mapa continuam verdes por cima)
   const gt = street ? grassTex("#b3ab9c", "#a39b8c", "#c2baab") : grassTex("#3b6421", "#2d5119", "#4b772a");
-  gt.repeat.set(size / 200, size / 200);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat("#ffffff", 1, { map: gt }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set((x0 + x1) / 2, -0.05, (z0 + z1) / 2);
+  // (o UV do chão é o mundo / 200: a textura repete a cada 200 m)
+  gt.repeat.set(1, 1);
+  /**
+   * grade de quadrados de `step` m (de `ox, oz`), só nos blocos de 16 m perto da pista; deitada na própria
+   * geometria (o relevo sobe o y do objeto: com o plano girado, ele empurrava o chão pro lado em vez de pra cima)
+   */
+  const groundGeo = (step: number, ox: number, oz: number) => {
+    const B = 8, k = Math.max(1, B / step);
+    const bx0 = ox + Math.floor((x0 - MAP_MARGIN - ox) / B) * B, bz0 = oz + Math.floor((z0 - MAP_MARGIN - oz) / B) * B;
+    const nbx = Math.ceil((x1 + MAP_MARGIN - bx0) / B) + 1, nbz = Math.ceil((z1 + MAP_MARGIN - bz0) / B) + 1;
+    const mask = new Uint8Array(nbx * nbz), r = Math.ceil(MAP_MARGIN / B) + 1;
+    for (let s = 0; s < track.L; s += 8) {
+      const p = track.pose(s, 0), bi = Math.floor((p.x - bx0) / B), bj = Math.floor((p.y - bz0) / B);
+      for (let dj = -r; dj <= r; dj++)
+        for (let di = -r; di <= r; di++) {
+          const i = bi + di, j = bj + dj;
+          if (i < 0 || j < 0 || i >= nbx || j >= nbz || Math.hypot(di, dj) * B > MAP_MARGIN + B) continue;
+          mask[j * nbx + i] = 1;
+        }
+    }
+    const nvx = nbx * k + 1, vid = new Int32Array(nvx * (nbz * k + 1)).fill(-1);
+    const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+    const v = (i: number, j: number) => {
+      const q = j * nvx + i;
+      if (vid[q] < 0) {
+        const x = bx0 + i * step, z = bz0 + j * step;
+        vid[q] = pos.length / 3;
+        pos.push(x, 0, z);
+        uv.push(x / 200, -z / 200);
+      }
+      return vid[q];
+    };
+    for (let bj = 0; bj < nbz; bj++)
+      for (let bi = 0; bi < nbx; bi++) {
+        if (!mask[bj * nbx + bi]) continue;
+        for (let cj = 0; cj < k; cj++)
+          for (let ci = 0; ci < k; ci++) {
+            const i = bi * k + ci, j = bj * k + cj;
+            const a = v(i, j), b = v(i, j + 1), c = v(i + 1, j), d = v(i + 1, j + 1);
+            idx.push(a, b, c, c, b, d);
+          }
+      }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, q) => (q % 3 === 1 ? 1 : 0)), 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  };
+  const ground = new THREE.Mesh(groundGeo(8, x0, z0), mat("#ffffff", 1, { map: gt }));
+  ground.position.set(0, -0.05, 0);
   ground.receiveShadow = shadows;
   // (a base: pintada antes de todas as camadas de chão)
   ground.renderOrder = -2000;
@@ -141,17 +207,21 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
 
   // ---- boxes: prédio de dois andares (portas amarelas embaixo, janelas em cima), torre de controle e paddock atrás ----
   const pitW = 9;
+  // garagens: cada equipe tem as dela bem atrás do lugar onde o carro para (Race.boxS: o trecho dos boxes
+  // dividido igual entre as equipes); a largura de cada garagem se ajusta pra fechar a conta (~6 m)
   const garages: THREE.Matrix4[] = [];
-  for (let d = 70; d <= range - 70 - 6; d += 6.2) {
-    const s = track.pitEntryS + d + 3.1;
+  const boxSpan = track.wrap(track.pitBoxEnd - track.pitBoxStart), perTeam = boxSpan / TEAMS.length;
+  const gw = perTeam / Math.max(1, Math.round(perTeam / 6.2));
+  const dBox = track.wrap(track.pitBoxStart - track.pitEntryS);
+  for (let d = dBox - Math.floor((dBox - 70) / gw) * gw; d + gw <= range - 70; d += gw) {
+    const s = track.pitEntryS + d + gw / 2;
     const m = new THREE.Matrix4();
-    const { p } = sideMatrix(s, PIT_LATERAL + pitW / 2 + 1.5, 1, m);
+    sideMatrix(s, PIT_LATERAL + pitW / 2 + 1.5, 1, m);
     garages.push(m);
-    void p;
     const c = track.pose(track.wrap(s), PIT_LATERAL + pitW / 2 + 8);
     taken.add(c.x, c.y, 9);
   }
-  for (const m of garages) fromM("box", m);
+  for (const m of garages) fromM("box", m, Math.abs(gw - 6.2) > 0.05 ? { s: gw / 6.2 } : {});
   if (garages.length) {
     // torre de controle antes do primeiro box
     const tm = new THREE.Matrix4();
@@ -213,7 +283,25 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   }
   corners.sort((a, b) => Math.abs(b.k) - Math.abs(a.k));
   for (const c of corners) tryStand(c.s, c.k > 0 ? -1 : 1);
-  for (const m of stands) fromM("arquibancada", m);
+  // (já com torcida; cada módulo senta o povo de um jeito)
+  for (const m of stands) fromM("arquibancada", m, { v: standV(0, true, Math.floor(rnd() * 4)) });
+
+  // ---- telões (classificação ao vivo): na reta dos boxes e nas curvas mais fortes, virados pra pista ----
+  const screenS: number[] = [];
+  const tryScreen = (s: number, side: number) => {
+    if (screenS.length >= 4 || screenS.some((o) => Math.abs(track.wrap(s - o + track.L / 2) - track.L / 2) < 350)) return;
+    for (const lat of [FENCE + 7, W2 + 34]) {
+      const m = new THREE.Matrix4();
+      const { p } = sideMatrix(s, lat * side, side, m);
+      if (trk.near(p.x, p.y, lat) < lat - 3 || taken.near(p.x, p.y, 8) < 7.5) continue;
+      taken.add(p.x, p.y, 7.5);
+      fromM("telao", m);
+      screenS.push(s);
+      return;
+    }
+  };
+  tryScreen(140, -1);
+  for (const c of corners) tryScreen(c.s, c.k > 0 ? -1 : 1);
 
   // ---- alambrado com mureta, dos dois lados (some onde outra parte da pista passa perto e no box) ----
   const runs: [number, number][][] = [];
@@ -261,11 +349,37 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
     if (p.length > 1) out.push(p[p.length - 1]);
     return out;
   };
+  /** os trechos de uma linha que ficam dentro do chão (pontos a cada ~6 m, pra o corte cair perto da borda) */
+  const clipLine = (p: [number, number][]) => {
+    const runs: [number, number][][] = [];
+    let run: [number, number][] = [];
+    const push = (x: number, z: number) => {
+      if (trk.near(x, z, MAP_MARGIN) < MAP_MARGIN - 6) run.push([x, z]);
+      else {
+        if (run.length > 1) runs.push(run);
+        run = [];
+      }
+    };
+    for (let j = 0; j < p.length; j++) {
+      if (j) {
+        const [ax, az] = p[j - 1], [bx, bz] = p[j], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 6);
+        for (let q = 1; q < n; q++) push(ax + ((bx - ax) * q) / n, az + ((bz - az) * q) / n);
+      }
+      push(p[j][0], p[j][1]);
+    }
+    if (run.length > 1) runs.push(run);
+    return runs;
+  };
   const mapPaths: PathItem[] = [];
+  /** alguma parte perto da pista? (o mapa real longe dela fica de fora) */
+  const near = (p: [number, number][]) => p.some(([x, z]) => trk.near(x, z, MAP_MARGIN) < MAP_MARGIN);
   const AREA_OF: Partial<Record<Kind, PathItem["t"]>> = { grama: "grama", bosque: "grama", estacionamento: "concreto", agua: "agua", piscina: "agua" };
   for (const [k, col] of areas)
     for (const i of by(k)) {
-      if (!i.fechado || i.p.length < 4) continue;
+      if (!i.fechado || i.p.length < 4 || !near(i.p)) continue;
+      // (grama e bosque: o chão de base já é grama, uma camada só por baixo de tudo; no circuito de rua, onde o
+      // chão é calçada, os parques continuam)
+      if (!street && (k === "grama" || k === "bosque")) continue;
       const p = thin(i.p.slice(0, -1), 3);
       if (p.length >= 3) mapPaths.push({ t: AREA_OF[k]!, p, c: col, reto: true, src: "mapa" });
     }
@@ -296,8 +410,8 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
         nz += c[k][0] - c[k - 1][0];
       }
       const nl = Math.hypot(nx, nz) || 1;
-      nx = (nx / nl) * 4000;
-      nz = (nz / nl) * 4000;
+      nx = (nx / nl) * MAP_MARGIN;
+      nz = (nz / nl) * MAP_MARGIN;
       const e = c[c.length - 1], b0 = c[0];
       seas.push([...c, [e[0] + nx, e[1] + nz], [b0[0] + nx, b0[1] + nz]]);
     }
@@ -307,6 +421,17 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
       if (!i.fechado) mapPaths.push({ t: "cais", p: thin(i.p, 4), w: 5, reto: true, src: "mapa" });
       else if (i.p.length > 3) mapPaths.push({ t: "concreto", p: thin(i.p.slice(0, -1), 3), c: "#b9b4a8", reto: true, src: "mapa" });
     }
+  }
+  {
+    const cut: Item[] = [];
+    for (const i of items) {
+      if (!["rua", "caminho", "kart", "muro", "cais", "arvores"].includes(i.k) || (i.fechado && i.k !== "arvores")) {
+        cut.push(i);
+        continue;
+      }
+      for (const run of clipLine(i.p)) cut.push({ ...i, p: run, fechado: false });
+    }
+    items = cut;
   }
   for (const i of by("rua")) mapPaths.push({ t: "rua", p: thin(i.p), w: i.w ?? 6, reto: true, src: "mapa" });
   for (const i of by("caminho")) mapPaths.push({ t: "caminho", p: thin(i.p), w: 2, reto: true, src: "mapa" });
@@ -326,7 +451,7 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
     const keep = street ? W2 + 6 + o.w / 2 : 34;
     if (trk.near(o.cx, o.cz, keep) < keep || taken.near(o.cx, o.cz, o.l / 2 + 1) < o.l / 2) continue;
     // (longe demais da pista: some, pesa e quase não aparece)
-    if (trk.near(o.cx, o.cz, 450) >= 450) continue;
+    if (trk.near(o.cx, o.cz, 400) >= 400) continue;
     const h = i.h ?? (street ? 12 + Math.floor(rnd() * 5) * 3 : 6);
     if (i.h == null && street) i.h = h;
     if (!street && i.k === "predio" && h <= 9 && o.l < 40) houses.push({ x: o.cx, z: o.cz, a: o.a, l: o.l, w: o.w, h: h <= 6 ? 3.2 + rnd() * 1.6 : h });
@@ -366,6 +491,7 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   let nNear = 0;
   const tryTree = (x: number, z: number) => {
     if (trk.near(x, z, W2 + 15) < W2 + 14) return;
+    if (trk.near(x, z, MAP_MARGIN) > MAP_MARGIN - 8) return;
     if (taken.near(x, z, 4) < 1.2) return;
     if (water.some((p) => inPoly(x, z, p))) return;
     const near = trk.near(x, z, 140) < 140;
@@ -399,7 +525,7 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   fill("bosque", 7, 1);
   fill("grama", 22, 0.35);
   for (let n = 0; n < (street ? 0 : 7000); n++) {
-    const s = rnd() * track.L, lat = (W2 + 16 + Math.pow(rnd(), 1.6) * 230) * (rnd() < 0.5 ? -1 : 1);
+    const s = rnd() * track.L, lat = (W2 + 16 + Math.pow(rnd(), 1.6) * 220) * (rnd() < 0.5 ? -1 : 1);
     const p = track.pose(s, lat);
     tryTree(p.x, p.y);
   }
@@ -469,27 +595,57 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
     g.computeVertexNormals();
     add(g, mat("#ffffff", 1, { map: rubberTexture(), vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, ...over(1) }));
   }
-  // zebras dos dois lados nas curvas; escape de asfalto por fora das curvas fechadas
-  // zebras: blocos de 1 m na sequência de cores da pista
+  // ---- beira da pista: zebras nas curvas (dos dois lados) e, por fora das curvas fechadas, faixa verde,
+  // escape e brita. Tudo vira linha ou área editável (src "pista"): dá pra mover, apagar, mudar cor e largura ----
   const kc = KERBS[slugOf(track.name)] ?? ["#d8262b", "#f2f2f2"];
-  const kerbs: THREE.BufferGeometry[][] = kc.map(() => []);
-  for (let s = 0; s < track.L; s += 1) {
-    const k = Math.abs(track.curvature[Math.floor(s)] ?? 0);
-    if (k < 1 / 220) continue;
-    for (const [l0, l1] of [[W2, W2 + 1.5], [-W2 - 1.5, -W2]] as const) kerbs[Math.floor(s) % kc.length].push(band(l0, l1, 0.13, s, s + 1, 1));
-  }
-  const runoff: THREE.BufferGeometry[] = [], paint: THREE.BufferGeometry[] = [], gravel: THREE.BufferGeometry[] = [];
+  const pistaPaths: PathItem[] = [];
+  /** trechos seguidos de s (passo `step`) onde `on(s)` vale; buracos curtos não cortam */
+  const runsOf = (step: number, on: (s: number) => boolean) => {
+    const out: [number, number][] = [];
+    let a = -1, last = -1e9;
+    for (let s = 0; s < track.L; s += step) {
+      if (!on(s)) continue;
+      if (s - last > step * 2.5) {
+        if (a >= 0) out.push([a, last + step]);
+        a = s;
+      }
+      last = s;
+    }
+    if (a >= 0) out.push([a, last + step]);
+    return out;
+  };
+  const along = (s0: number, s1: number, lat: number, step = 3) => {
+    const pts: [number, number][] = [];
+    for (let s = s0; s < s1; s += step) {
+      const p = track.pose(track.wrap(s), lat);
+      pts.push([p.x, p.y]);
+    }
+    const p = track.pose(track.wrap(s1), lat);
+    pts.push([p.x, p.y]);
+    return pts;
+  };
+  // zebras (duas cores; as de 4 cores ficam com a 1ª e a 3ª)
+  const zc1 = kc[0], zc2 = kc.length > 2 ? kc[2] : kc[1];
+  for (const [s0, s1] of runsOf(1, (s) => Math.abs(track.curvature[Math.floor(s)] ?? 0) >= 1 / 220))
+    for (const side of [1, -1]) pistaPaths.push({ t: "zebra", p: along(s0, s1, side * (W2 + 0.75)), w: 1.5, c: zc1, c2: zc2, reto: true, src: "pista" });
+  // escape por fora das curvas fechadas: uma área por trecho e por lado
+  const outside = (s: number) => {
+    const t = turn(s);
+    return Math.abs(t) > 0.45 && !(t < 0 && pitZone(s)) ? (t > 0 ? -1 : 1) : 0;
+  };
+  for (const side of [1, -1])
+    for (const [s0, s1] of runsOf(2, (s) => outside(s) === side)) {
+      const area = (l0: number, l1: number) => [...along(s0, s1, side * (W2 + l1)), ...along(s0, s1, side * (W2 + l0)).reverse()];
+      pistaPaths.push({ t: "pintura", p: area(1.4, 3), c: "#2f9e56", reto: true, src: "pista" });
+      pistaPaths.push({ t: "concreto", p: area(3, 6.5), c: "#7d8086", reto: true, src: "pista" });
+      pistaPaths.push({ t: "brita", p: area(6.5, 10), c: "#e08a3c", reto: true, src: "pista" });
+    }
   const tyres: [number, number, number][] = [], boards: THREE.Matrix4[][] = BRANDS.map(() => []);
   let lastBoard = -1e9;
   for (let s = 0; s < track.L; s += 2) {
     const t = turn(s);
     if (Math.abs(t) > 0.45 && !(t < 0 && pitZone(s))) {
       const side = t > 0 ? -1 : 1;
-      // escape: faixa verde, asfalto e brita laranja
-      const b2 = (l0: number, l1: number, y: number) => (side > 0 ? band(W2 + l0, W2 + l1, y, s, s + 2, 2) : band(-W2 - l1, -W2 - l0, y, s, s + 2, 2));
-      paint.push(b2(1.4, 3, 0.095));
-      runoff.push(b2(3, 6.5, 0.09));
-      gravel.push(b2(6.5, 10, 0.085));
       if (Math.abs(t) > 0.6) {
         // pneus na beira da brita (onde outra parte da pista não passa perto)
         const lat = W2 + 10.4;
@@ -510,10 +666,6 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
       }
     }
   }
-  kerbs.forEach((list, i) => add(merge(list), mat(kc[i], 0.7, { side: THREE.DoubleSide, ...over(2) })));
-  add(merge(runoff), mat("#7d8086", 0.9, { side: THREE.DoubleSide }));
-  add(merge(paint), mat("#2f9e56", 0.85, { side: THREE.DoubleSide, ...over(1) }));
-  add(merge(gravel), mat("#e08a3c", 1, { side: THREE.DoubleSide }));
   for (const [x, z, c] of tyres) P.push({ k: "pneu", x, z, r: 0, c: c ? "#f2f2f2" : "#1c1c1c" });
   boards.forEach((list, bi) => list.forEach((m) => fromM("placa", m, { v: bi })));
   // box: faixa de asfalto do pit lane
@@ -528,6 +680,30 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   const chk: THREE.BufferGeometry[] = [];
   for (let q = 0; q < 12; q++) chk.push(band(-W2 + (q * TRACK_WIDTH) / 12, -W2 + ((q + 1) * TRACK_WIDTH) / 12, 0.14, q % 2 ? 0 : 1.5, q % 2 ? 1.5 : 3, 1.5));
   add(merge(chk), mat("#f0f0f0", 0.6, { side: THREE.DoubleSide, ...over(3) }));
+  // grid de largada: onde cada carro para (Race: s = L - 14 - 8i, um de cada lado a 3,4 m do meio);
+  // a marca em "U" aberta pra trás, na frente do carro
+  const gridM: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < TEAMS.length * 2; i++) {
+    const sc = track.L - 14 - i * 8, lat = i % 2 === 0 ? -3.4 : 3.4, f = sc + 2.6;
+    gridM.push(band(lat - 1.35, lat + 1.35, 0.14, f, f + 0.25, 0.25));
+    gridM.push(band(lat - 1.35, lat - 1.15, 0.14, f - 1.4, f, 0.7));
+    gridM.push(band(lat + 1.15, lat + 1.35, 0.14, f - 1.4, f, 0.7));
+  }
+  add(merge(gridM), mat("#f4f4f4", 0.6, { side: THREE.DoubleSide, ...over(3) }));
+  // boxes: a vaga de cada equipe (retângulo amarelo onde o carro para) e a faixa entre a pista de passagem
+  // e a de trabalho
+  const pitM: THREE.BufferGeometry[] = [], laneM: THREE.BufferGeometry[] = [];
+  const boxLat = PIT_LATERAL + BOX_SHIFT;
+  for (let i = 0; i < TEAMS.length; i++) {
+    const sc = track.pitBoxStart + perTeam * (i + 0.5);
+    pitM.push(band(boxLat - 1.4, boxLat + 1.4, 0.1, sc + 2.7, sc + 2.9, 0.2));
+    pitM.push(band(boxLat - 1.4, boxLat + 1.4, 0.1, sc - 2.9, sc - 2.7, 0.2));
+    pitM.push(band(boxLat - 1.4, boxLat - 1.25, 0.1, sc - 2.9, sc + 2.9, 1.45));
+    pitM.push(band(boxLat + 1.25, boxLat + 1.4, 0.1, sc - 2.9, sc + 2.9, 1.45));
+  }
+  for (let d = 0; d < boxSpan; d += 4) laneM.push(band(PIT_LATERAL + 0.9, PIT_LATERAL + 1.05, 0.1, track.pitBoxStart + d, track.pitBoxStart + d + 2.5, 2.5));
+  add(merge(pitM), mat("#f5d10f", 0.6, { side: THREE.DoubleSide, ...over(3) }));
+  add(merge(laneM), mat("#f4f4f4", 0.6, { side: THREE.DoubleSide, ...over(3) }));
 
   let shipped: Piece[] | null = null, shippedPaths: PathItem[] = [], shippedTerrain: Terrain | null = null;
   if (!opts.pieces && !loadPieces(slugOf(track.name)))
@@ -543,27 +719,35 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
       /* sem as do projeto */
     }
   // (ordem: as do editor neste navegador, as que vêm no jogo, o automático)
-  const layer = new PieceLayer(opts.pieces ?? loadPieces(slugOf(track.name)) ?? shipped ?? P, shadows);
+  const base = opts.pieces ?? loadPieces(slugOf(track.name)) ?? shipped ?? P;
+  // (autódromo salvo antes dos telões automáticos: ganha os telões)
+  if (base !== P && !base.some((p) => p.k === "telao")) base.push(...P.filter((p) => p.k === "telao"));
+  // (modelos .glb importados que aparecem no autódromo)
+  if (base.some((p) => p.k === "modelo")) await (await import("./customModels")).loadModels(base.filter((p) => p.k === "modelo").map((p) => p.v ?? 0));
+  const layer = new PieceLayer(base, shadows);
   group.add(layer.group);
   // (ordem: as do editor neste navegador, as que vêm no jogo, o alambrado automático)
   // o chão do mapa real entra no automático; quem salvou antes dele existir ganha ele por baixo do que salvou
-  autoPaths.unshift(...mapPaths);
+  autoPaths.unshift(...mapPaths, ...pistaPaths);
   let savedPaths = loadPaths(slugOf(track.name)) ?? (shipped ? shippedPaths : null);
+  // (quem salvou antes: a grama picotada do mapa sai, o chão de base já é grama; as linhas do mapa são
+  // cortadas na borda do chão)
+  if (savedPaths && !street) savedPaths = savedPaths.filter((it) => !(it.src === "mapa" && it.t === "grama"));
+  if (savedPaths)
+    savedPaths = savedPaths.flatMap((it) => (it.src === "mapa" && !PATHS[it.t].area ? clipLine(it.p).map((p) => ({ ...it, p: p.filter((_, k) => k % 2 === 0 || k === p.length - 1) })) : [it]));
   if (savedPaths && mapPaths.length && !savedPaths.some((it) => it.src === "mapa")) savedPaths = [...mapPaths, ...savedPaths];
+  // (salvo antes das zebras/escapes editáveis: ganha os automáticos, que antes eram fixos)
+  if (savedPaths && !savedPaths.some((it) => it.src === "pista")) savedPaths = [...pistaPaths, ...savedPaths];
   const paths = new PathLayer(savedPaths ?? autoPaths.map((it) => ({ ...it, p: it.p.slice() })), shadows);
   group.add(paths.group);
   // relevo: o salvo, o que vem no jogo, ou plano (plano não liga nada: não pesa)
   const saved = loadTerrain(slugOf(track.name));
-  const terrain = (saved !== undefined ? saved : shippedTerrain) ?? Terrain.around(x0, z0, x1, z1);
+  const terrain = (saved !== undefined ? saved : shippedTerrain) ?? Terrain.around(x0, z0, x1, z1, MAP_MARGIN);
   const relief = !!opts.terrain || !terrain.flat;
   if (relief) {
-    // chão com um ponto por célula da grade (pra subir e descer junto)
+    // chão com um ponto em cada ponto da grade de alturas (sobe e desce junto, sem sobrar pedaço reto)
     ground.geometry.dispose();
-    const w = terrain.nx * terrain.cell, d = terrain.nz * terrain.cell;
-    // (2 pontos por célula: o chão segue o relevo quase igual à pista, que pega a altura a cada 2 m)
-    ground.geometry = new THREE.PlaneGeometry(w, d, (terrain.nx - 1) * 2, (terrain.nz - 1) * 2);
-    ground.position.set(terrain.x0 - terrain.cell / 2 + w / 2, -0.05, terrain.z0 - terrain.cell / 2 + d / 2);
-    gt.repeat.set(w / 200, d / 200);
+    ground.geometry = groundGeo(terrain.cell, terrain.x0, terrain.z0);
   }
 
   for (const o of group.children) {

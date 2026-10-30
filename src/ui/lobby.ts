@@ -135,11 +135,12 @@ export class LobbyScreen {
 
     const tracks = root.querySelector("#l-tracks")!;
     if (!this.thumbsDrawn) {
-      tracks.innerHTML = ACTIVE_TRACKS.map(
+      // (pistas não oficiais do editor: só no solo; o servidor do online não tem elas)
+      tracks.innerHTML = ACTIVE_TRACKS.filter((i) => lobby.solo || !CIRCUITS[i].mod).map(
         (i) => [CIRCUITS[i], i] as const,
       ).map(
         ([c, i]) => `<button class="trackcard" data-track="${i}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
-          <div class="st">${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
+          <div class="st">${c.mod ? "Não oficial · " : c.edited ? "Editada · " : ""}${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
       ).join("");
       root.querySelector<HTMLInputElement>("#l-tsearch")!.addEventListener("input", (e) => {
         const q = (e.target as HTMLInputElement).value.trim().toLowerCase();

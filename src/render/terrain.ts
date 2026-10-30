@@ -185,8 +185,7 @@ export function shadeGround(m: THREE.Material, t: Terrain) {
         float hx = texture2D(tHeight, gU + vec2(gD.x, 0.0)).r - texture2D(tHeight, gU - vec2(gD.x, 0.0)).r;
         float hz = texture2D(tHeight, gU + vec2(0.0, gD.y)).r - texture2D(tHeight, gU - vec2(0.0, gD.y)).r;
         vec3 n = normalize(vec3(-hx / (2.0 * tCell), 1.0, -hz / (2.0 * tCell)));
-        // (o chão é um plano deitado: volta pro espaço dele)
-        objectNormal = vec3(n.x, -n.z, n.y);
+        objectNormal = n;
       }`,
     );
   };

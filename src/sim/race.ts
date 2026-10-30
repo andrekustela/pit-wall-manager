@@ -196,6 +196,64 @@ export class Race {
   private wearScale: number;
   private trace = new Map<number, number>(); // bucket de distância -> tempo do líder
   private teamIndex = new Map<string, number>();
+  /**
+   * muro de verdade de cada lado, a cada metro (distância até o meio da pista): vem das barreiras do
+   * autódromo 3D (guard-rail, muro, concreto, pneus, alambrado; setWalls). Sem: a distância padrão.
+   */
+  private wallL: Float32Array | null = null;
+  private wallR: Float32Array | null = null;
+
+  /**
+   * barreiras do autódromo (pontos no mundo, um a cada ~1 m): cada lado da pista bate no que estiver mais
+   * perto. Só no solo (no online quem roda a corrida é o servidor).
+   */
+  setWalls(pts: [number, number][]) {
+    const t = this.track, L = t.L, edge = TRACK_WIDTH / 2;
+    const def = edge + (t.def.street ? STREET_RUNOFF : RUNOFF);
+    const wl = new Float32Array(L).fill(def), wr = new Float32Array(L).fill(def);
+    // meio da pista a cada 2 m, numa grade de 20 m (pra achar o trecho mais perto de cada ponto)
+    const cell = 20, grid = new Map<number, number[]>(), key = (i: number, j: number) => i * 100003 + j;
+    for (let s = 0; s < L; s += 2) {
+      const p = t.pose(s, 0), k = key(Math.floor(p.x / cell), Math.floor(p.y / cell));
+      let a = grid.get(k);
+      if (!a) grid.set(k, (a = []));
+      a.push(s);
+    }
+    for (const [x, y] of pts) {
+      const ci = Math.floor(x / cell), cj = Math.floor(y / cell);
+      let best = -1, bd = 45 * 45;
+      for (let i = ci - 2; i <= ci + 2; i++)
+        for (let j = cj - 2; j <= cj + 2; j++)
+          for (const s of grid.get(key(i, j)) ?? []) {
+            const p = t.pose(s, 0), d = (p.x - x) ** 2 + (p.y - y) ** 2;
+            if (d < bd) {
+              bd = d;
+              best = s;
+            }
+          }
+      if (best < 0) continue;
+      const p = t.pose(best, 0);
+      // de lado (+ = direita) e ao longo (acerta o metro certo dentro dos 2 m)
+      const lat = -Math.sin(p.h) * (x - p.x) + Math.cos(p.h) * (y - p.y);
+      const along = Math.cos(p.h) * (x - p.x) + Math.sin(p.h) * (y - p.y);
+      // (barreira em cima da pista ou da zebra não conta: deve ser enfeite de outra parte)
+      if (Math.abs(lat) < edge + 1.2) continue;
+      // o carro (1 m de meia largura) encosta antes
+      const w = Math.max(edge + 0.8, Math.abs(lat) - 1);
+      const s0 = Math.round(t.wrap(best + along));
+      for (let d = -1; d <= 1; d++) {
+        const k = (s0 + d + L) % L;
+        if (lat > 0) wr[k] = Math.min(wr[k], w);
+        else wl[k] = Math.min(wl[k], w);
+      }
+    }
+    this.wallL = wl;
+    this.wallR = wr;
+    if (typeof window !== "undefined") {
+      const st = (w: Float32Array) => ({ min: Math.min(...w).toFixed(1), perto: w.filter((v) => v < def - 0.5).length });
+      (window as unknown as { __muros: unknown }).__muros = { padrao: def, esq: st(wl), dir: st(wr), pontos: pts.length };
+    }
+  }
   private remoteGaps: Map<string, { seconds: number; laps: number }> | null = null;
   private lastLapAnnounced = false;
 
@@ -744,7 +802,8 @@ export class Race {
     if (c.slide!.mode === "rejoin") return this.stepRejoin(c, dt);
     const t = this.track, sl = c.slide!;
     const street = !!t.def.street, edge = TRACK_WIDTH / 2;
-    const wall = edge + (street ? STREET_RUNOFF : RUNOFF);
+    const wk = Math.floor(t.wrap(c.s)) % t.L;
+    const wall = (c.lateral > 0 ? this.wallR?.[wk] : this.wallL?.[wk]) ?? edge + (street ? STREET_RUNOFF : RUNOFF);
     const team = c.isHuman ? c.team.id : undefined;
     const off = Math.abs(c.lateral) > edge + 0.5;
     if (c.v > 0.3) {

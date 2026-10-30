@@ -3,6 +3,7 @@
 // então as curvas são as de verdade; o sobe-e-desce é inventado, mais forte
 // nas pistas onduladas. Por cima, o cockpit: halo, bico, pneus da frente,
 // retrovisores e o volante com marcha, velocidade e luzes de giro.
+import { gearOf } from "./gear";
 import { gfx } from "./gfx";
 import type { Race } from "../sim/race";
 import { TRACK_WIDTH, angDiff, type Track } from "../sim/track";
@@ -60,6 +61,9 @@ export class OnboardCam {
    * Desenha a visão do carro `car`, que está em s/lat (suavizados pela tela).
    * `t` = tempo real (s) pra animações; `dt` = tempo do quadro.
    */
+  /** vista 3D de dentro do carro (o renderer liga quando o autódromo 3D está pronto: RealCars.drawOnboard) */
+  static world3d: ((g: CanvasRenderingContext2D, W: number, H: number, id: string, x: number, y: number, h: number) => boolean) | null = null;
+
   draw(g: CanvasRenderingContext2D, W: number, H: number, car: CarState, s0: number, lat0: number, dt: number, interp?: Map<string, { s: number; lat: number }>) {
     const race = this.race;
     const t = race.track;
@@ -298,12 +302,15 @@ export class OnboardCam {
       }
     }
 
+    // autódromo 3D pronto: a vista de verdade de dentro do carro por cima do desenho (o cockpit vem depois)
+    OnboardCam.world3d?.(g, W, H, car.id, cam.x, cam.y, h0);
+
     // ---- cockpit ----
     const steer = this.steerFor(car, s0, dt);
     const ped = this.pedalsFor(car, dt);
     const kmh = Math.round(car.v * 3.6);
-    const gear = car.v < 1 ? "N" : String(Math.min(8, 1 + Math.floor(Math.max(0, kmh - 20) / 40)));
-    const rev = kmh <= 20 ? kmh / 20 : ((kmh - 20) % 40) / 40;
+    // (com folga entre as marchas e o modo safety car: src/render/gear.ts)
+    const { gear, rev } = gearOf(car.id, kmh, this.race.sc.active);
     // 3D (render do Blender nos olhos do piloto) ou o desenho em vetor
     if (drawCockpit3d(g, W, H, car.team, steer, kmh, gear, rev, inTunnel(s0) || night)) this.pedalBars(g, W, H, ped, 0.74);
     else {

@@ -42,7 +42,7 @@ export function showEditor(onDone: () => void) {
   };
   const render = () => {
     m.innerHTML = `<div class="helpbox panel profbox edbox">
-      <div class="helphead"><b>EDITOR</b><span class="row-btns" style="margin:0"><button class="btn small primary" data-ted title="Mexer nas arquibancadas, boxes, pneus, árvores... de cada pista em 3D">AUTÓDROMO 3D</button><button class="btn small" data-x>✕</button></span></div>
+      <div class="helphead"><b>EDITOR</b><span class="row-btns" style="margin:0"><button class="btn small primary" data-tle title="Mexer no desenho das pistas (tamanho, curvas) ou criar pistas novas não oficiais">TRAÇADO</button><button class="btn small primary" data-ted title="Mexer nas arquibancadas, boxes, pneus, árvores... de cada pista em 3D">AUTÓDROMO 3D</button><button class="btn small" data-x>✕</button></span></div>
       <p class="hint" style="margin:0 0 10px">Troque os nomes das pistas e dos pilotos do seu jeito (vazio = nome original) e escolha a voz de cada piloto no rádio. Fica salvo só aqui; dá pra exportar e mandar o pacote pros amigos.</p>
       <div class="seg edtabs">${(["pistas", "lendas", "pilotos", "vozes"] as Tab[]).map((t) => `<button data-tab="${t}" class="${t === tab ? "on" : ""}">${{ pistas: "PISTAS", lendas: "LENDAS", pilotos: "PILOTOS FICTÍCIOS", vozes: "VOZES DO RÁDIO" }[t]}</button>`).join("")}</div>
       ${tab === "vozes" ? "" : `<input class="txt edsearch" data-q placeholder="Buscar..." value="${esc(q)}">`}
@@ -96,9 +96,30 @@ export function showEditor(onDone: () => void) {
     const t = e.target as HTMLElement;
     if (t === m || t.closest("[data-x]")) return close();
     // autódromo 3D: tela própria (o Three.js só é baixado aqui)
+    if (t.closest("[data-tle]")) {
+      close();
+      toast("Abrindo o editor de traçado...");
+      import("./trackLayoutEditor")
+        .then((md) => md.showTrackLayoutEditor(onDone))
+        .catch((err) => {
+          console.error(err);
+          toast("Não deu pra abrir o editor: recarregando a página...");
+          setTimeout(() => location.reload(), 1200);
+        });
+      return;
+    }
     if (t.closest("[data-ted]")) {
       close();
-      void import("./trackEditor3d").then((md) => md.showTrackEditor3d(onDone));
+      // (aviso enquanto baixa; se o arquivo do editor não vier, por exemplo porque o jogo foi atualizado
+      // com a página aberta, recarrega a página em vez de não fazer nada)
+      toast("Abrindo o editor do autódromo 3D...");
+      import("./trackEditor3d")
+        .then((md) => md.showTrackEditor3d(onDone))
+        .catch((err) => {
+          console.error(err);
+          toast("Não deu pra abrir o editor: recarregando a página...");
+          setTimeout(() => location.reload(), 1200);
+        });
       return;
     }
     const tb = t.closest<HTMLElement>("[data-tab]");

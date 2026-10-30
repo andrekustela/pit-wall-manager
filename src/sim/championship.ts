@@ -4,7 +4,9 @@ import { DEV_AREAS, DEV_MAX, NO_DEV, devCost, roundDevPoints, rollUpgrade, type 
 import type { Race } from "./race";
 import { CREW_AREAS, CREW_DEFAULT, CREW_MAX, crewCost, crewOf, normCrew, roundCrewPoints, type Crew, type CrewArea } from "./crew";
 export { crewCost } from "./crew";
-import { ACTIVE_TRACKS } from "./track";
+import { ACTIVE_TRACKS, CIRCUITS } from "./track";
+/** pistas do campeonato: as do jogo (as não oficiais do editor ficam de fora) */
+const champTracks = () => ACTIVE_TRACKS.filter((i) => !CIRCUITS[i].mod);
 
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 
@@ -198,7 +200,7 @@ export function startNewSeason(
   });
   ch.season = (ch.season ?? 1) + 1;
   // pistas novas (mesma quantidade de etapas)
-  const all = [...ACTIVE_TRACKS].sort(() => rnd() - 0.5);
+  const all = champTracks().sort(() => rnd() - 0.5);
   ch.rounds = all.slice(0, ch.rounds.length);
   ch.round = 0;
   ch.driverPts = {};
@@ -310,12 +312,12 @@ export function engineCheck(ch: ChampState, lineup: Record<string, string[]>, hu
 
 /** quantas etapas tem um campeonato com essa porcentagem das pistas */
 export function champRounds(pct: number): number {
-  return Math.max(1, Math.round((ACTIVE_TRACKS.length * pct) / 100));
+  return Math.max(1, Math.round((champTracks().length * pct) / 100));
 }
 
 /** campeonato com uma parte das pistas, sorteadas e em ordem aleatória */
 export function newChampionship(pct = 100, rnd: () => number = Math.random): ChampState {
-  const all = [...ACTIVE_TRACKS];
+  const all = champTracks();
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];

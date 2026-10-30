@@ -1,4 +1,5 @@
 import { MIX_GROUPS, sound, type MixGroup } from "../audio/sound";
+import { isKey } from "./keys";
 import { music } from "../audio/music";
 import { teamVoice } from "../audio/voice";
 import { voiceCmd } from "../audio/voiceCmd";
@@ -164,7 +165,7 @@ Roda no seu PC, sem custo: na primeira vez baixa uns 1,2 GB (o ouvido, a IA e as
     renderAi();
     this.el.querySelector("[data-full]")!.addEventListener("click", () => toggleFullscreen());
     document.addEventListener("keydown", (e) => {
-      if ((e.key === "f" || e.key === "F") && !(e.target as HTMLElement)?.closest("input, textarea")) toggleFullscreen();
+      if (isKey(e, "telaCheia") && !e.ctrlKey && !e.altKey && !(e.target as HTMLElement)?.closest("input, textarea")) toggleFullscreen();
     });
     document.addEventListener("fullscreenchange", () => {
       this.el.querySelector("[data-full]")!.textContent = document.fullscreenElement ? "🗗" : "⛶";

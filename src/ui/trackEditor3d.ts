@@ -6,27 +6,47 @@ import * as THREE from "three";
 import { MapControls } from "three/addons/controls/MapControls.js";
 import { ACTIVE_TRACKS, CIRCUITS, getTrack, type Track } from "../sim/track";
 import { buildTrack3d, slugOf } from "../render/track3d";
-import { DEFAULT_SIZE, PIECES, clearPieces, pathsFromJson, piecesFromJson, piecesToJson, savePieces, type Piece, type PieceKind, type PieceLayer } from "../render/pieces";
+import { DEFAULT_SIZE, PIECES, standV, clearPieces, pathsFromJson, piecesFromJson, piecesToJson, savePieces, type Piece, type PieceKind, type PieceLayer } from "../render/pieces";
+import { addModelFile, deleteModel, listModels, loadModels } from "../render/customModels";
 import { applyTerrain, type BrushMode, type Terrain } from "../render/terrain";
 import { PATHS, orderOf, samplePath, type PathItem, type PathKind, type PathLayer } from "../render/paths3d";
 import { esc, toast } from "./common";
 import { BAKE_PX, deleteBaked, getBakedMeta, putBakedMeta, putBakedTile, type BakedMeta } from "../render/bakedWorld";
 
+/** as peças por assunto, na ordem da paleta (o que faltar cai em "Outros") */
+const GROUPS: [string, PieceKind[]][] = [
+  ["Arquibancadas e público", ["arquibancada", "torcida", "telao", "bandeira", "passarela", "podio", "arco", "banheiro", "fotografo"]],
+  ["Pista e segurança", ["pneu", "blocopneus", "barreira", "jersey", "salsicha", "guardrail", "muro", "cone", "ambulancia", "freada", "placa", "fiscal", "cameratv", "portico", "semaforo", "poste"]],
+  ["Boxes e paddock", ["box", "equipe", "torre", "tenda", "motorhome", "onibus", "caminhao", "container", "caixas", "gerador", "golfe", "carro", "heliponto"]],
+  ["Prédios e cidade", ["edificio", "casa", "predio", "apartamento", "palacete", "hotel", "vila", "caixadagua", "tunel"]],
+  ["Natureza", ["arvore", "pinheiro", "palmeira", "arbusto", "cercaviva", "canteiro", "pedra"]],
+  ["Mar e porto", ["iate", "veleiro", "cruzeiro", "pier", "farol"]],
+];
+
 const CSS = `
 .ted{position:fixed;inset:0;z-index:9000;background:#0b0f14;user-select:none}
 .ted canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.ted .tedbar{position:absolute;left:290px;top:10px;right:290px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ted{--tedz:1;--pw:270px}
+.ted .tedbar,.ted .tedside,.ted .tedhint,.ted .tedmode,.ted .tedctx{zoom:var(--tedz)}
+.ted .tedbar{position:absolute;left:calc((var(--pw) + 20px) / var(--tedz));top:10px;right:calc((var(--pw) + 20px) / var(--tedz));display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .ted .tedbar select{max-width:230px}
 .ted .tedpanels{position:absolute;inset:0;pointer-events:none}
-.ted .tedside{position:absolute;right:10px;top:10px;max-height:calc(100% - 20px);width:270px;overflow:auto;padding:10px;pointer-events:auto;box-sizing:border-box}
-.ted .tedside.tedleft{left:10px;right:auto;bottom:10px}
+.ted .tedside{position:absolute;right:10px;top:10px;max-height:calc((100% - 20px) / var(--tedz));width:270px;overflow:auto;padding:10px;pointer-events:auto;box-sizing:border-box}
+.ted .tedside.tedleft{left:10px;right:auto;bottom:auto}
 .ted .tedside h4{margin:10px 0 6px;font-size:12px;letter-spacing:.08em;opacity:.8}
 .ted .tedpal{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .ted .tedpal button.on{outline:2px solid #ffd21a}
+.ted .tedtabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:0 0 8px}
+.ted details.tedgrp{margin:4px 0}
+.ted details.tedgrp summary{cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.04em;padding:4px 0;opacity:.9}
 .ted .tedfld{display:flex;flex-direction:column;gap:3px;margin:6px 0;font-size:12px}
 .ted .tedfld input[type=range]{width:100%}
-.ted .tedhint{position:absolute;left:290px;bottom:10px;right:290px;font-size:12px;opacity:.85;pointer-events:none;text-shadow:0 1px 2px #000}
+.ted .tedhint{position:absolute;left:calc((var(--pw) + 20px) / var(--tedz));bottom:10px;right:calc((var(--pw) + 20px) / var(--tedz));font-size:12px;opacity:.85;pointer-events:none;text-shadow:0 1px 2px #000}
 .ted .tedctx{position:absolute;z-index:5;display:flex;flex-direction:column;gap:3px;padding:6px;min-width:150px}
+.ted .tedall{position:absolute;inset:0;z-index:20;background:rgba(5,8,12,.72);display:flex;align-items:center;justify-content:center;padding:20px}
+.ted .tedall>div{zoom:var(--tedz);width:min(980px,calc((100vw - 40px) / var(--tedz)));max-height:calc((100vh - 40px) / var(--tedz));overflow:auto;padding:14px;box-sizing:border-box}
+.ted .tedall .tedpal{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.ted .tedall h4{margin:12px 0 6px;font-size:12px;letter-spacing:.08em;opacity:.8}
 .ted .tedrect{position:absolute;border:1px dashed #ffd21a;background:rgba(255,210,26,.12);pointer-events:none}
 .ted .tedmode{position:absolute;left:50%;top:60px;transform:translateX(-50%);background:#ffd21a;color:#111;padding:6px 12px;border-radius:6px;font-weight:700;font-size:13px}
 `;
@@ -68,6 +88,9 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   controls.maxPolarAngle = (85 * Math.PI) / 180;
   controls.minDistance = 12;
   controls.maxDistance = 2600;
+  // (a roda aproxima de onde o mouse está; o giro do botão direito é nosso, em volta do ponto clicado)
+  controls.zoomToCursor = true;
+  controls.mouseButtons.RIGHT = undefined as unknown as THREE.MOUSE;
   const selBox = new THREE.Box3Helper(new THREE.Box3(), 0xffd21a);
   selBox.visible = false;
   scene.add(selBox);
@@ -87,7 +110,51 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   let terrain: Terrain | null = null;
   let relevo: BrushMode | null = null;
   let rRadius = 40, rForce = 0.6, rLevel = 0;
-  let leftTab: "pecas" | "camadas" = "pecas";
+  // camadas do chão: as linhas da lista (as do mapa iguais juntas) e as selecionadas (por chave)
+  let layerRows: { key: string; ids: number[] }[] = [];
+  const layerSel = new Set<string>();
+  const layerRowsOf = () => {
+    const ids = paths().map((_, i) => i).filter((i) => PATHS[paths()[i].t].area && !PATHS[paths()[i].t].solid);
+    ids.sort((a, b) => orderOf(paths()[b]) - orderOf(paths()[a]) || b - a);
+    const rows: { key: string; ids: number[] }[] = [], byKey = new Map<string, { key: string; ids: number[] }>();
+    for (const i of ids) {
+      const it = paths()[i];
+      const key = it.src ? `${it.src}:${it.t}:${it.c ?? ""}:${orderOf(it)}` : `i:${i}`;
+      let r = byKey.get(key);
+      if (!r) {
+        r = { key, ids: [] };
+        rows.push(r);
+        byKey.set(key, r);
+      }
+      r.ids.push(i);
+    }
+    return rows;
+  };
+  /** põe as linhas `moved` logo acima da linha `before` (-1 = no fim) e renumera a ordem de todas (a de cima cobre) */
+  const moveRows = (moved: number[], before: number) => {
+    if (!pathL || !moved.length) return;
+    const set = new Set(moved);
+    const mv = layerRows.filter((_, n) => set.has(n));
+    const rest: typeof layerRows = [];
+    layerRows.forEach((r, n) => {
+      if (n === before) rest.push(...mv);
+      if (!set.has(n)) rest.push(r);
+    });
+    if (before < 0) rest.push(...mv);
+    rest.forEach((r, n) => r.ids.forEach((i) => (paths()[i].o = (rest.length - n) * 10)));
+    pathL.rebuild();
+    commit();
+  };
+  /** grupos da paleta abertos (lembra entre um desenho e outro do painel) */
+  const openGroups = new Set<string>(["Arquibancadas e público", "Linhas (barreiras, zebras, cercas)", "Chão (pintar uma área)", "Prédio pelo contorno"]);
+  // modelos .glb importados (neste navegador) e qual está sendo colocado
+  let myModels: { id: number; name: string }[] = [];
+  let placingV = 0;
+  void listModels().then((l) => {
+    myModels = l;
+    renderSide();
+  });
+  let leftTab: "pecas" | "linhas" | "relevo" | "camadas" = "pecas";
   // seleção múltipla (Shift + clique, ou Shift + arrastar um retângulo): "p3" = peça 3, "l5" = linha 5
   const multi = new Set<string>();
   let selP = -1;
@@ -107,6 +174,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   let lastR = 0;
   /** busca na paleta */
   let q = "";
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   let dirty = false;
   let undo: string[] = [];
@@ -273,7 +341,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   const hint = document.createElement("div");
   hint.className = "tedhint";
   hint.innerHTML =
-    "<b>Mouse:</b> esquerdo arrasta o mapa ou a peça (com <b>Alt</b>: só anda, sem mexer em nada) · direito gira a câmera · roda dá zoom · <b>Teclas:</b> Q/E giram · [ ] tamanho · Ctrl+D duplica · Del apaga · Ctrl+Z desfaz · Esc solta";
+    "<b>Mouse:</b> esquerdo arrasta o mapa ou a peça (com <b>Alt</b>: só anda, sem mexer em nada) · direito gira em volta do ponto clicado · roda aproxima de onde está o mouse · <b>Teclas:</b> Q/E giram · [ ] tamanho · Ctrl+D duplica · Del apaga · Ctrl+Z desfaz · Esc solta";
   const mode = document.createElement("div");
   mode.className = "tedmode";
   mode.hidden = true;
@@ -282,6 +350,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   function renderBar() {
     bar.innerHTML = `<b style="margin-right:6px">AUTÓDROMO 3D</b>
       <select class="txt" data-track ${loading ? "disabled" : ""}>${ACTIVE_TRACKS.map((i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${esc(CIRCUITS[i].name)}</option>`).join("")}</select>
+      <button class="btn small" data-all ${loading ? "disabled" : ""} title="Todas as peças, linhas, chãos e ferramentas numa tela só, com pesquisa">☰ VER TUDO</button>
       <button class="btn small primary" data-save ${loading ? "disabled" : ""}>SALVAR</button>
       <button class="btn small" data-auto ${loading ? "disabled" : ""} title="Volta pro posicionamento automático desta pista">AUTOMÁTICO</button>
       <button class="btn small" data-exp ${loading ? "disabled" : ""}>⬇ EXPORTAR</button>
@@ -292,39 +361,129 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
       ${baking ? `<span class="hint">${baking}</span>` : loading ? `<span class="hint">montando o autódromo...</span>` : `<span class="hint">${pieces().length.toLocaleString("pt-BR")} peças${dirty ? " · não salvo" : ""}${hasBaked ? " · com 2D gerado" : ""}</span>`}`;
   }
 
+  // ---- VER TUDO: o catálogo inteiro numa tela, com pesquisa; um clique já escolhe ----
+  const catalog = document.createElement("div");
+  catalog.className = "tedall";
+  catalog.hidden = true;
+  root.appendChild(catalog);
+  let cq = "";
+  function renderCatalog() {
+    const show = (label: string) => !cq || norm(label).includes(norm(cq));
+    const used = new Set(GROUPS.flatMap((g) => g[1]));
+    const all = Object.keys(PIECES) as PieceKind[];
+    const ks = Object.keys(PATHS) as PathKind[];
+    const sec = (title: string, items: string[]) => (items.length ? `<h4>${esc(title)} (${items.length})</h4><div class="tedpal">${items.join("")}</div>` : "");
+    const pc = (k: PieceKind) => (show(PIECES[k].label) ? [`<button class="btn small" data-cat-place="${k}">${esc(PIECES[k].label)}</button>`] : []);
+    const pa = (k: PathKind) => (show(PATHS[k].label) ? [`<button class="btn small" data-cat-draw="${k}">${esc(cap(PATHS[k].label.replace("Chão: ", "")))}</button>`] : []);
+    const rel = (["subir", "descer", "suavizar", "nivelar"] as BrushMode[]).filter((m) => show(`relevo ${m}`)).map((m) => `<button class="btn small" data-cat-relevo="${m}">Relevo: ${m}</button>`);
+    const body =
+      [...GROUPS, ["Outros", all.filter((k) => !used.has(k))] as [string, PieceKind[]]].map(([n, list]) => sec(`Peças · ${n}`, list.flatMap(pc))).join("") +
+      sec("Linhas (barreiras, zebras, cercas)", ks.filter((k) => !PATHS[k].area).flatMap(pa)) +
+      sec("Chão (pintar uma área)", ks.filter((k) => PATHS[k].area && !PATHS[k].solid).flatMap(pa)) +
+      sec("Prédio pelo contorno", ks.filter((k) => PATHS[k].solid).flatMap(pa)) +
+      sec("Relevo", rel);
+    const box = catalog.querySelector<HTMLElement>("[data-cat-body]");
+    if (box) box.innerHTML = body || `<p class="hint">Nada com "${esc(cq)}".</p>`;
+    else
+      catalog.innerHTML = `<div class="panel"><div class="row-btns" style="align-items:center;margin:0"><b style="flex:1">TUDO DO EDITOR</b><input class="txt" data-cat-q placeholder="Pesquisar em tudo..." style="width:260px"><button class="btn small" data-cat-x>✕ FECHAR (Esc)</button></div><div data-cat-body>${body}</div></div>`;
+  }
+  const openCatalog = () => {
+    cq = "";
+    catalog.innerHTML = "";
+    renderCatalog();
+    catalog.hidden = false;
+    catalog.querySelector<HTMLInputElement>("[data-cat-q]")?.focus();
+  };
+  catalog.addEventListener("input", (e) => {
+    const t = e.target as HTMLInputElement;
+    if (!t.matches("[data-cat-q]")) return;
+    cq = t.value;
+    renderCatalog();
+  });
+  catalog.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t === catalog || t.closest("[data-cat-x]")) return void (catalog.hidden = true);
+    const b = t.closest<HTMLElement>("[data-cat-place], [data-cat-draw], [data-cat-relevo]");
+    if (!b) return;
+    relevo = null;
+    placing = null;
+    drawing = null;
+    sel = selP = selPt = -1;
+    multi.clear();
+    if (b.dataset.catPlace) {
+      leftTab = "pecas";
+      placing = b.dataset.catPlace as PieceKind;
+      // (abre o grupo da peça na paleta)
+      const g = GROUPS.find(([, l]) => l.includes(placing!));
+      if (g) openGroups.add(g[0]);
+    } else if (b.dataset.catDraw) {
+      leftTab = "linhas";
+      drawing = { t: b.dataset.catDraw as PathKind, pts: [] };
+    } else {
+      leftTab = "relevo";
+      relevo = b.dataset.catRelevo as BrushMode;
+    }
+    catalog.hidden = true;
+    updateSel();
+    renderSide();
+  });
+
   function renderSide() {
     const p = sel >= 0 ? pieces()[sel] : null;
     const kinds = Object.keys(PIECES) as PieceKind[];
-    const tabs = `<div class="row-btns" style="margin:0 0 8px"><button class="btn small ${leftTab === "pecas" ? "primary" : ""}" data-tab3="pecas">PEÇAS</button><button class="btn small ${leftTab === "camadas" ? "primary" : ""}" data-tab3="camadas">CAMADAS DO CHÃO</button></div>`;
+    const tabs = `<div class="tedtabs">${([["pecas", "PEÇAS"], ["linhas", "LINHAS E CHÃO"], ["relevo", "RELEVO"], ["camadas", "CAMADAS"]] as const)
+      .map(([k, n]) => `<button class="btn small ${leftTab === k ? "primary" : ""}" data-tab3="${k}">${n}</button>`)
+      .join("")}</div>`;
+    const hidden = (label: string) => (q && !norm(label).includes(norm(q)) ? "hidden" : "");
+    let palHtml = tabs;
+    // (abrir ou fechar todos os grupos da aba)
+    const grpAll = (names: string[]) => {
+      const all = names.every((n) => openGroups.has(n));
+      return `<button class="btn small" data-grpall="${esc(names.join("|"))}" title="${all ? "Fechar todos os grupos" : "Abrir todos os grupos"}" style="flex:0 0 34px;padding:0;font-size:16px">${all ? "⊟" : "⊞"}</button>`;
+    };
+    /** campo de pesquisa com o botão de abrir/fechar os grupos do lado */
+    const search = (ph: string, names: string[]) => `<div style="display:flex;gap:4px;margin-bottom:4px"><input class="txt" data-q placeholder="${ph}" value="${esc(q)}" style="flex:1;min-width:0">${grpAll(names)}</div>`;
     if (leftTab === "camadas") {
-      // as camadas do chão, de cima pra baixo (a de cima cobre as de baixo)
-      const ids = paths().map((_, i) => i).filter((i) => PATHS[paths()[i].t].area && !PATHS[paths()[i].t].solid);
-      ids.sort((a, b) => orderOf(paths()[b]) - orderOf(paths()[a]) || b - a);
-      side.innerHTML = `<div class="tedside tedleft panel">${tabs}<p class="hint" style="margin:0 0 6px">De cima pra baixo: a de cima cobre as de baixo. Clique pra selecionar.</p>${ids
-        .map((i) => {
-          const it = paths()[i];
-          return `<div class="row-btns" style="margin:2px 0;align-items:center;${i === selP ? "outline:1px solid #ffd21a;" : ""}"><span style="display:inline-block;width:12px;height:12px;background:${it.c ?? PATHS[it.t].cores?.[0] ?? "#30343d"};border:1px solid #000"></span><button class="btn small" data-layer="${i}" style="flex:1;text-align:left">${esc(PATHS[it.t].label.replace("Chão: ", ""))}${it.src === "mapa" ? " · mapa" : ""}</button><button class="btn small" data-lup="${i}">▲</button><button class="btn small" data-ldown="${i}">▼</button></div>`;
+      layerRows = layerRowsOf();
+      palHtml += `<p class="hint" style="margin:0 0 6px">De cima pra baixo: a de cima cobre as de baixo. <b>Arraste</b> pra mudar a ordem; <b>Ctrl/Shift + clique</b> seleciona várias. As do mapa real do mesmo tipo e cor vêm juntas numa linha (ex.: lagos e piscinas = água).</p>${layerRows
+        .map((r, n) => {
+          const it = paths()[r.ids[0]], on = layerSel.has(r.key) || (r.ids.length === 1 && r.ids[0] === selP);
+          return `<div class="row-btns tedlayer" draggable="true" data-row="${n}" style="margin:2px 0;align-items:center;cursor:grab;${on ? "outline:1px solid #ffd21a;" : ""}"><span style="display:inline-block;width:12px;height:12px;background:${it.c ?? PATHS[it.t].cores?.[0] ?? "#30343d"};border:1px solid #000"></span><button class="btn small" data-lrow="${n}" style="flex:1;text-align:left">${esc(cap(PATHS[it.t].label.replace("Chão: ", "")))}${it.src === "mapa" ? " · mapa" : it.src === "pista" ? " · beira da pista" : ""}${r.ids.length > 1 ? ` (${r.ids.length})` : ""}</button><button class="btn small" data-lmove="${n}" data-dir="-1" title="Pra cima">▲</button><button class="btn small" data-lmove="${n}" data-dir="1" title="Pra baixo">▼</button></div>`;
         })
-        .join("")}</div>${selP >= 0 || sel >= 0 ? "" : ""}`;
-      mode.hidden = true;
-      renderBar();
-      return;
+        .join("")}`;
+    } else if (leftTab === "relevo")
+      palHtml += `<p class="hint" style="margin:0 0 6px">Escolha o pincel e arraste no chão. A pista, as peças e o chão acompanham. (Só o visual: a corrida não muda.)</p><div class="tedpal">${(["subir", "descer", "suavizar", "nivelar"] as BrushMode[])
+        .map((m) => `<button class="btn small ${relevo === m ? "on" : ""}" data-relevo="${m}">${{ subir: "▲ Subir", descer: "▼ Descer", suavizar: "≈ Suavizar", nivelar: "▬ Nivelar" }[m]}</button>`)
+        .join("")}</div>
+        <label class="tedfld"><span>Raio: <b data-out="rr">${rRadius} m</b></span><input type="range" data-rr min="8" max="250" step="1" value="${rRadius}"></label><label class="tedfld"><span>Força: <b data-out="rf">${rForce.toFixed(1)}</b></span><input type="range" data-rf min="0.1" max="3" step="0.1" value="${rForce}"></label>`;
+    else if (leftTab === "linhas") {
+      const ks = Object.keys(PATHS) as PathKind[];
+      const btn = (k: PathKind) => `<button class="btn small ${drawing?.t === k ? "on" : ""}" data-draw="${k}" ${hidden(PATHS[k].label)}>${cap(PATHS[k].label.replace("Chão: ", ""))}</button>`;
+      const groups: [string, PathKind[]][] = [
+        ["Linhas (barreiras, zebras, cercas)", ks.filter((k) => !PATHS[k].area)],
+        ["Chão (pintar uma área)", ks.filter((k) => PATHS[k].area && !PATHS[k].solid)],
+        ["Prédio pelo contorno", ks.filter((k) => PATHS[k].solid)],
+      ];
+      palHtml += `${search("Pesquisar linha ou chão...", groups.map((g) => g[0]))}${groups
+        .map(([name, list]) => `<details class="tedgrp" ${q || openGroups.has(name) ? "open" : ""} data-grp="${esc(name)}" ${q && list.every((k) => hidden(PATHS[k].label)) ? "hidden" : ""}><summary>${esc(name)}</summary><div class="tedpal">${list.map(btn).join("")}</div></details>`)
+        .join("")}<p class="hint" style="margin-top:8px">Escolha e clique os pontos no chão; a curva passa suave por eles. Enter conclui.</p>`;
+    } else {
+      const used = new Set(GROUPS.flatMap((g) => g[1]));
+      const groups: [string, PieceKind[]][] = [...GROUPS, ["Outros", kinds.filter((k) => !used.has(k) && k !== "modelo")]];
+      palHtml += `${search("Pesquisar peça...", groups.filter(([, ks]) => ks.length).map((g) => g[0]))}${groups
+        .filter(([, ks]) => ks.length && (!q || ks.some((k) => !hidden(PIECES[k].label))))
+        .map(([name, ks]) => `<details class="tedgrp" ${q || openGroups.has(name) ? "open" : ""} data-grp="${esc(name)}"><summary>${esc(name)}</summary><div class="tedpal">${ks
+          .map((k) => `<button class="btn small ${placing === k ? "on" : ""}" data-place="${k}" ${hidden(PIECES[k].label)}>${PIECES[k].label}</button>`)
+          .join("")}</div></details>`)
+        .join("")}
+        <details class="tedgrp" open><summary>Meus modelos 3D (.glb)</summary>
+          <button class="btn small" data-glb style="width:100%;margin:2px 0 4px">⬆ IMPORTAR MODELO .GLB</button><input type="file" accept=".glb" data-glbfile hidden>
+          <div class="tedpal">${myModels.map((m) => `<button class="btn small ${placing === "modelo" && placingV === m.id ? "on" : ""}" data-model="${m.id}" ${hidden(m.name)}>${esc(m.name)}</button>`).join("")}</div>
+          ${myModels.length ? `<p class="hint" style="margin:4px 0 0">Ficam só neste navegador. Pra ir pro jogo de todo mundo, me mande o .glb junto com o autódromo exportado.</p>` : `<p class="hint" style="margin:4px 0 0">Modelos de graça: Poly Pizza, Sketchfab (licença livre), Kenney. Em metros, de preferência leves.</p>`}
+        </details>
+        <p class="hint" style="margin-top:8px">Escolha uma peça e clique no chão (várias seguidas; Esc para). Clique numa peça pra editar.</p>`;
     }
-    let html = tabs + `<h4>RELEVO (SUBIR E DESCER O CHÃO)</h4><div class="tedpal">${(["subir", "descer", "suavizar", "nivelar"] as BrushMode[])
-      .map((m) => `<button class="btn small ${relevo === m ? "on" : ""}" data-relevo="${m}">${{ subir: "▲ Subir", descer: "▼ Descer", suavizar: "≈ Suavizar", nivelar: "▬ Nivelar" }[m]}</button>`)
-      .join("")}</div>
-      ${relevo ? `<label class="tedfld"><span>Raio: <b data-out="rr">${rRadius} m</b></span><input type="range" data-rr min="8" max="250" step="1" value="${rRadius}"></label><label class="tedfld"><span>Força: <b data-out="rf">${rForce.toFixed(1)}</b></span><input type="range" data-rf min="0.1" max="3" step="0.1" value="${rForce}"></label>` : ""}
-      <h4>COLOCAR PEÇA</h4>`;
-    html = html.replace("<h4>COLOCAR PEÇA</h4>", "<h4>COLOCAR PEÇA</h4>");
-    html += ``;
-    let pal0 = `<h4>COLOCAR PEÇA</h4><input class="txt" data-q placeholder="Pesquisar peça..." value="${esc(q)}" style="width:100%;margin-bottom:6px"><div class="tedpal">${kinds
-      .map((k) => `<button class="btn small ${placing === k ? "on" : ""}" data-place="${k}" ${q && !norm(PIECES[k].label).includes(norm(q)) ? "hidden" : ""}>${PIECES[k].label}</button>`)
-      .join("")}</div>
-      <h4>DESENHAR LINHA OU CHÃO</h4><div class="tedpal">${(Object.keys(PATHS) as PathKind[])
-        .map((k) => `<button class="btn small ${drawing?.t === k ? "on" : ""}" data-draw="${k}" ${q && !norm(PATHS[k].label).includes(norm(q)) ? "hidden" : ""}>${PATHS[k].label}</button>`)
-        .join("")}</div>`;
-    const palHtml = html + pal0.replace("<h4>COLOCAR PEÇA</h4>", "");
-    html = "";
+    let html = "";
     const it = selP >= 0 ? paths()[selP] : null;
     if (multi.size)
       html += `<h4>SELEÇÃO</h4><b>${multi.size} selecionados</b><p class="hint">Shift + clique põe ou tira da seleção; Shift + arrastar seleciona por área.</p>
@@ -357,11 +516,13 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
         ${p.k === "edificio" ? `<label class="tedfld"><span>Cor do teto</span><input type="color" data-c="c2" value="${p.c2 ?? "#c9c2b4"}"></label>` : ""}
         ${def.cores ? `<label class="tedfld"><span>Cor</span><input type="color" data-c="c" value="${p.c ?? def.cores[0]}"></label>` : ""}
         ${def.cores?.[1] && p.k !== "edificio" ? `<label class="tedfld"><span>Cor do telhado</span><input type="color" data-c="c2" value="${p.c2 ?? def.cores[1]}"></label>` : ""}
-        ${def.variantes ? `<label class="tedfld"><span>Tipo</span><select class="txt" data-var>${def.variantes.map((n, i) => `<option value="${i}" ${(p.v ?? 0) === i ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
+        ${def.variantes ? `<label class="tedfld"><span>Tipo</span><select class="txt" data-var>${def.variantes.map((n, i) => `<option value="${i}" ${(p.k === "arquibancada" ? (p.v ?? 0) & 3 : p.v ?? 0) === i ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>` : ""}
+        ${p.k === "arquibancada" ? `<label class="tedfld" style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" data-crowd ${(p.v ?? 0) & 4 ? "checked" : ""}> com torcida (gente e bandeiras)</label>` : ""}
         ${p.k === "edificio" ? `<button class="btn small" data-heli style="margin-top:6px">+ HELIPONTO NO TETO</button>` : ""}
+        ${p.k === "modelo" ? `<p class="hint">${esc(myModels.find((m) => m.id === p.v)?.name ?? "modelo sem o arquivo neste navegador (caixa rosa)")}</p><button class="btn small" data-delmodel="${p.v ?? 0}">APAGAR ESTE MODELO DO NAVEGADOR</button>` : ""}
         <div class="row-btns" style="margin-top:8px"><button class="btn small" data-dup>DUPLICAR</button><button class="btn small" data-del>APAGAR</button></div>`;
     }
-    side.innerHTML = `<div class="tedside tedleft panel">${palHtml}<p class="hint" style="margin-top:10px">Escolha uma peça e clique no chão pra colocar (várias seguidas; Esc pra parar). Clique numa peça ou linha pra editar.</p></div>${html ? `<div class="tedside panel">${html}</div>` : ""}`;
+    side.innerHTML = `<div class="tedside tedleft panel">${palHtml}</div>${html ? `<div class="tedside panel">${html}</div>` : ""}`;
     mode.hidden = !placing && !drawing;
     if (relevo) {
       mode.hidden = false;
@@ -375,6 +536,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
 
   function select(i: number) {
     multi.clear();
+    layerSel.clear();
     sel = i;
     selP = selPt = -1;
     updateSel();
@@ -382,6 +544,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   }
   function selectPath(i: number, pt = -1) {
     multi.clear();
+    layerSel.clear();
     sel = -1;
     selP = i;
     selPt = pt;
@@ -415,6 +578,15 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
     preview.geometry = new THREE.BufferGeometry().setFromPoints(sm.map(([x, z]) => new THREE.Vector3(x, 0.5, z)));
     preview.visible = true;
   }
+  // ---- ir até a seleção (clique na camada): a câmera desliza até ela, olhando do mesmo jeito ----
+  let fly: { t0: number; fromT: THREE.Vector3; toT: THREE.Vector3; fromP: THREE.Vector3; toP: THREE.Vector3 } | null = null;
+  function focusSel() {
+    if (!selBox.visible || selBox.box.isEmpty()) return;
+    const c = selBox.box.getCenter(new THREE.Vector3()), size = selBox.box.getSize(new THREE.Vector3()).length();
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    const dist = Math.min(controls.maxDistance, Math.max(40, size * 1.4));
+    fly = { t0: performance.now(), fromT: controls.target.clone(), toT: c, fromP: camera.position.clone(), toP: c.clone().addScaledVector(dir, dist) };
+  }
   function updateSel() {
     updateHandles();
     updatePreview();
@@ -442,7 +614,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   const addPiece = (k: PieceKind, x: number, z: number) => {
     if (!layer) return;
     const def = PIECES[k], sz = DEFAULT_SIZE[k];
-    const p: Piece = { k, x, z, r: lastR, ...(def.cores ? { c: def.cores[0] } : {}), ...(def.cores?.[1] ? { c2: def.cores[1] } : {}), ...(sz ? { sx: sz[0], sy: sz[1], sz: sz[2] } : {}) };
+    const p: Piece = { k, x, z, r: lastR, ...(k === "modelo" ? { v: placingV } : {}), ...(def.cores ? { c: def.cores[0] } : {}), ...(def.cores?.[1] ? { c2: def.cores[1] } : {}), ...(sz ? { sx: sz[0], sy: sz[1], sz: sz[2] } : {}) };
     layer.pieces.push(p);
     layer.rebuild();
     sel = layer.pieces.length - 1;
@@ -537,6 +709,8 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
     controls.dispose();
     layer?.dispose();
     renderer.dispose();
+    // (devolve o contexto da placa de vídeo na hora: abrir e fechar várias vezes esgotava e a tela não abria)
+    renderer.forceContextLoss();
     root.remove();
     onDone();
   };
@@ -555,6 +729,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
       void t.files[0].text().then((txt) => {
         try {
           const list = piecesFromJson(txt);
+          void loadModels(list.filter((p) => p.k === "modelo").map((p) => p.v ?? 0)).then(() => layer?.rebuild());
           undo.push(snap);
           replaceAll(list, pathsFromJson(txt));
           snap = stateJson();
@@ -571,6 +746,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   bar.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t.closest("[data-exit]")) return close();
+    if (t.closest("[data-all]")) return openCatalog();
     if (t.closest("[data-bake]")) return void bake();
     if (t.closest("[data-unbake]")) {
       void deleteBaked(slugOf(track.name)).then(() => {
@@ -614,6 +790,10 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
     const tb3 = t.closest<HTMLElement>("[data-tab3]");
     if (tb3) {
       leftTab = tb3.dataset.tab3 as typeof leftTab;
+      relevo = null;
+      placing = null;
+      drawing = null;
+      updateSel();
       return renderSide();
     }
     const rl = t.closest<HTMLElement>("[data-relevo]");
@@ -623,6 +803,67 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
       placing = null;
       drawing = null;
       updateSel();
+      return renderSide();
+    }
+    const dm = t.closest<HTMLElement>("[data-delmodel]");
+    if (dm && layer) {
+      if (!window.confirm("Apagar o arquivo deste modelo do navegador? As peças dele viram caixa rosa até importar de novo.")) return;
+      void deleteModel(Number(dm.dataset.delmodel)).then(async () => {
+        myModels = await listModels();
+        layer?.rebuild();
+        renderSide();
+      });
+      return;
+    }
+    if (t.closest("[data-glb]")) return side.querySelector<HTMLInputElement>("[data-glbfile]")?.click();
+    const md = t.closest<HTMLElement>("[data-model]");
+    if (md) {
+      const id = Number(md.dataset.model);
+      placing = placing === "modelo" && placingV === id ? null : "modelo";
+      placingV = id;
+      drawing = null;
+      relevo = null;
+      updateSel();
+      return renderSide();
+    }
+    const ga = t.closest<HTMLElement>("[data-grpall]");
+    if (ga) {
+      const names = (ga.dataset.grpall ?? "").split("|"), open = !names.every((n) => openGroups.has(n));
+      for (const n of names) {
+        if (open) openGroups.add(n);
+        else openGroups.delete(n);
+      }
+      return renderSide();
+    }
+    const lr = t.closest<HTMLElement>("[data-lrow]");
+    if (lr) {
+      const r = layerRows[Number(lr.dataset.lrow)];
+      if (!r) return;
+      const me = e as MouseEvent;
+      const keep = new Set(me.ctrlKey || me.shiftKey || me.metaKey ? layerSel : []);
+      if (keep.has(r.key)) keep.delete(r.key);
+      else keep.add(r.key);
+      // (a seleção da lista vira a seleção da cena: uma só abre o editor dela; várias, a seleção múltipla)
+      const ids = layerRows.filter((x) => keep.has(x.key)).flatMap((x) => x.ids);
+      if (ids.length === 1) selectPath(ids[0]);
+      else {
+        select(-1);
+        for (const i of ids) multi.add(`l${i}`);
+        updateSel();
+      }
+      for (const k of keep) layerSel.add(k);
+      focusSel();
+      return renderSide();
+    }
+    const lmv = t.closest<HTMLElement>("[data-lmove]");
+    if (lmv) {
+      const n = Number(lmv.dataset.lmove), dir = Number(lmv.dataset.dir);
+      // (move a linha, ou todas as selecionadas se ela estiver entre elas)
+      const sel0 = layerRows.map((r, k) => (layerSel.has(r.key) ? k : -1)).filter((k) => k >= 0);
+      const moved = sel0.includes(n) ? sel0 : [n];
+      const edge = dir < 0 ? Math.min(...moved) - 1 : Math.max(...moved) + 2;
+      if (edge < 0 || edge > layerRows.length) return;
+      moveRows(moved, edge >= layerRows.length ? -1 : edge);
       return renderSide();
     }
     const ly = t.closest<HTMLElement>("[data-layer]");
@@ -731,6 +972,10 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
       q = t.value;
       side.querySelectorAll<HTMLElement>("[data-place]").forEach((b) => (b.hidden = !!q && !norm(PIECES[b.dataset.place as PieceKind].label).includes(norm(q))));
       side.querySelectorAll<HTMLElement>("[data-draw]").forEach((b) => (b.hidden = !!q && !norm(PATHS[b.dataset.draw as PathKind].label).includes(norm(q))));
+      side.querySelectorAll<HTMLDetailsElement>("details.tedgrp").forEach((d) => {
+        d.hidden = !!q && ![...d.querySelectorAll<HTMLElement>("button")].some((b) => !b.hidden);
+        d.open = !!q || openGroups.has(d.dataset.grp ?? "");
+      });
       return;
     }
     const it = selP >= 0 ? paths()[selP] : null;
@@ -763,14 +1008,70 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
       changed();
     }
   });
+  // arrastar camadas: solta em cima de outra linha = fica acima dela
+  let dragRow = -1;
+  side.addEventListener("dragstart", (e) => {
+    const r = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+    if (!r) return;
+    dragRow = Number(r.dataset.row);
+    e.dataTransfer?.setData("text/plain", String(dragRow));
+  });
+  side.addEventListener("dragover", (e) => {
+    const r = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+    if (!r || dragRow < 0) return;
+    e.preventDefault();
+    side.querySelectorAll<HTMLElement>("[data-row]").forEach((x) => (x.style.borderTop = x === r ? "2px solid #ffd21a" : ""));
+  });
+  side.addEventListener("dragend", () => (dragRow = -1));
+  side.addEventListener("drop", (e) => {
+    const r = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+    if (!r || dragRow < 0) return;
+    e.preventDefault();
+    const to = Number(r.dataset.row);
+    const sel0 = layerRows.map((x, k) => (layerSel.has(x.key) ? k : -1)).filter((k) => k >= 0);
+    const moved = sel0.includes(dragRow) ? sel0 : [dragRow];
+    dragRow = -1;
+    if (!moved.includes(to)) moveRows(moved, to);
+    renderSide();
+  });
+  // (lembra quais grupos da paleta ficaram abertos; o "toggle" não sobe, por isso a captura)
+  side.addEventListener(
+    "toggle",
+    (e) => {
+      const d = e.target as HTMLDetailsElement;
+      if (!d.dataset?.grp || q) return;
+      if (d.open) openGroups.add(d.dataset.grp);
+      else openGroups.delete(d.dataset.grp);
+    },
+    true,
+  );
   side.addEventListener("change", (e) => {
     const t = e.target as HTMLSelectElement;
+    const fi = e.target as HTMLInputElement;
+    if (fi.matches("[data-glbfile]") && fi.files?.[0]) {
+      const f = fi.files[0];
+      toast(`Lendo ${f.name}...`);
+      void addModelFile(f)
+        .then(async (id) => {
+          myModels = await listModels();
+          placing = "modelo";
+          placingV = id;
+          renderSide();
+          toast(`${f.name}: clique no chão pra colocar`);
+        })
+        .catch((err) => toast(`Não deu pra abrir o modelo: ${(err as Error).message}`));
+      return;
+    }
     if (t.matches("[data-q]") || t.matches("[data-rr]") || t.matches("[data-rf]")) return;
     if (selP >= 0) return commit();
     const p = sel >= 0 ? pieces()[sel] : null;
     if (!p) return;
-    if (t.matches("[data-var]")) {
-      p.v = Number(t.value) || undefined;
+    if (t.matches("[data-var]") || t.matches("[data-crowd]")) {
+      if (p.k === "arquibancada") {
+        const v = p.v ?? 0, kind = t.matches("[data-var]") ? Number(t.value) : v & 3;
+        const crowd = t.matches("[data-crowd]") ? (t as unknown as HTMLInputElement).checked : !!(v & 4);
+        p.v = standV(kind, crowd, (v >> 3) & 3) || undefined;
+      } else p.v = Number(t.value) || undefined;
       layer?.rebuild();
       updateSel();
     }
@@ -1007,7 +1308,35 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   let rdown: { x: number; y: number } | null = null;
   renderer.domElement.addEventListener("pointerdown", (e) => {
     ctx.hidden = true;
-    if (e.button === 2) rdown = { x: e.clientX, y: e.clientY };
+    if (e.button === 2) {
+      rdown = { x: e.clientX, y: e.clientY };
+      // girar a câmera: o eixo é o ponto do chão onde clicou (a tela não pula: câmera e alvo giram juntos)
+      // (com algo selecionado, gira em volta dele)
+      const pv = selBox.visible && !selBox.box.isEmpty() ? selBox.box.getCenter(new THREE.Vector3()) : null;
+      orbit = { x: e.clientX, y: e.clientY, pivot: pv ?? hitGround(e) ?? controls.target.clone() };
+    }
+  });
+  let orbit: { x: number; y: number; pivot: THREE.Vector3 } | null = null;
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), fwd = new THREE.Vector3(), right = new THREE.Vector3();
+  window.addEventListener("pointermove", (e) => {
+    if (!orbit || !(e.buttons & 2)) return void (orbit = null);
+    const dx = e.clientX - orbit.x, dy = e.clientY - orbit.y;
+    orbit.x = e.clientX;
+    orbit.y = e.clientY;
+    right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    qa.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -dx * 0.005);
+    qb.setFromAxisAngle(right, -dy * 0.005);
+    // (sem passar de olhar reto pra baixo nem olhar pro horizonte)
+    fwd.set(0, 0, -1).applyQuaternion(qb.clone().multiply(camera.quaternion));
+    if (fwd.y > -0.08 || fwd.y < -0.998) qb.identity();
+    const q = qa.multiply(qb);
+    const pv = orbit.pivot;
+    camera.position.sub(pv).applyQuaternion(q).add(pv);
+    controls.target.sub(pv).applyQuaternion(q).add(pv);
+    camera.quaternion.premultiply(q);
+  });
+  window.addEventListener("pointerup", (e) => {
+    if (e.button === 2) orbit = null;
   });
   renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
   renderer.domElement.addEventListener("pointerup", (e) => {
@@ -1043,8 +1372,16 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
 
   // ---- teclas ----
   const onKey = (e: KeyboardEvent) => {
+    // (catálogo aberto: Esc fecha, o resto das teclas não mexe na cena)
+    if (!catalog.hidden) {
+      if (e.key === "Escape") catalog.hidden = true;
+      return;
+    }
     const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === "INPUT" || tag === "SELECT") return;
+    if (tag === "INPUT" || tag === "SELECT") {
+      if (e.key !== "Escape") return;
+      (e.target as HTMLElement).blur();
+    }
     e.stopPropagation();
     const k = e.key.toLowerCase();
     const p = sel >= 0 ? pieces()[sel] : null;
@@ -1099,7 +1436,15 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
   window.addEventListener("keydown", onKey, true);
 
   // ---- tamanho e laço ----
+  /** escala dos painéis pelo tamanho da tela (tela menor: tudo menor, nada cortado) */
+  const fitUi = () => {
+    const z = Math.max(0.6, Math.min(1.15, window.innerWidth / 1600, window.innerHeight / 880));
+    root.style.setProperty("--tedz", z.toFixed(3));
+    root.style.setProperty("--pw", `${Math.round(270 * z)}px`);
+  };
+  fitUi();
   const resize = () => {
+    fitUi();
     const w = root.clientWidth, h = root.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / Math.max(1, h);
@@ -1113,6 +1458,12 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
     raf = requestAnimationFrame(loop);
     if (baking) return;
     if (world && terrain && ++terrFrame % 20 === 0) applyTerrain(world, terrain);
+    if (fly) {
+      const k = Math.min(1, (performance.now() - fly.t0) / 600), e = 1 - Math.pow(1 - k, 3);
+      controls.target.lerpVectors(fly.fromT, fly.toT, e);
+      camera.position.lerpVectors(fly.fromP, fly.toP, e);
+      if (k >= 1) fly = null;
+    }
     controls.update();
     // sombra em volta do que está sendo olhado (o tamanho segue o zoom)
     const t = controls.target, dist = camera.position.distanceTo(t);

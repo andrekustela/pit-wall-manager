@@ -1,4 +1,4 @@
-import { CIRCUITS } from "./sim/track";
+﻿import { CIRCUITS } from "./sim/track";
 import { toggleFullscreen } from "./ui/help";
 import { showRaceMenu } from "./ui/raceMenu";
 import { showSettings } from "./ui/menu";
@@ -17,6 +17,25 @@ import { carStatusText } from "./ui/radioContext";
 import { mountFlagBackdrop } from "./ui/flagField";
 import { DriversScreen } from "./ui/drivers";
 import { car3dReady } from "./render/car3d";
+import { applyDisplay } from "./render/display";
+import { setForceRain } from "./sim/weather";
+import { actionOf, isKey } from "./ui/keys";
+import { getTrack } from "./sim/track";
+
+/**
+ * autódromo 3D: se a corrida vai usar (carros 3D com a pista 3D ou câmera de lado/de trás), começa a montar
+ * já no treino, com a tela parada, pra a largada não engasgar
+ */
+// brilho/contraste/saturação/tom (Configurações > TELA)
+applyDisplay();
+
+function preload3d(trackIndex: number) {
+  const tilt = new URLSearchParams(location.search).get("camera");
+  if (car3dPref.style !== "real" || !(gfx().track3d || gfx().cam3d !== "cima" || tilt)) return;
+  const shadows = gfx().shadows === "medio" || gfx().shadows === "alto";
+  // (depois da tela do treino aparecer)
+  setTimeout(() => void import("./render/track3d").then((m) => m.preloadTrack3d(getTrack(trackIndex), shadows)), 600);
+}
 import { DriverRequests } from "./ui/requests";
 import { applyEditor } from "./ui/editorData";
 
@@ -83,6 +102,8 @@ const AUTO = params.has("auto");
 const HOLD = params.get("hold");
 // teste: ?caos = muito mais rodadas, saídas de pista e batidas (pra ver o guindaste e o safety car)
 if (params.has("caos")) setChaos(40);
+// teste: ?chuva = a corrida inteira com chuva forte (pra ver spray, pneus de chuva e a pista molhada)
+if (params.has("chuva")) setForceRain(true);
 
 class App {
   private conn: Connection | null = null;
@@ -365,6 +386,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         break;
       case "practice":
         this.quali = null;
+        preload3d(l.trackIndex);
         // pilotos acabaram de sair (fim de semana novo ou 1ª etapa do campeonato): primeiro a tela
         // dos pilotos (sorteio ou escolha), depois o treino, com a transição de sempre
         if (this.needDrivers(l)) {
@@ -589,38 +611,46 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     view.minimap = new Minimap(view.hud.minimapCanvas, race, setFollow);
     view.onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
-      if (e.code === "Space") {
+      // (teclas de Configurações > ATALHOS; Ctrl/Alt fica pro navegador)
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      const act = actionOf(e);
+      if (act === "pausa") {
         e.preventDefault();
         setSpeed(view.speed === 0 ? prevSpeed : 0);
       }
-      const n = Number(e.key);
-      if (n >= 1 && n <= SPEEDS.length) setSpeed(SPEEDS[n - 1]);
-      if (e.key === "m" || e.key === "M") view.hud.toggleCompact();
-      if (e.key === "p" || e.key === "P") view.hud.toggleBoard();
-      // V: troca a câmera do 3D (de cima, de lado, atrás do carro)
-      if (e.key === "v" || e.key === "V") {
-        // (carros 2D ou 2D estilizado: só a câmera de cima, a tecla não faz nada)
-        if (car3dPref.style === "real") {
-          const next = ({ cima: "lado", lado: "tras", tras: "cima" } as const)[currentCam3d()];
-          setCam3d(next);
-          toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro" }[next]}`);
+      const vel = ["vel1", "vel2", "vel3", "vel4", "vel5"].indexOf(act ?? "");
+      if (vel >= 0) {
+        // (F1 abre a ajuda, F3 a busca e F5 recarrega a página no navegador)
+        e.preventDefault();
+        setSpeed(SPEEDS[vel]);
+      }
+      if (act === "painel") view.hud.toggleCompact();
+      if (act === "tabela") view.hud.toggleBoard();
+      // câmera do 3D (de cima, de lado, atrás do carro, piloto)
+      const camKey = ({ cam1: "cima", cam2: "lado", cam3: "tras", cam4: "piloto" } as const)[act as "cam1"];
+      if (camKey) {
+        e.preventDefault();
+        // (carros 2D ou 2D estilizado: só a câmera de cima)
+        if (car3dPref.style !== "real") toast("Câmeras: só com os carros em 3D (Configurações > Gráficos)");
+        else if (camKey !== currentCam3d()) {
+          setCam3d(camKey);
+          toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro", piloto: "piloto (botão direito gira)" }[camKey]}`);
         }
       }
       if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
       if (e.key === "-" || e.key === "_") view.renderer.zoomOut();
-      // atalhos do piloto seguido: B box, Q/W/E ritmo, Z/X/C motor
+      // atalhos do piloto seguido: box, ritmo e motor
       const slot = teamVoice.drivers().findIndex((d) => d.id === view.follow);
       const fc = race.cars.find((c) => c.id === view.follow);
-      if (slot >= 0 && fc && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        const k = e.code;
-        if (k === "KeyB") this.act(view, { kind: fc.boxRequest ? "cancelBox" : "box", slot }, slot);
-        const pace = { KeyQ: "push", KeyW: "normal", KeyE: "conserve" }[k] as PaceMode | undefined;
+      if (slot >= 0 && fc && act) {
+        if (act === "box") this.act(view, { kind: fc.boxRequest ? "cancelBox" : "box", slot }, slot);
+        const pace = ({ ritmoAtacar: "push", ritmoNormal: "normal", ritmoPoupar: "conserve" } as Record<string, PaceMode>)[act];
         if (pace) this.act(view, { kind: "pace", slot, mode: pace }, slot);
-        const eng = { KeyZ: "rich", KeyX: "normal", KeyC: "lean" }[k] as EngineMode | undefined;
+        const eng = ({ motorRica: "rich", motorNormal: "normal", motorPobre: "lean" } as Record<string, EngineMode>)[act];
         if (eng) this.act(view, { kind: "engine", slot, mode: eng }, slot);
       }
-      if (e.code === "KeyT") view.hud.setTv(toggleTv());
-      if (e.key === "Tab" && mine.length) {
+      if (act === "tv") view.hud.setTv(toggleTv());
+      if (act === "trocarCarro" && mine.length) {
         e.preventDefault();
         const i = mine.findIndex((c) => c.id === view.follow);
         setFollow(mine[(i + 1) % mine.length].id);
@@ -634,12 +664,13 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
 
     let lastT = performance.now();
     let hudT = 0;
-    // limite de FPS (Configurações > Gráficos); teste de FPS (?fpsteste): mede 20 s depois de 3 s
-    const cap = gfx().fpsCap;
+    // limite de FPS (Configurações > Gráficos; lido a cada quadro: mudar pelo MENU vale na hora);
+    // teste de FPS (?fpsteste): mede 20 s depois de 3 s
     let lastDraw = 0;
     const test = params.has("fpsteste") ? { t0: performance.now(), frames: [] as number[], done: false } : null;
     document.body.classList.toggle("no-onboard", !gfx().onboard);
     const frame = (now: number) => {
+      const cap = gfx().fpsCap;
       if (cap) {
         // ritmo constante: o que sobra de um quadro passa pro próximo (só pular quadros deixava irregular)
         const step = 1000 / cap, el = now - lastDraw;
@@ -991,15 +1022,44 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   if (radioAI.wanted && radioAI.supported) void radioAI.enable();
   const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement)?.closest?.("input, textarea");
   window.addEventListener("keydown", (e) => {
-    if (e.code !== "KeyV" || e.repeat || typing(e) || !appInst.inRace()) return;
+    if (!isKey(e, "microfone") || e.repeat || typing(e) || !appInst.inRace()) return;
     if (voiceCmd.state === "off") return appInst.voiceNote("🎙 Ligue o comando de voz no botão 🎙 (canto da tela) e segure V pra falar");
     e.preventDefault();
     voiceCmd.startListening();
   });
   window.addEventListener("keyup", (e) => {
-    if (e.code === "KeyV") voiceCmd.stopListening();
+    if (isKey(e, "microfone")) voiceCmd.stopListening();
   });
   window.addEventListener("blur", () => voiceCmd.stopListening());
+
+  // ⚙ no canto de baixo à esquerda, em qualquer tela; na corrida entra na fileira do FPS, MENU, ? e ⛶
+  const gear = document.createElement("button");
+  gear.className = "btn small floatgear";
+  gear.textContent = "⚙";
+  gear.title = "Configurações (música, sons, gráficos, tela e atalhos)";
+  gear.addEventListener("click", () => {
+    if (document.querySelector(".setbox")) return;
+    showSettings(() => {}, "sons");
+    // (por cima de tudo, até do editor do autódromo)
+    const modal = document.querySelector<HTMLElement>(".setbox")?.closest<HTMLElement>(".helpmodal");
+    if (modal) modal.style.zIndex = "9600";
+  });
+  document.body.appendChild(gear);
+  setInterval(() => {
+    const corner = document.querySelector(".racecorner");
+    const home = corner ?? document.body;
+    if (gear.parentElement !== home) home.appendChild(gear);
+    // (nas telas de carregamento não aparece)
+    gear.hidden = !!document.querySelector(".loadscreen");
+  }, 400);
+  // N: próxima música; Shift+N: a anterior (com a música desligada, liga)
+  window.addEventListener("keydown", (e) => {
+    if (!isKey(e, "musica") || e.repeat || e.ctrlKey || e.altKey || typing(e) || document.querySelector(".reqbox")) return;
+    if (!music.enabled) music.toggle();
+    else if (e.shiftKey) music.prev();
+    else music.skip();
+    if (music.current) toast(`🎵 ${music.current.title}`);
+  });
 
   // ?radio: demonstração das falas gravadas do rádio (um clique libera o som e começa)
   if (location.search.includes("radio")) {

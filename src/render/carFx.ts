@@ -193,7 +193,8 @@ export class CarFx {
 
   /** por cima dos carros: fumaça, poeira e faíscas */
   /** `sparks`: só as faíscas (desenhadas antes dos carros: saem de baixo deles) ou só fumaça e poeira */
-  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, sparks: boolean) {
+  /** `soft` < 1: câmeras 3D de perto (o carro fica grande na tela e o brilho virava uma bola de fogo) */
+  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, sparks: boolean, soft = 1) {
     if (!this.parts.length) return;
     o.save();
     for (const p of this.parts) {
@@ -204,24 +205,27 @@ export class CarFx {
         // rastro (largo e fraco + núcleo fino e forte) do tamanho da velocidade e um brilho na ponta
         const heat = 1 - q;
         const gc = Math.round(110 + 145 * heat), bc = Math.round(30 + 200 * heat * heat);
-        const trail = (0.045 + 0.035 * heat) * m;
-        const tx = x - p.vx * trail, ty = y - p.vy * trail;
+        // (o rastro é calculado no chão e projetado: nas câmeras 3D de lado e de trás ele segue o chão em vez
+        // de subir na tela)
+        const trail = 0.045 + 0.035 * heat;
+        const { x: tx, y: ty } = toCss({ x: p.x - p.vx * trail, y: p.y - p.vy * trail });
+        const mid = toCss({ x: p.x - p.vx * trail * 0.6, y: p.y - p.vy * trail * 0.6 });
         o.globalCompositeOperation = "lighter";
         o.lineCap = "round";
-        o.strokeStyle = `rgba(255,${Math.round(gc * 0.75)},${Math.round(bc * 0.4)},${(0.32 * heat).toFixed(3)})`;
-        o.lineWidth = Math.max(1.2, 0.16 * m);
+        o.strokeStyle = `rgba(255,${Math.round(gc * 0.75)},${Math.round(bc * 0.4)},${(0.32 * heat * soft).toFixed(3)})`;
+        o.lineWidth = Math.max(1, 0.16 * m * soft);
         o.beginPath();
         o.moveTo(x, y);
         o.lineTo(tx, ty);
         o.stroke();
         o.strokeStyle = `rgba(255,${gc},${bc},${heat.toFixed(3)})`;
-        o.lineWidth = Math.max(0.6, 0.05 * m);
+        o.lineWidth = Math.max(0.6, 0.05 * m * Math.max(0.5, soft));
         o.beginPath();
         o.moveTo(x, y);
-        o.lineTo(x - p.vx * trail * 0.6, y - p.vy * trail * 0.6);
+        o.lineTo(mid.x, mid.y);
         o.stroke();
-        const gs = (0.18 + 0.3 * heat) * m * (p.size / 0.5);
-        o.globalAlpha = 0.6 * heat;
+        const gs = (0.18 + 0.3 * heat) * m * (p.size / 0.5) * soft;
+        o.globalAlpha = 0.6 * heat * soft;
         o.drawImage(glow(), x - gs, y - gs, gs * 2, gs * 2);
         o.globalAlpha = 1;
         o.globalCompositeOperation = "source-over";

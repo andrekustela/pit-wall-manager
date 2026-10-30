@@ -4,10 +4,11 @@
 // Mundo da pista (x, y) -> Three (X = x, Z = y), Y pra cima.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { TessellateModifier } from "three/addons/modifiers/TessellateModifier.js";
 import { buildingMat } from "./pieces";
 import { asphaltTexture, fenceTex, tyreBlockGeo, tyreStackGeo } from "./trackParts";
 
-export type PathKind = "blocopneus" | "guardrail" | "muro" | "zebra" | "pneus" | "alambrado" | "faixa" | "asfalto" | "concreto" | "brita" | "grama" | "areia" | "pintura" | "agua" | "cais" | "construcao" | "rua" | "caminho";
+export type PathKind = "jersey" | "blocopneus" | "guardrail" | "muro" | "zebra" | "pneus" | "alambrado" | "faixa" | "asfalto" | "concreto" | "brita" | "grama" | "areia" | "pintura" | "agua" | "cais" | "construcao" | "rua" | "caminho";
 
 export interface PathItem {
   t: PathKind;
@@ -21,8 +22,8 @@ export interface PathItem {
   reto?: boolean;
   /** ordem do chão (maior fica por cima; sem: pela ordem padrão do tipo) */
   o?: number;
-  /** veio do mapa real (OpenStreetMap) */
-  src?: "mapa";
+  /** veio do mapa real (OpenStreetMap) ou da beira da pista automática (zebras, escapes, brita) */
+  src?: "mapa" | "pista";
   /** prédio: 0 janelas, 1 vidro espelhado, 2 parede lisa */
   v?: number;
 }
@@ -41,6 +42,7 @@ export const PATHS: Record<PathKind, PathDef> = {
   guardrail: { label: "Guard-rail" },
   muro: { label: "Muro", cores: ["#d8d6cf"], w: [1.3, 0.5, 6, "Altura"] },
   zebra: { label: "Zebra", cores: ["#d8262b", "#f2f2f2"], w: [1.5, 0.5, 4, "Largura"] },
+  jersey: { label: "Barreira de concreto", cores: ["#c9c7c0"] },
   pneus: { label: "Barreira de pneus", cores: ["#1c1c1c", "#f2f2f2"] },
   blocopneus: { label: "Blocos de pneus", cores: ["#1c1c1c", "#f2f2f2"] },
   alambrado: { label: "Alambrado" },
@@ -195,7 +197,10 @@ export function buildPath(it: PathItem, index: number, shadows: boolean, areaY?:
   if (def.area) {
     if (it.p.length < 3) return g;
     const pts = samplePath(it, 2);
-    const geo = new THREE.ShapeGeometry(new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z))));
+    let geo: THREE.BufferGeometry = new THREE.ShapeGeometry(new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z))));
+    // (o contorno sozinho dá triângulos enormes, que não dobram com o relevo: quebra em pedaços de até ~10 m;
+    // a água fica plana)
+    if (it.t !== "agua") geo = new TessellateModifier(10, 10).modify(geo);
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, areaY ?? AREA_Y[it.t] ?? 0.05, 0);
     if (it.t === "asfalto") {
@@ -213,6 +218,12 @@ export function buildPath(it: PathItem, index: number, shadows: boolean, areaY?:
   const pts = samplePath(it, 1);
   const ds = { side: THREE.DoubleSide };
   switch (it.t) {
+    case "jersey":
+      // concreto de 0,9 m (os dois lados e o topo) com uma faixa vermelha
+      add(wall(pts, 0, 0.9), M(c1, ds), true);
+      add(band(pts, 0.3, 0.9), M(c1, ds));
+      add(wall(pts, 0.55, 0.7), M("#e32222", { ...ds, ...over(1) }));
+      break;
     case "guardrail":
       add(posts(pts, 2, 0.14, 0.85), M("#7d848b"), true);
       add(mergeGeometries([wall(pts, 0.42, 0.62), wall(pts, 0.66, 0.8)]), M("#b9c0c7", ds), true);

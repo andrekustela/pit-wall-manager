@@ -7,11 +7,13 @@ import type { PathItem } from "./paths3d";
 import { Terrain } from "./terrain";
 import { apartmentGeo, palaceGeo, hotelGeo, villaGeo, yachtGeo, sailboatGeo, cruiseGeo, pierGeo, lighthouseGeo, tunnelGeo, tyreBlockGeo, brakeBoardGeos, brakeBoardTex, pitLightGeo, inflatableArchGeo, hedgeGeo, rockGeo, toiletGeo, golfCartGeo, generatorGeo } from "./trackParts";
 import { liveScreenTexture } from "./liveScreen";
+import { ambulanceGeo, flowerBedGeo, jerseyGeo, photographerGeo, pitCrewGeo, sausageGeo } from "./trackParts";
+import { modelParts } from "./customModels";
 import { BRANDS, containerGeo, cratesGeo, flagpoleGeo, helipadGeo, marshalGeo, podiumGeo, screenGeo, truckGeo, tvTowerGeo, barrierGeo, billboardGeos, billboardTex, blob, bridgeGeo, busGeo, carGeo, coneGeo, crowdGeo, gantryGeo, garageTex, guardrailGeo, houseGeos, lampGeo, motorhomeGeo, palmGeo, pineGeo, standModule, stoneWallGeo, tallBuildingGeo, tentGeo, towerGeo, tyreStackGeo, waterTowerGeo } from "./trackParts";
 
 export type PieceKind =
   | "arquibancada" | "torcida" | "box" | "torre" | "tenda" | "motorhome" | "onibus" | "pneu" | "barreira" | "guardrail" | "muro" | "cone"
-  | "placa" | "poste" | "portico" | "passarela" | "arvore" | "pinheiro" | "palmeira" | "arbusto" | "casa" | "predio" | "caixadagua" | "carro" | "telao" | "bandeira" | "fiscal" | "cameratv" | "container" | "caminhao" | "podio" | "heliponto" | "caixas" | "freada" | "semaforo" | "arco" | "cercaviva" | "pedra" | "banheiro" | "golfe" | "gerador" | "blocopneus" | "apartamento" | "palacete" | "hotel" | "vila" | "iate" | "veleiro" | "cruzeiro" | "pier" | "farol" | "tunel" | "edificio";
+  | "placa" | "poste" | "portico" | "passarela" | "arvore" | "pinheiro" | "palmeira" | "arbusto" | "casa" | "predio" | "caixadagua" | "carro" | "telao" | "bandeira" | "fiscal" | "cameratv" | "container" | "caminhao" | "podio" | "heliponto" | "caixas" | "freada" | "semaforo" | "arco" | "cercaviva" | "pedra" | "banheiro" | "golfe" | "gerador" | "blocopneus" | "apartamento" | "palacete" | "hotel" | "vila" | "iate" | "veleiro" | "cruzeiro" | "pier" | "farol" | "tunel" | "edificio" | "modelo" | "jersey" | "salsicha" | "ambulancia" | "fotografo" | "equipe" | "canteiro";
 
 export interface Piece {
   k: PieceKind;
@@ -58,8 +60,14 @@ const trunkGeo = (h: number) => new THREE.CylinderGeometry(0.144, 0.234, h, 5, 1
 export const PIECES: Record<PieceKind, Def> = {
   arquibancada: {
     label: "Arquibancada",
-    variantes: ["Com cobertura", "Sem cobertura"],
-    parts: (v) => [{ geo: standModule(undefined, undefined, v !== 1), mat: lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), shadow: true }],
+    // v: 0-3 o tipo; +4 com torcida (e +8/+16 sorteiam quem senta onde: `standV`)
+    variantes: ["Com cobertura", "Sem cobertura", "Sobre pilares, com cobertura", "Sobre pilares, sem cobertura"],
+    parts: (v) => {
+      const kind = v & 3, lift = kind >= 2 ? 4 : 0;
+      const out: Part[] = [{ geo: standModule(undefined, undefined, kind % 2 === 0, lift), mat: lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), shadow: true }];
+      if (v & 4) out.push({ geo: crowdGeo(23 + (v >> 3), lift), mat: vc(), shadow: true });
+      return out;
+    },
   },
   torcida: { label: "Torcida", parts: () => [{ geo: crowdGeo(), mat: vc(), shadow: true }] },
   box: {
@@ -187,8 +195,19 @@ export const PIECES: Record<PieceKind, Def> = {
   pier: { label: "Píer de madeira", parts: () => [{ geo: pierGeo(), mat: vc(), shadow: true }] },
   farol: { label: "Farol", parts: () => [{ geo: lighthouseGeo(), mat: vc({ flatShading: true }), shadow: true }] },
   tunel: { label: "Entrada de túnel", parts: () => [{ geo: tunnelGeo(), mat: vc(), shadow: true }] },
+  jersey: { label: "Barreira de concreto", parts: () => [{ geo: jerseyGeo(), mat: vc(), shadow: true }] },
+  salsicha: { label: "Zebra alta (salsicha)", parts: () => [{ geo: sausageGeo(), mat: vc(), shadow: true }] },
+  ambulancia: { label: "Ambulância", parts: () => [{ geo: ambulanceGeo(), mat: vc(), shadow: true }] },
+  fotografo: { label: "Fotógrafo", parts: () => [{ geo: photographerGeo(), mat: vc(), shadow: true }] },
+  equipe: { label: "Equipe de box", cores: ["#d62b2b"], parts: () => [{ geo: pitCrewGeo(), mat: vc(), tint: 1, shadow: true }] },
+  canteiro: { label: "Canteiro de flores", parts: () => [{ geo: flowerBedGeo(), mat: vc(), shadow: true }] },
+  // (v = o número do modelo .glb importado: src/render/customModels.ts)
+  modelo: { label: "Modelo 3D importado", parts: (v) => modelParts(v) },
   carro: { label: "Carro parado", cores: ["#d62b2b"], parts: () => [{ geo: carGeo(), mat: lam("#ffffff", { vertexColors: true }), tint: 1, shadow: true }] },
 };
+
+/** variante da arquibancada: tipo (0-3) e torcida (sorteia um dos 4 jeitos de sentar) */
+export const standV = (kind: number, crowd: boolean, seed = Math.floor(Math.random() * 4)) => (kind & 3) | (crowd ? 4 | (seed << 3) : 0);
 
 /** medidas padrão de cada tipo (as próprias da casa) */
 export const DEFAULT_SIZE: Partial<Record<PieceKind, [number, number, number]>> = { casa: [8, 4, 7], edificio: [16, 12, 12] };
@@ -255,6 +274,8 @@ const partCache = new Map<string, Part[]>();
 const partsOf = (k: PieceKind, v: number) => {
   const key = `${k}:${v}`;
   let p = partCache.get(key);
+  // (modelo importado: não guarda, ele pode chegar depois do primeiro desenho)
+  if (k === "modelo") return PIECES[k].parts(v);
   if (!p) partCache.set(key, (p = PIECES[k].parts(v)));
   return p;
 };

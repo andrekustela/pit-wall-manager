@@ -208,37 +208,51 @@ export function vwall(pts: [number, number][], y0: number, y1: number, uvm = 2.5
 }
 
 /** módulo de arquibancada (14 m de frente, 12 de fundo): degraus, cadeiras em L em blocos verdes e amarelos, escada no meio, cobertura curva */
-export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = true) {
+export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = true, lift = 0) {
   const b = new GB();
+  // (sobre pilares: tudo sobe `lift` m e cada degrau vira uma laje fina, com o vão livre por baixo)
+  const L = lift;
+  const bx = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: THREE.Color) => b.box(x0, y0 + L, z0, x1, y1 + L, z1, c);
+  const qd = (p0: number[], p1: number[], p2: number[], p3: number[], c: THREE.Color) => b.quad(...([p0, p1, p2, p3].map((v) => [v[0], v[1] + L, v[2]]) as [number[], number[], number[], number[]]), c);
   const concrete = C("#c4c8cc"), nose = C("#a9aeb3"), back = C("#8c9298"), steel = C("#9aa3ab"), g = C(green), y = C(yellow);
   const roof = C("#5bdc9f"), under = C("#3c9f73");
   const n = 8, D = 1.4, R = 0.9;
   for (let i = 0; i < n; i++) {
     const z0 = i * D, top = 1.2 + i * R;
-    b.box(-7, 0, z0, 7, top, z0 + D, concrete);
-    b.box(-7, top - 0.08, z0 - 0.04, 7, top, z0 + 0.1, nose);
+    bx(-7, L ? top - 0.4 : 0, z0, 7, top, z0 + D, concrete);
+    bx(-7, top - 0.08, z0 - 0.04, 7, top, z0 + 0.1, nose);
     // escada no meio: degraus menores
-    b.box(-0.45, top, z0, 0.45, top + R / 2, z0 + D / 2, nose);
+    bx(-0.45, top, z0, 0.45, top + R / 2, z0 + D / 2, nose);
     for (let x = -6.6; x <= 6.6; x += 0.62) {
       if (Math.abs(x) < 0.6) continue;
       const blk = Math.floor((x + 7) / 2.5);
       const c = (blk + i) % 2 ? y : g;
       const x0 = x - 0.24, x1 = x + 0.24, zs = z0 + 0.45, ze = z0 + 0.95, ys = top + 0.4;
       // assento (em cima e a frente)
-      b.quad([x0, ys, zs], [x0, ys, ze], [x1, ys, ze], [x1, ys, zs], c);
-      b.quad([x0, top + 0.12, zs], [x0, ys, zs], [x1, ys, zs], [x1, top + 0.12, zs], c);
+      qd([x0, ys, zs], [x0, ys, ze], [x1, ys, ze], [x1, ys, zs], c);
+      qd([x0, top + 0.12, zs], [x0, ys, zs], [x1, ys, zs], [x1, top + 0.12, zs], c);
       // encosto um pouco inclinado (frente, topo, costas)
       const zb = ze, yt = ys + 0.5;
-      b.quad([x0, ys, zb], [x0, yt, zb + 0.1], [x1, yt, zb + 0.1], [x1, ys, zb], c);
-      b.quad([x0, yt, zb + 0.1], [x0, yt, zb + 0.18], [x1, yt, zb + 0.18], [x1, yt, zb + 0.1], c);
-      b.quad([x0, top, zb + 0.08], [x1, top, zb + 0.08], [x1, yt, zb + 0.18], [x0, yt, zb + 0.18], c);
+      qd([x0, ys, zb], [x0, yt, zb + 0.1], [x1, yt, zb + 0.1], [x1, ys, zb], c);
+      qd([x0, yt, zb + 0.1], [x0, yt, zb + 0.18], [x1, yt, zb + 0.18], [x1, yt, zb + 0.1], c);
+      qd([x0, top, zb + 0.08], [x1, top, zb + 0.08], [x1, yt, zb + 0.18], [x0, yt, zb + 0.18], c);
     }
   }
   const topY = 1.2 + (n - 1) * R;
-  b.box(-7, 0, n * D, 7, topY + 2.2, n * D + 0.3, back);
+  bx(-7, 0, n * D, 7, topY + 2.2, n * D + 0.3, back);
   // corrimão na frente
-  b.box(-7, 1.2, -0.25, 7, 1.28, -0.17, steel);
-  for (const x of [-6.8, -3.4, 3.4, 6.8]) b.box(x - 0.04, 0.0, -0.25, x + 0.04, 1.28, -0.17, steel);
+  bx(-7, 1.2, -0.25, 7, 1.28, -0.17, steel);
+  for (const x of [-6.8, -3.4, 3.4, 6.8]) bx(x - 0.04, 0.0, -0.25, x + 0.04, 1.28, -0.17, steel);
+  if (L) {
+    // pilares de concreto até o chão, embaixo de cada laje
+    for (const x of [-6.6, -2.2, 2.2, 6.6])
+      for (const z of [0.7, 4.9, 9.1]) {
+        const i = Math.floor(z / D);
+        b.box(x - 0.3, 0, z - 0.3, x + 0.3, L + 1.2 + i * R - 0.4, z + 0.3, back);
+      }
+    // (a parede do fundo também desce até o chão, e a cobertura vai de pilar em pilar)
+    b.box(-7, 0, n * D, 7, L, n * D + 0.3, back);
+  }
   if (!covered) return b.geo();
   // pilares atrás e arcos da cobertura
   const arc: [number, number][] = [];
@@ -247,17 +261,17 @@ export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = tru
     arc.push([12.2 - 13.4 * t, 11.0 + 1.8 * (1 - t) + 1.1 * Math.sin(Math.PI * t)]);
   }
   for (const x of [-6.8, 0, 6.8]) {
-    b.box(x - 0.2, 0, n * D + 0.3, x + 0.2, 12.6, n * D + 0.7, steel);
+    b.box(x - 0.2, 0, n * D + 0.3, x + 0.2, 12.6 + L, n * D + 0.7, steel);
     for (let i = 0; i < 8; i++) {
       const [zi, yi] = arc[i], [zj, yj] = arc[i + 1];
-      b.quad([x - 0.1, yi - 0.55, zi], [x + 0.1, yi - 0.55, zi], [x + 0.1, yj - 0.55, zj], [x - 0.1, yj - 0.55, zj], steel);
-      b.quad([x - 0.1, yi - 0.2, zi], [x - 0.1, yi - 0.55, zi], [x - 0.1, yj - 0.55, zj], [x - 0.1, yj - 0.2, zj], steel);
+      qd([x - 0.1, yi - 0.55, zi], [x + 0.1, yi - 0.55, zi], [x + 0.1, yj - 0.55, zj], [x - 0.1, yj - 0.55, zj], steel);
+      qd([x - 0.1, yi - 0.2, zi], [x - 0.1, yi - 0.55, zi], [x - 0.1, yj - 0.55, zj], [x - 0.1, yj - 0.2, zj], steel);
     }
   }
   for (let i = 0; i < 8; i++) {
     const [zi, yi] = arc[i], [zj, yj] = arc[i + 1];
-    b.quad([-7.05, yi, zi], [7.05, yi, zi], [7.05, yj, zj], [-7.05, yj, zj], roof);
-    b.quad([-7.05, yi - 0.2, zi], [-7.05, yj - 0.2, zj], [7.05, yj - 0.2, zj], [7.05, yi - 0.2, zi], under);
+    qd([-7.05, yi, zi], [7.05, yi, zi], [7.05, yj, zj], [-7.05, yj, zj], roof);
+    qd([-7.05, yi - 0.2, zi], [-7.05, yj - 0.2, zj], [7.05, yj - 0.2, zj], [7.05, yi - 0.2, zi], under);
   }
   return b.geo();
 }
@@ -610,19 +624,43 @@ export function busGeo() {
   return b.geo();
 }
 
-/** torcida pra pôr em cima de um módulo de arquibancada (mesmos degraus): bonequinhos coloridos */
-export function crowdGeo() {
+/** torcida pra pôr em cima de um módulo de arquibancada (mesmos degraus): bonequinhos de roupas variadas,
+ * uns de braço pra cima, uns com bandeira. `seed` muda quem senta onde; `lift` = arquibancada sobre pilares */
+export function crowdGeo(seed = 23, lift = 0) {
   const b = new GB();
-  const shirts = ["#e32222", "#1f5fbf", "#f6d21a", "#18b04f", "#ffffff", "#f07a1a", "#8a2be2", "#111111"].map(C);
-  const skin = [C("#f1c9a5"), C("#c68a5c"), C("#8d5a3b")];
-  const rnd = rng(23);
+  const shirts = ["#e32222", "#1f5fbf", "#f6d21a", "#18b04f", "#ffffff", "#f07a1a", "#8a2be2", "#111111", "#ff6fa8", "#2ec4c4", "#7a4a2a", "#9aa3ab"].map(C);
+  const pants = ["#2b3445", "#1b1b1f", "#5a6470", "#3a2c22"].map(C);
+  const skin = [C("#f1c9a5"), C("#c68a5c"), C("#8d5a3b"), C("#e0b48c")];
+  const hair = [C("#2a1d14"), C("#111111"), C("#c9a25a"), C("#7a3d1c")];
+  const caps = [C("#e32222"), C("#1f5fbf"), C("#ffffff"), C("#f6d21a")];
+  // bandeiras inventadas (duas ou três faixas)
+  const flags = [["#18b04f", "#f6d21a"], ["#e32222", "#ffffff"], ["#1f5fbf", "#ffffff", "#e32222"], ["#111111", "#f6d21a", "#e32222"], ["#f07a1a", "#ffffff", "#18b04f"], ["#2ec4c4", "#ffffff"]].map((l) => l.map(C));
+  const pole = C("#d9d9d9");
+  const rnd = rng(seed);
+  const pick = <T,>(l: T[]) => l[Math.floor(rnd() * l.length)];
+  const L = lift;
   for (let i = 0; i < 8; i++) {
-    const z0 = i * 1.4, top = 1.2 + i * 0.9;
+    const z0 = i * 1.4, top = 1.2 + i * 0.9 + L;
     for (let x = -6.6; x <= 6.6; x += 0.62) {
-      if (Math.abs(x) < 0.6 || rnd() < 0.25) continue;
-      const zs = z0 + 0.6;
-      b.box(x - 0.17, top + 0.4, zs, x + 0.17, top + 0.95, zs + 0.28, shirts[Math.floor(rnd() * shirts.length)]);
-      b.box(x - 0.11, top + 0.95, zs + 0.03, x + 0.11, top + 1.2, zs + 0.25, skin[Math.floor(rnd() * skin.length)]);
+      if (Math.abs(x) < 0.6 || rnd() < 0.22) continue;
+      const zs = z0 + 0.6, shirt = pick(shirts);
+      // pernas (sentado: pra frente do assento), tronco, cabeça e às vezes boné
+      b.box(x - 0.15, top + 0.12, zs - 0.35, x + 0.15, top + 0.42, zs + 0.05, pick(pants));
+      b.box(x - 0.17, top + 0.4, zs, x + 0.17, top + 0.95, zs + 0.28, shirt);
+      b.box(x - 0.11, top + 0.95, zs + 0.03, x + 0.11, top + 1.2, zs + 0.25, pick(skin));
+      if (rnd() < 0.3) b.box(x - 0.12, top + 1.17, zs + 0.01, x + 0.12, top + 1.25, zs + 0.27, pick(caps));
+      else b.box(x - 0.12, top + 1.16, zs + 0.05, x + 0.12, top + 1.24, zs + 0.27, pick(hair));
+      const r = rnd();
+      if (r < 0.1) {
+        // bandeira num pau, por cima da cabeça
+        const fl = pick(flags), fw = 1.1, fh = 0.7, y0 = top + 1.5;
+        b.box(x + 0.16, top + 0.6, zs + 0.1, x + 0.2, y0 + fh, zs + 0.14, pole);
+        fl.forEach((c, k) => b.box(x + 0.2, y0 + (fh * k) / fl.length, zs + 0.11, x + 0.2 + fw, y0 + (fh * (k + 1)) / fl.length, zs + 0.13, c));
+      } else if (r < 0.25) {
+        // braços pra cima
+        b.box(x - 0.24, top + 0.85, zs + 0.08, x - 0.16, top + 1.45, zs + 0.18, shirt);
+        b.box(x + 0.16, top + 0.85, zs + 0.08, x + 0.24, top + 1.45, zs + 0.18, shirt);
+      }
     }
   }
   return b.geo();
@@ -1020,5 +1058,101 @@ export function tunnelGeo() {
   b.box(-14, 9, -1, 14, 13, 12, hill);
   b.box(-12, 0, 1, -10, 9, 12, hill);
   b.box(10, 0, 1, 12, 9, 12, hill);
+  return b.geo();
+}
+
+/** barreira de concreto tipo "new jersey" (4 m): base larga e topo estreito, faixa pintada */
+export function jerseyGeo(len = 4) {
+  const b = new GB();
+  const c = C("#c9c7c0"), stripe = C("#e32222");
+  const x0 = -len / 2, x1 = len / 2;
+  // perfil: 0,6 de base subindo até 0,15 no topo (0,9 m de altura)
+  const prof: [number, number][] = [[-0.3, 0], [-0.25, 0.25], [-0.09, 0.8], [-0.08, 0.9], [0.08, 0.9], [0.09, 0.8], [0.25, 0.25], [0.3, 0]];
+  for (let i = 0; i < prof.length - 1; i++) {
+    const [za, ya] = prof[i], [zb, yb] = prof[i + 1];
+    b.quad([x0, ya, za], [x0, yb, zb], [x1, yb, zb], [x1, ya, za], c);
+  }
+  b.quad([x0, 0, -0.3], [x0, 0, 0.3], [x0, 0.9, 0.08], [x0, 0.9, -0.08], c);
+  b.quad([x1, 0, 0.3], [x1, 0, -0.3], [x1, 0.9, -0.08], [x1, 0.9, 0.08], c);
+  b.box(x0 + 0.05, 0.55, -0.185, x1 - 0.05, 0.7, -0.17, stripe);
+  b.box(x0 + 0.05, 0.55, 0.17, x1 - 0.05, 0.7, 0.185, stripe);
+  return b.geo();
+}
+
+/** zebra alta ("salsicha", 2 m): lombada amarela com pontas inclinadas */
+export function sausageGeo() {
+  const b = new GB();
+  const y = C("#f5d10f"), d = C("#1c1c1c");
+  b.box(-0.75, 0, -0.18, 0.75, 0.16, 0.18, y);
+  b.quad([-1, 0, -0.18], [-1, 0, 0.18], [-0.75, 0.16, 0.18], [-0.75, 0.16, -0.18], y);
+  b.quad([1, 0, 0.18], [1, 0, -0.18], [0.75, 0.16, -0.18], [0.75, 0.16, 0.18], y);
+  for (const x of [-0.45, 0, 0.45]) b.box(x - 0.1, 0.161, -0.18, x + 0.1, 0.163, 0.18, d);
+  return b.geo();
+}
+
+/** ambulância (6 × 2,2 m): branca, faixa e cruz vermelhas, giroflex */
+export function ambulanceGeo() {
+  const b = new GB();
+  const w = C("#f6f6f4"), r = C("#e32222"), g = C("#2c3e55"), t = C("#1a1a1a"), blue = C("#3b8bff");
+  b.box(-3, 0.5, -1.1, 1.2, 3, 1.1, w);
+  b.box(1.2, 0.5, -1.05, 3, 2.2, 1.05, w);
+  b.box(1.9, 1.4, -1.06, 2.95, 2.1, 1.06, g);
+  b.box(2.95, 1.4, -0.95, 3.01, 2.1, 0.95, g);
+  b.box(-3.01, 1.2, -1.11, 1.2, 1.5, 1.11, r);
+  b.box(-1.2, 1.9, 1.11, -0.6, 2.6, 1.12, r);
+  b.box(-1.55, 2.1, 1.11, -0.25, 2.4, 1.12, r);
+  b.box(-1.2, 1.9, -1.12, -0.6, 2.6, -1.11, r);
+  b.box(-1.55, 2.1, -1.12, -0.25, 2.4, -1.11, r);
+  b.box(0.4, 3, -0.6, 1.0, 3.25, 0.6, blue);
+  for (const x of [-2, 2]) for (const z of [-1, 1]) b.box(x - 0.45, 0, z - 0.2, x + 0.45, 0.9, z + 0.2, t);
+  return b.geo();
+}
+
+/** bonequinho em pé (1,75 m): corpo, cabeça e pernas */
+function person(b: GB, x: number, z: number, shirt: THREE.Color, pants: THREE.Color, skin: THREE.Color) {
+  b.box(x - 0.16, 0, z - 0.1, x - 0.02, 0.85, z + 0.1, pants);
+  b.box(x + 0.02, 0, z - 0.1, x + 0.16, 0.85, z + 0.1, pants);
+  b.box(x - 0.22, 0.85, z - 0.13, x + 0.22, 1.45, z + 0.13, shirt);
+  b.box(x - 0.11, 1.45, z - 0.11, x + 0.11, 1.72, z + 0.11, skin);
+}
+
+/** fotógrafo com câmera de lente grande e colete laranja */
+export function photographerGeo() {
+  const b = new GB();
+  person(b, 0, 0, C("#f07a1a"), C("#2b3445"), C("#e0b48c"));
+  b.box(-0.12, 1.3, -0.55, 0.12, 1.5, -0.13, C("#1a1a1a"));
+  b.box(-0.09, 1.33, -0.75, 0.09, 1.47, -0.55, C("#d9d9d9"));
+  return b.geo();
+}
+
+/** equipe de box: 6 mecânicos de macacão (a cor tinge pela peça) e capacete */
+export function pitCrewGeo() {
+  const b = new GB();
+  const suit = C("#ffffff"), dark = C("#1b1b1f"), skin = C("#c68a5c");
+  const spots: [number, number][] = [[-2.2, -1.5], [2.2, -1.5], [-2.2, 1.5], [2.2, 1.5], [0, -3.2], [0, 3.2]];
+  for (const [x, z] of spots) {
+    person(b, x, z, suit, suit, skin);
+    b.box(x - 0.13, 1.6, z - 0.13, x + 0.13, 1.78, z + 0.13, dark);
+  }
+  return b.geo();
+}
+
+/** canteiro de flores (3 × 1,5 m): borda de pedra e flores coloridas */
+export function flowerBedGeo() {
+  const b = new GB();
+  const stone = C("#b9b4a8"), soil = C("#5a3d2a"), leaf = C("#2f6a22");
+  const cols = ["#e32222", "#f6d21a", "#ff6fa8", "#ffffff", "#8a2be2", "#f07a1a"].map(C);
+  const rnd = rng(41);
+  b.box(-1.5, 0, -0.75, 1.5, 0.3, -0.65, stone);
+  b.box(-1.5, 0, 0.65, 1.5, 0.3, 0.75, stone);
+  b.box(-1.5, 0, -0.65, -1.4, 0.3, 0.65, stone);
+  b.box(1.4, 0, -0.65, 1.5, 0.3, 0.65, stone);
+  b.box(-1.4, 0, -0.65, 1.4, 0.22, 0.65, soil);
+  for (let i = 0; i < 40; i++) {
+    const x = -1.3 + rnd() * 2.6, z = -0.55 + rnd() * 1.1, h = 0.3 + rnd() * 0.2;
+    b.box(x - 0.03, 0.22, z - 0.03, x + 0.03, h, z + 0.03, leaf);
+    const c = cols[Math.floor(rnd() * cols.length)];
+    b.box(x - 0.08, h, z - 0.08, x + 0.08, h + 0.1, z + 0.08, c);
+  }
   return b.geo();
 }
