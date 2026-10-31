@@ -42,6 +42,8 @@ interface Part {
   /** pinta com a cor da peça (1 = c, 2 = c2) */
   tint?: 1 | 2;
   shadow?: boolean;
+  /** versão simples, desenhada no lugar desta quando a peça está longe da câmera (PieceLayer.lod) */
+  far?: Part;
 }
 interface Def {
   label: string;
@@ -65,11 +67,11 @@ export const PIECES: Record<PieceKind, Def> = {
     parts: (v) => {
       const kind = v & 3, lift = kind >= 2 ? 4 : 0;
       const out: Part[] = [{ geo: standModule(undefined, undefined, kind % 2 === 0, lift), mat: lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), shadow: true }];
-      if (v & 4) out.push({ geo: crowdGeo(23 + (v >> 3), lift), mat: vc(), shadow: true });
+      if (v & 4) out.push({ geo: crowdGeo(23 + (v >> 3), lift), mat: vc(), shadow: true, far: { geo: crowdGeo(23 + (v >> 3), lift, true), mat: vc() } });
       return out;
     },
   },
-  torcida: { label: "Torcida", parts: () => [{ geo: crowdGeo(), mat: vc(), shadow: true }] },
+  torcida: { label: "Torcida", parts: () => [{ geo: crowdGeo(), mat: vc(), shadow: true, far: { geo: crowdGeo(23, 0, true), mat: vc() } }] },
   box: {
     label: "Box (garagem)",
     parts: () => {
@@ -103,7 +105,14 @@ export const PIECES: Record<PieceKind, Def> = {
     variantes: ["Detalhada", "Simples (leve)"],
     parts: (v) => [
       { geo: trunkGeo(1.1), mat: lam("#7a5a3c") },
-      { geo: blob(v === 1 ? 0 : 1).translate(0, 1.55, 0), mat: lam("#ffffff", { flatShading: true }), tint: 1, shadow: true },
+      {
+        geo: blob(v === 1 ? 0 : 1).translate(0, 1.55, 0),
+        mat: lam("#ffffff", { flatShading: true }),
+        tint: 1,
+        shadow: true,
+        // (a detalhada vira a simples de longe: 20 triângulos em vez de 80)
+        ...(v === 1 ? {} : { far: { geo: blob(0).translate(0, 1.55, 0), mat: lam("#ffffff", { flatShading: true }), shadow: true } }),
+      },
     ],
   },
   pinheiro: {
@@ -294,9 +303,17 @@ export class PieceLayer {
   meshes: THREE.InstancedMesh[] = [];
   /** pra cada malha, qual peça é cada instância */
   private owner = new Map<THREE.InstancedMesh, number[]>();
-  /** pra cada peça, onde ela está: [malha, instância, tint] */
-  private where: [THREE.InstancedMesh, number, 1 | 2 | undefined][][] = [];
+  /** pra cada peça, onde ela está: [malha, instância, tint, 0 = sempre / 1 = só de perto / 2 = só de longe] */
+  private where: [THREE.InstancedMesh, number, 1 | 2 | undefined, 0 | 1 | 2][][] = [];
   private m4 = new THREE.Matrix4();
+  /** peças com versão de longe, e se cada peça está sendo desenhada de perto (1) ou de longe (0) */
+  private lodIds: number[] = [];
+  private nearNow: Uint8Array = new Uint8Array(0);
+  /**
+   * malhas de perto (1) e de longe (2): só as instâncias que valem agora, uma atrás da outra, e `count` pra
+   * desenhar só elas (instância de tamanho zero ainda passa pela placa de vídeo)
+   */
+  private lodMeshes = new Map<THREE.InstancedMesh, { ids: number[]; role: 1 | 2; tint?: 1 | 2 }>();
 
   constructor(
     public pieces: Piece[],
@@ -314,6 +331,10 @@ export class PieceLayer {
     this.meshes = [];
     this.owner.clear();
     this.where = this.pieces.map(() => []);
+    this.nearNow = new Uint8Array(this.pieces.length);
+    this.lodIds = [];
+    this.lodMeshes.clear();
+    this.lodAt = null;
     const groups = new Map<string, number[]>();
     this.pieces.forEach((p, i) => {
       const key = `${p.k}:${p.v ?? 0}`;
@@ -323,17 +344,24 @@ export class PieceLayer {
     });
     for (const [key, ids] of groups) {
       const [k, v] = key.split(":");
-      for (const part of partsOf(k as PieceKind, Number(v))) {
-        const im = new THREE.InstancedMesh(part.geo, part.mat, ids.length);
-        im.castShadow = this.shadows && !!part.shadow;
-        im.receiveShadow = this.shadows;
-        ids.forEach((pi, j) => this.where[pi].push([im, j, part.tint]));
-        this.owner.set(im, ids);
-        this.meshes.push(im);
-        this.group.add(im);
+      const parts = partsOf(k as PieceKind, Number(v));
+      if (parts.some((p) => p.far)) this.lodIds.push(...ids);
+      for (const part of parts) {
+        const list: [Part, 0 | 1 | 2][] = part.far ? [[part, 1], [part.far, 2]] : [[part, 0]];
+        for (const [pt, role] of list) {
+          const im = new THREE.InstancedMesh(pt.geo, pt.mat, ids.length);
+          im.castShadow = this.shadows && !!pt.shadow;
+          im.receiveShadow = this.shadows;
+          ids.forEach((pi, j) => this.where[pi].push([im, j, pt.tint ?? part.tint, role]));
+          this.owner.set(im, ids);
+          if (role) this.lodMeshes.set(im, { ids, role, tint: pt.tint ?? part.tint });
+          this.meshes.push(im);
+          this.group.add(im);
+        }
       }
     }
     this.pieces.forEach((_, i) => this.write(i));
+    for (const im of this.lodMeshes.keys()) this.refill(im);
     for (const m of this.meshes) {
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
@@ -341,19 +369,69 @@ export class PieceLayer {
     }
   }
 
+  private tintOf(p: Piece, tint: 1 | 2) {
+    return tc.set((tint === 2 ? p.c2 : p.c) ?? PIECES[p.k].cores?.[tint - 1] ?? "#ffffff");
+  }
+
   private write(i: number) {
-    const p = this.pieces[i], def = PIECES[p.k];
+    const p = this.pieces[i];
     pieceMatrix(p, this.m4);
-    for (const [im, j, tint] of this.where[i]) {
+    for (const [im, j, tint, role] of this.where[i]) {
+      if (role) continue; // (as de perto/de longe: refill)
       im.setMatrixAt(j, this.m4);
-      if (tint) im.setColorAt(j, tc.set((tint === 2 ? p.c2 : p.c) ?? def.cores?.[tint - 1] ?? "#ffffff"));
+      if (tint) im.setColorAt(j, this.tintOf(p, tint));
     }
   }
+
+  /** malha de perto ou de longe: põe na frente só as peças que valem agora */
+  private refill(im: THREE.InstancedMesh) {
+    const lm = this.lodMeshes.get(im)!, vis: number[] = [];
+    for (const pi of lm.ids) {
+      if ((lm.role === 1) !== (this.nearNow[pi] === 1)) continue;
+      const p = this.pieces[pi];
+      im.setMatrixAt(vis.length, pieceMatrix(p, this.m4));
+      if (lm.tint) im.setColorAt(vis.length, this.tintOf(p, lm.tint));
+      vis.push(pi);
+    }
+    im.count = vis.length;
+    // (o clique acha a peça pela posição da instância)
+    this.owner.set(im, vis);
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.boundingSphere = null;
+  }
+
+  /**
+   * de perto ou de longe, pela distância até a câmera (com folga pra não ficar trocando na divisa).
+   * Sem chamar: tudo de longe. dist = Infinity: tudo de perto (Configurações > Gráficos dos cenários 3D).
+   */
+  lod(cam: THREE.Vector3, dist: number) {
+    // (só quando a câmera andou ou a distância mudou: são milhares de árvores)
+    if (this.lodAt && this.lodAt.distanceToSquared(cam) < 4 && dist === this.lodDist) return;
+    (this.lodAt ??= new THREE.Vector3()).copy(cam);
+    this.lodDist = dist;
+    const d2in = dist * dist, d2out = (dist * 1.15) ** 2;
+    const dirty = new Set<THREE.InstancedMesh>();
+    for (const i of this.lodIds) {
+      const p = this.pieces[i], d2 = (p.x - cam.x) ** 2 + ((p.y ?? 0) - cam.y) ** 2 + (p.z - cam.z) ** 2;
+      const was = this.nearNow[i], now = was ? d2 < d2out : d2 < d2in;
+      if (now === !!was) continue;
+      this.nearNow[i] = now ? 1 : 0;
+      for (const [im, , , role] of this.where[i]) if (role) dirty.add(im);
+    }
+    for (const im of dirty) this.refill(im);
+  }
+  private lodAt: THREE.Vector3 | null = null;
+  private lodDist = 0;
 
   /** a peça i mudou (posição, giro, tamanho ou cor) */
   update(i: number) {
     this.write(i);
-    for (const [im] of this.where[i]) {
+    for (const [im, , , role] of this.where[i]) {
+      if (role) {
+        this.refill(im);
+        continue;
+      }
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
       // (a esfera serve pro clique e pro que aparece na tela: recalcula quando precisar)

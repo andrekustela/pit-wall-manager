@@ -3,7 +3,7 @@ import { gearOf } from "./gear";
 import { BakedWorld, mapSlug } from "./bakedWorld";
 import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
-import type { Race } from "../sim/race";
+import { fmtLap, type Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
 import { CarFx } from "./carFx";
@@ -223,6 +223,10 @@ export class Renderer {
   }
 
   private clock = 0;
+  /** atraso do relógio da tela em relação ao alvo, filtrado (segundos reais) */
+  private errSm = 0;
+  /** velocidade da corrida da última conta do relógio */
+  private clockSpeed = 1;
 
   /**
    * Relógio da tela (tempo de corrida mostrado): anda sozinho no ritmo real e
@@ -235,11 +239,29 @@ export class Renderer {
       if (this.clock > this.snapT + 1e-6 || this.clock < this.snapT - 2) this.clock = this.snapT;
       return Math.min(this.clock, this.snapT);
     }
-    const delay = Math.max(0.05, this.interval * 1.5) * this.simSpeed;
+    // (folga de 2,5 estados: com a correção mansa, 1,5 deixava o relógio alcançar o último estado e o carro
+    // parava um quadro)
+    const delay = Math.max(0.08, this.interval * 2.5) * this.simSpeed;
     const target = this.snapT + ((performance.now() - this.snapReal) / 1000) * this.simSpeed - delay;
     const err = target - this.clock;
-    if (Math.abs(err) > 2 * this.simSpeed + 1) this.clock = target; // muito longe: pula
-    else this.clock += realDt * this.simSpeed * (1 + Math.max(-0.25, Math.min(0.25, err / (0.25 * this.simSpeed + 1e-6))));
+    // trocou a velocidade (16x -> 1x...): a folga muda de tamanho de uma vez. Vai direto pro alvo se ele
+    // está à frente (nunca volta) e esquece o erro velho, que estava na escala da velocidade antiga e
+    // empurrava o relógio até bater no último estado (o carro parava um quadro, várias vezes)
+    if (this.simSpeed !== this.clockSpeed) {
+      this.clockSpeed = this.simSpeed;
+      this.errSm = 0;
+      if (err > 0) this.clock = target;
+      return Math.min(this.clock, this.snapT);
+    }
+    // (o erro chega tremido: cada estado vem uns milissegundos antes ou depois. Corrigir forte a cada quadro
+    // mudava a velocidade do mundo em até 25% de um quadro pro outro, e na câmera de trás tudo engasgava.
+    // Agora o erro é filtrado e a correção é mansa, ~1 s pra alcançar. Em segundos reais: vale igual em
+    // qualquer velocidade)
+    this.errSm += (err / this.simSpeed - this.errSm) * Math.min(1, realDt * 4);
+    if (Math.abs(err) > 2 * this.simSpeed + 1) {
+      this.clock = target; // muito longe: pula
+      this.errSm = 0;
+    } else this.clock += realDt * this.simSpeed * (1 + Math.max(-0.2, Math.min(0.2, this.errSm)));
     this.clock = Math.min(this.clock, this.snapT);
     return this.clock;
   }
@@ -271,7 +293,21 @@ export class Renderer {
   private fx = new CarFx();
   private wallsFor = "";
   /** lateral desenhada (suavizada) e quanto o carro tinha andado, por carro */
-  private latSm = new Map<string, { lat: number; d: number }>();
+  private latSm = new Map<string, { lat: number; d: number; trail: [number, number][] }>();
+  private lastRt = 0;
+  /** equipe do jogador (retorno dos acontecimentos: câmera lenta, tela cinza, textos em cima do carro) */
+  myTeam = "";
+  /** acontecimentos da corrida já vistos */
+  private evSeen = 0;
+  /** textos que sobem em cima do carro por um instante (volta mais rápida, tempo do box, undercut) */
+  private floaters: { id: string; text: string; bg: string; fg: string; t0: number; dur: number }[] = [];
+  /** câmera lenta curtinha (batida forte) e tela cinza (abandono do seu carro), até quando (ms) */
+  private slowUntil = 0;
+  private greyFrom = 0;
+  /** correção de traseira na saída de curva: velocidade do quadro anterior, tempo desde que começou, tamanho */
+  private wiggle = new Map<string, { v: number; t: number; amp: number; cool: number }>();
+  /** box: fase e tempo de cada carro no quadro anterior (pro cronômetro em cima dele) */
+  private pitSeen = new Map<string, string>();
   /** câmera piloto: quanto ela está virada (botão direito; volta pra frente ao trocar de câmera) */
   private pilotYaw = 0;
   /** pedaços de asa voando / caídos na pista (metros do mundo) */
@@ -298,35 +334,70 @@ export class Renderer {
     const W = window.innerWidth, H = window.innerHeight;
     const m = this.m2css();
 
+    // acontecimentos novos: retorno na tela (por importância: toque é só faísca; batida forte do seu carro
+    // ou do seguido = tremor + câmera lenta de ~0,12 s; abandono do seu carro = tela fica cinza um instante)
+    const calm = !!gfx().calm, nowMs = performance.now();
+    if (race.events.length < this.evSeen) this.evSeen = 0;
+    for (; this.evSeen < race.events.length; this.evSeen++) {
+      const e = race.events[this.evSeen], c = e.carId ? race.cars.find((x) => x.id === e.carId) : undefined;
+      const mine = !!c && c.team.id === this.myTeam;
+      if (e.kind === "fastest" && c && race.fastestLap) this.floaters.push({ id: c.id, text: `⏱ ${fmtLap(race.fastestLap.time)}`, bg: "#9b30ff", fg: "#fff", t0: nowMs, dur: 1600 });
+      if (e.kind === "undercut" && c) this.floaters.push({ id: c.id, text: "UNDERCUT!", bg: "#ffcc00", fg: "#111", t0: nowMs, dur: 2600 });
+      if ((e.kind === "crash" || e.kind === "out") && c && (mine || c.id === this.followId) && !calm) {
+        if (e.kind === "crash") {
+          this.slowUntil = nowMs + 120;
+          this.fx.kick(0.9);
+        }
+        if (mine) this.greyFrom = nowMs;
+      }
+    }
+    // box: cronômetro em cima dos seus carros e do seguido; na saída fica o tempo final, verde (limpa) ou
+    // vermelho (os mecânicos erraram)
+    for (const c of race.cars) {
+      const was = this.pitSeen.get(c.id) ?? "none";
+      if (was === "stopped" && c.pit !== "stopped" && (c.team.id === this.myTeam || c.id === this.followId) && c.pitTotal) {
+        const slow = c.pitTotal > (c.pitClean ?? c.pitTotal) + 0.5;
+        this.floaters.push({ id: c.id, text: `${slow ? "▼" : "✔"} ${c.pitTotal.toFixed(1).replace(".", ",")} s`, bg: slow ? "#e0303a" : "#22a85a", fg: "#fff", t0: nowMs, dur: 1800 });
+      }
+      this.pitSeen.set(c.id, c.pit);
+    }
     // posições interpoladas (em pixels do mundo)
-    const rt = this.renderTime(realDt);
+    const rt = this.renderTime(nowMs < this.slowUntil ? realDt * 0.15 : realDt);
+    // quanto a corrida andou neste quadro no relógio da tela (as suavizações usam este, não o tempo real:
+    // o relógio acelera/freia um pouco pra acompanhar a simulação, e com tempos diferentes a lateral e o
+    // quanto o carro andou saíam do passo um do outro e o bico balançava)
+    const drt = Math.max(0, Math.min(0.5 * Math.max(1, speed), rt - this.lastRt));
+    this.lastRt = rt;
     const pos = this.pos;
     pos.clear();
     for (const c of race.cars) {
       const smp = this.sample(this.hist.get(c.id), rt);
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
+      const d = smp ? smp.d : c.s;
       // troca de faixa em curva de S, não em linha reta: a lateral desenhada persegue a da simulação com
       // atraso curto (a simulação muda a velocidade lateral de uma vez, e o carro "escorregava" de lado).
       // Pulo grande (box, batida, volta pra pista) ou carro rodando: vai direto
       const latSim = smp ? smp.lat : c.lateral;
       const ls = this.latSm.get(c.id);
+      const free = c.spin <= 0 && !c.recover;
       let lat = latSim;
-      if (ls && c.spin <= 0 && !c.recover && Math.abs(latSim - ls.lat) < 4) lat = ls.lat + (latSim - ls.lat) * (1 - Math.exp(-Math.max(0, realDt) * Math.max(1, speed) / 0.16));
+      if (ls && free && Math.abs(latSim - ls.lat) < 4) lat = ls.lat + (latSim - ls.lat) * (1 - Math.exp(-drt / 0.16));
       const q = this.px(s, lat);
       // o bico aponta pra onde o carro está indo (seguindo o traçado ele atravessa a pista: com o ângulo
-      // da linha do meio parecia drift). Direção = corda entre a posição de um instante atrás e a de
-      // agora, mais metade do quanto a pista girou nesse trecho (a corda de um arco aponta pro meio
-      // dele). Funciona igual em grampo, por dentro ou por fora
-      // (bico: inclinação da lateral suavizada em relação ao quanto andou; não passa de 35° do rumo da pista)
-      const dD = smp && ls ? smp.d - ls.d : 0;
-      let off = 0;
-      if (ls && c.spin <= 0 && dD > 0.05 && dD < 30) off = Math.max(-0.6, Math.min(0.6, Math.atan2(lat - ls.lat, dD)));
-      else if (ls && c.spin <= 0 && dD <= 0.05) off = this.yawOff.get(c.id) ?? 0;
-      this.latSm.set(c.id, { lat, d: smp ? smp.d : c.s });
+      // da linha do meio parecia drift): inclinação do caminho desenhado nos últimos ~4 m (a corda de um
+      // quadro só pegava qualquer tremidinha e o carro rebolava). Não passa de 35° do rumo da pista
+      const trail = ls && free && d >= ls.d - 0.01 && d - ls.d < 30 ? ls.trail : [];
+      if (!trail.length || d - trail[trail.length - 1][0] > 0.4) trail.push([d, lat]);
+      while (trail.length > 2 && d - trail[1][0] > 4) trail.shift();
+      const [d0, l0] = trail[0];
+      let off = this.yawOff.get(c.id) ?? 0;
+      if (!free) off = 0;
+      else if (d - d0 > 1) off = Math.max(-0.6, Math.min(0.6, Math.atan2(lat - l0, d - d0)));
+      this.latSm.set(c.id, { lat, d, trail });
       // carro de verdade não gira de uma vez: quando ele muda de lado de repente (começa a ultrapassar,
-      // desvia), o bico acompanha em ~0,06 s em vez de pular
+      // desvia), o bico acompanha em ~0,08 s em vez de pular
       const was = this.yawOff.get(c.id) ?? off;
-      const sm = was + (off - was) * (1 - Math.exp(-Math.max(0, realDt) * speed / 0.06));
+      const sm = was + (off - was) * (1 - Math.exp(-drt / 0.08));
       this.yawOff.set(c.id, sm);
       q.h += sm;
       pos.set(c.id, q);
@@ -359,7 +430,8 @@ export class Renderer {
     const o = this.octx;
     // o carro seguido fica no meio da parte da tela que o painel não cobre (desliza junto)
     this.inset += (this.insetTarget - this.inset) * Math.min(1, realDt * 12);
-    const [shx, shy] = this.fx.shakeOffset(realDt);
+    // (o tremor continua passando mesmo desligado, pra não aparecer guardado quando ligar de novo)
+    const shk = this.fx.shakeOffset(realDt), [shx, shy] = calm ? [0, 0] : shk;
     const viewX = cx - W / m / 2 + shx, viewY = cy - (H - this.inset) / m / 2 + shy;
     o.setTransform(1, 0, 0, 1, 0, 0);
     // resolução cheia sempre: os tiles são desenhados no Worker, sem travar o jogo
@@ -439,7 +511,8 @@ export class Renderer {
     this.fx.step(dt);
     const under = (cv: typeof toCss, mm: number, soft = 1, scaleAt?: (x: number, y: number) => number, skipNear?: { x: number; y: number } | null) => {
       drawDebris(cv, mm);
-      this.fx.drawGround(o, cv, mm);
+      // (câmeras 3D: as marcas de pneu já estão no chão da cena, embaixo dos carros)
+      if (!tiltOn) this.fx.drawGround(o, cv, mm);
       this.mistStep(o, dt, cv, mm, scaleAt, skipNear);
       // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
       this.fx.drawAir(o, cv, mm, true, soft);
@@ -453,9 +526,15 @@ export class Renderer {
     for (const c of sorted) {
       const p = pos.get(c.id)!;
       let { x, y } = toCss(p);
-      // (câmera inclinada: aparece bem mais que a tela do 2D, principalmente pra cima)
-      const margin = TILT ? Math.max(W, H) * 1.6 : CAR_LEN_M * m * (c.recover ? 12 : 1);
-      if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
+      // câmeras de trás e piloto: vale a distância de verdade até o carro seguido (pela tela do 2D, com um
+      // zoom que nem aparece nelas, os carros sumiam e voltavam). De cima e de lado: a tela, com folga
+      if (TILT === "tv" || TILT === "piloto") {
+        const fp = pos.get(this.followId) ?? scPos;
+        if (fp && Math.hypot(p.x - fp.x, p.y - fp.y) > 900) continue;
+      } else {
+        const margin = TILT ? Math.max(W, H) * 1.6 : CAR_LEN_M * m * (c.recover ? 12 : 1);
+        if (x < -margin || y < -margin || x > W + margin || y > H + margin) continue;
+      }
       this.screenPos.set(c.id, { x, y });
       if (race.wet > 0.25 && c.v > 25 && gfx().rain !== "off") {
         const wet = race.wet * LV_AMOUNT[gfx().rain], v = c.v;
@@ -469,7 +548,27 @@ export class Renderer {
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
       const crashed = this.fx.crashed(c);
-      let hh = p.h + yaw, alpha = c.retired && !crashed ? 0.6 : 1, mm = m;
+      // saída de curva lenta acelerando forte: às vezes a traseira escapa um pouco e o piloto corrige (2-4°,
+      // some em ~0,6 s). Mais comum com piloto agressivo e na chuva. Só no desenho: a corrida não muda
+      let wig = this.wiggle.get(c.id);
+      const vPrev = wig?.v ?? c.v, acc = drt > 0 ? (c.v - vPrev) / drt : 0;
+      if (!wig) this.wiggle.set(c.id, (wig = { v: c.v, t: 9, amp: 0, cool: 0 }));
+      wig.v = c.v;
+      wig.t += drt;
+      wig.cool -= drt;
+      if (wig.cool <= 0 && wig.t > 1 && !c.slide && c.spin <= 0 && acc > 5 && c.v > 14 && c.v < 45 && Math.abs(curv) > 1 / 160) {
+        const aggr = (c.driver.profile?.aggression ?? 55) / 100;
+        if (Math.random() < (0.25 + aggr * 0.5 + race.wet * 0.3) * 0.5) {
+          wig.t = 0;
+          wig.amp = (0.035 + Math.random() * 0.035) * (Math.random() < 0.5 ? -1 : 1) * (1 + race.wet * 0.3);
+        }
+        wig.cool = 2.5; // (uma chance por curva)
+      }
+      // (câmera piloto no próprio carro: a câmera segue a pista e o carro girava embaixo dela, parecia que
+      // escorregava/tremia; ali não tem)
+      const onboardMe = TILT === "piloto" && c.id === this.followId;
+      const wy = wig.t < 0.8 && !onboardMe ? wig.amp * Math.exp(-wig.t * 5) * Math.sin((wig.t / 0.3) * Math.PI * 2) : 0;
+      let hh = p.h + yaw + wy, alpha = c.retired && !crashed ? 0.6 : 1, mm = m;
       // guindaste retirando o carro: desenha o caminhão e leva o carro junto
       const lift = c.recover ? this.crane(o, c, p, hh, toCss, m) : null;
       if (lift) ({ x, y, h: hh, scale: mm, alpha } = { ...lift, scale: m * lift.scale, alpha: alpha * lift.alpha });
@@ -538,8 +637,9 @@ export class Renderer {
       const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
       real.followId = this.followId;
       real.scMode = race.sc.active;
-      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" && TILT !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: TILT, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw } : null;
+      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" && TILT !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: TILT, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw, cover: this.inset } : null;
       real.liveScreen(race);
+      real.skidMarks(tiltOn ? this.fx.skidList : null);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
     }
     // câmera inclinada: os efeitos por cima da cena 3D, e as posições na tela (etiquetas, clique) pela câmera 3D
@@ -603,6 +703,39 @@ export class Renderer {
       const txt = (c.retired ? `OUT ${c.driver.short}` : `P${c.position} ${c.driver.short}`) + eng;
       this.label(o, sp.x, sp.y - lift, txt, mine ? c.team.color : "#111", mine && isLight(c.team.color) ? "#111" : "#fff", placed);
     }
+    // box: o cronômetro correndo enquanto os mecânicos trabalham
+    for (const c of race.cars) {
+      if (c.pit !== "stopped" || !c.pitTotal || (c.team.id !== this.myTeam && c.id !== this.followId)) continue;
+      const sp = this.screenPos.get(c.id);
+      if (sp) this.label(o, sp.x, sp.y - lift, `⏱ ${Math.max(0, c.pitTotal - c.pitTimer).toFixed(1).replace(".", ",")} s`, "#111", "#fff", placed);
+    }
+    // textos que sobem em cima do carro e somem (entram com um pulinho)
+    this.floaters = this.floaters.filter((f) => nowMs - f.t0 < f.dur);
+    for (const f of this.floaters) {
+      const sp = this.screenPos.get(f.id);
+      if (!sp) continue;
+      const k = (nowMs - f.t0) / f.dur;
+      o.save();
+      o.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
+      // (pulinho na entrada: passa um pouco do tamanho e volta; calmo: sem)
+      const pop = calm ? 1 : k < 0.12 ? 1 + 0.35 * Math.sin((k / 0.12) * Math.PI) : 1;
+      const y = sp.y - lift - 22 - k * 18;
+      o.translate(sp.x, y);
+      o.scale(pop, pop);
+      this.label(o, 0, 0, f.text, f.bg, f.fg, []);
+      o.restore();
+    }
+    // seu carro abandonou: a tela perde a cor por um instante e volta
+    if (this.greyFrom && nowMs - this.greyFrom < 1600) {
+      const k = (nowMs - this.greyFrom) / 1600;
+      o.save();
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.globalCompositeOperation = "saturation";
+      o.globalAlpha = 0.75 * (k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85);
+      o.fillStyle = "#808080";
+      o.fillRect(0, 0, o.canvas.width, o.canvas.height);
+      o.restore();
+    }
 
     if (race.rain > 0) {
       const fcr = race.cars.find((c) => c.id === this.followId);
@@ -642,11 +775,14 @@ export class Renderer {
     let target: number;
     // curva que o carro está fazendo de verdade: quanto a direção dele muda por metro (inclui troca de
     // faixa, ultrapassagem e desvio, que a curvatura da pista não mostra)
+    // (pela posição desenhada, que anda junto com o bico; a da simulação anda aos saltos. Mede a cada
+    // meio metro pelo menos: em pedacinhos menores qualquer tremida virava esterço)
+    const s = this.interp.get(c.id)?.s ?? c.s;
     const prev = this.headSeen.get(c.id);
     let kPath = prev?.k ?? 0;
-    const ds = prev ? tr.wrap(c.s - prev.s) : 0;
-    if (prev && ds > 0.05 && ds < 40) kPath += (angDiff(prev.h, h) / ds - kPath) * 0.35;
-    if (!prev || (ds > 0.05 && ds < 40) || ds >= 40) this.headSeen.set(c.id, { h, s: c.s, k: kPath });
+    const ds = prev ? tr.wrap(s - prev.s) : 0;
+    if (prev && ds > 0.5 && ds < 40) kPath += (angDiff(prev.h, h) / ds - kPath) * 0.35;
+    if (!prev || ds > 0.5) this.headSeen.set(c.id, { h, s, k: kPath });
     if (c.spin > 0) target = Math.sin(performance.now() / 90) * 0.45; // contra-esterço rodando
     else {
       // curvatura logo à frente (o piloto já vira na entrada) misturada com a curva real do carro;

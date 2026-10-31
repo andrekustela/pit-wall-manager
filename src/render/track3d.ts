@@ -15,10 +15,13 @@ type Kind = "costa" | "cais" | "pista" | "kart" | "rua" | "caminho" | "grama" | 
 interface Item { k: Kind; p: [number, number][]; h?: number; fechado?: boolean; w?: number }
 
 /** nome da pista -> arquivo (sem acento, minúsculo) */
-export const slugOf = (name: string) => name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+export { slugOf } from "../sim/walls";
+import { slugOf } from "../sim/walls";
 
 /** pintura por cima do asfalto: puxa pra frente na profundidade (só a altura de milímetros brigava de longe e serrilhava) */
-const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -k, polygonOffsetUnits: -k * 2 });
+// (fator pequeno: ele cresce com o ângulo rasante, e visto de lado a pintura passava na frente da base dos
+// pneus; a separação entre as camadas fica com as unidades)
+const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -Math.min(1, k), polygonOffsetUnits: -k * 3 });
 // (fosco: sem o brilho que muda com o ângulo, a câmera de cima e a de lado mostram a mesma cor; e pesa menos)
 const mat = (color: string, _rough = 0.9, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
@@ -738,6 +741,19 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   if (savedPaths && mapPaths.length && !savedPaths.some((it) => it.src === "mapa")) savedPaths = [...mapPaths, ...savedPaths];
   // (salvo antes das zebras/escapes editáveis: ganha os automáticos, que antes eram fixos)
   if (savedPaths && !savedPaths.some((it) => it.src === "pista")) savedPaths = [...pistaPaths, ...savedPaths];
+  // (traçado editado depois de salvar o autódromo: as zebras/escapes salvos ficaram onde a pista era. Se a
+  // maioria dos pontos deles não está mais na beira da pista, troca pelos automáticos do traçado novo)
+  if (savedPaths?.some((it) => it.src === "pista")) {
+    let n = 0, off = 0;
+    for (const it of savedPaths)
+      if (it.src === "pista")
+        for (const [x, z] of it.p.filter((_, k) => k % 4 === 0)) {
+          n++;
+          const d = trk.near(x, z, W2 + 40);
+          if (d < W2 - 2 || d > W2 + 30) off++;
+        }
+    if (n && off / n > 0.4) savedPaths = [...pistaPaths, ...savedPaths.filter((it) => it.src !== "pista")];
+  }
   const paths = new PathLayer(savedPaths ?? autoPaths.map((it) => ({ ...it, p: it.p.slice() })), shadows);
   group.add(paths.group);
   // relevo: o salvo, o que vem no jogo, ou plano (plano não liga nada: não pesa)

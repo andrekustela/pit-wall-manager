@@ -178,6 +178,12 @@ export interface CarState {
   boxFuel: number; // kg a colocar na próxima parada
   pit: PitPhase;
   pitTimer: number;
+  /** parada atual: quanto ela dura no total e quanto duraria sem erro dos mecânicos (s) — pro cronômetro
+   * em cima do carro ficar verde ou vermelho */
+  pitTotal?: number;
+  pitClean?: number;
+  /** undercut em andamento: "id@volta" do carro que estava logo à frente quando este parou (Race.updatePit) */
+  ucTarget?: string;
   pitStops: number;
   /** ordem de equipe pra esse carro */
   order: TeamOrder;
@@ -279,6 +285,12 @@ export interface CarState {
   // IA
   aiPlan: number[]; // voltas planejadas de parada
   aiCompounds: Compound[];
+  /** IA lendo a corrida: última volta avaliada, voltas seguidas preso atrás de alguém, até que volta
+   * acelerar (overcut) e de quem já cobriu a parada */
+  aiLapSeen?: number;
+  aiStuck?: number;
+  aiPushTill?: number;
+  aiCovered?: string;
 }
 
 export interface RaceEvent {

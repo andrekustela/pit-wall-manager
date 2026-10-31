@@ -98,7 +98,8 @@ const M = (color: string, extra: THREE.MeshLambertMaterialParameters = {}) => {
   if (!m) matCache.set(key, (m = lam(color, extra)));
   return m;
 };
-const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -k, polygonOffsetUnits: -k * 2 });
+// (fator pequeno: ele cresce com o ângulo rasante e a pintura passava na frente da base dos pneus)
+const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -Math.min(1, k), polygonOffsetUnits: -k * 3 });
 
 /** parede em pé ao longo da linha */
 function wall(pts: [number, number][], y0: number, y1: number, uvm = 2.5) {

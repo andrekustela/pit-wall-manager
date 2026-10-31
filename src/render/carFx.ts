@@ -13,7 +13,7 @@ interface Part {
   size: number;
   kind: "fumaca" | "poeira" | "faisca";
 }
-interface Skid {
+export interface Skid {
   x1: number;
   y1: number;
   x2: number;
@@ -172,6 +172,11 @@ export class CarFx {
     const life = { off: 0, baixo: 12, medio: 25, alto: 45 }[gfx().skids];
     this.skids = this.skids.filter((s) => s.t < life);
     this.kept = this.parts.length;
+  }
+
+  /** as marcas de pneu (as câmeras 3D desenham elas no chão da cena: RealCars.skidMarks) */
+  get skidList(): readonly Skid[] {
+    return this.skids;
   }
 
   /** no chão, embaixo dos carros: marcas de pneu */

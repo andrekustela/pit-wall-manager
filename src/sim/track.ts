@@ -44,6 +44,9 @@ export interface TrackDef {
   mod?: boolean;
   /** traçado mexido no editor de traçado (neste navegador) */
   edited?: boolean;
+  /** pista editada: onde ficavam a entrada e a saída do túnel no mapa (as `marks` não valem pro traçado
+   * novo; o túnel vai pro ponto mais perto do traçado editado) */
+  tunnelAt?: [[number, number], [number, number]];
 }
 
 import { turtle } from "./trackShape";
@@ -197,7 +200,16 @@ export function applyTrackMods() {
     // (traçado novo: a linha ideal antiga não serve mais; a do editor, se calculou, entra no lugar)
     const key = `editado:${t.name}`;
     if (e.line) RACING_LINES[key] = { o: e.line, gain: 0, lap: 0 };
-    CIRCUITS[i] = { ...t, points: e.points, targetLength: e.targetLength, lineKey: key, edited: true, marks: undefined };
+    // (túnel: guarda onde ele fica no mapa, pela pista original)
+    let tunnelAt: TrackDef["tunnelAt"];
+    if (t.marks?.t0 !== undefined) {
+      const o = new Track(t);
+      if (o.tunnel) {
+        const a = o.pose(o.tunnel[0], 0), b = o.pose(o.tunnel[1], 0);
+        tunnelAt = [[a.x, a.y], [b.x, b.y]];
+      }
+    }
+    CIRCUITS[i] = { ...t, points: e.points, targetLength: e.targetLength, lineKey: key, edited: true, marks: undefined, tunnelAt };
   });
   for (const m of loadMods()) {
     const key = `mod:${m.id}`;
@@ -332,6 +344,23 @@ export class Track {
     this.L = pts.length;
     const mk = def.marks;
     if (mk?.t0 !== undefined && mk.t1 !== undefined) this.tunnel = [this.wrap(mk.t0 * k - startIdx), this.wrap(mk.t1 * k - startIdx)];
+    else if (def.tunnelAt) {
+      // pista editada: o ponto do traçado novo mais perto de onde ficavam a entrada e a saída (longe
+      // demais, o trecho foi mexido e o túnel sai)
+      const near = ([x, y]: [number, number]) => {
+        let best = -1, bd = 30 * 30;
+        pts.forEach((p, i) => {
+          const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+          if (d < bd) {
+            bd = d;
+            best = i;
+          }
+        });
+        return best;
+      };
+      const a = near(def.tunnelAt[0]), b = near(def.tunnelAt[1]);
+      if (a >= 0 && b >= 0) this.tunnel = [a, b];
+    }
 
     const runLen = run[1] - run[0];
     this.mainStraight = [this.L - runLen * 0.55, runLen * 0.45];
@@ -345,7 +374,21 @@ export class Track {
     if (line) {
       // o carro de teste deixa umas tremidas nas retas (custam quase nada pra ele): alisa
       const N = line.length, wgt = [1, 2, 3, 2, 1];
-      this.line = line.map((_, j) => wgt.reduce((a, w, q) => a + w * line[(j + q - 2 + N) % N], 0) / 9);
+      const o = line.map((_, j) => wgt.reduce((a, w, q) => a + w * line[(j + q - 2 + N) % N], 0) / 9);
+      // nas retas sobravam ondas de ~100 m (o carro ia e voltava de lado sem motivo e parecia balançar):
+      // alisa forte onde a pista é reta e nada nas curvas (lá o traçado tem que encostar na tangência)
+      const k = o.map((_, j) => {
+        let a = 0;
+        for (let d = -30; d <= 30; d += 5) a += Math.abs(this.curvature[Math.floor(this.wrap(j * LINE_STEP + d)) % this.L] ?? 0);
+        return a / 13;
+      });
+      const free = k.map((v) => Math.max(0, 1 - v / 0.006) ** 2);
+      // (muitas passadas: entre duas curvas a linha vira uma travessia lisa, de um lado pro outro, sem S)
+      for (let pass = 0; pass < 400; pass++) {
+        const prev = o.slice();
+        for (let j = 0; j < N; j++) o[j] += (free[j] * ((prev[(j - 1 + N) % N] + prev[(j + 1) % N]) / 2 - prev[j])) / 2;
+      }
+      this.line = o;
       this.lineK = this.lineCurvature();
     }
     const p = this.profile(DEFAULT_PHYS.latAcc, DEFAULT_PHYS.vmax);

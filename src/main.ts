@@ -574,6 +574,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       });
     });
     view.renderer.showEngineers = !this.lobby?.solo;
+    view.renderer.myTeam = my;
     let prevSpeed = 1;
     const setSpeed = (s: number) => {
       if (!isHost) return;

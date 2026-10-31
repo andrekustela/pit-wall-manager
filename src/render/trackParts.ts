@@ -390,7 +390,8 @@ export function asphaltTexture() {
   const c = document.createElement("canvas");
   c.width = c.height = 256;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#222a3c";
+  // (um pouco mais claro que o #222a3c antigo, pedido do usuário)
+  g.fillStyle = "#323a4b";
   g.fillRect(0, 0, 256, 256);
   const rnd = rng(5);
   for (let i = 0; i < 20000; i++) {
@@ -625,8 +626,10 @@ export function busGeo() {
 }
 
 /** torcida pra pôr em cima de um módulo de arquibancada (mesmos degraus): bonequinhos de roupas variadas,
- * uns de braço pra cima, uns com bandeira. `seed` muda quem senta onde; `lift` = arquibancada sobre pilares */
-export function crowdGeo(seed = 23, lift = 0) {
+ * uns de braço pra cima, uns com bandeira. `seed` muda quem senta onde; `lift` = arquibancada sobre pilares.
+ * `far`: a versão de longe (as mesmas pessoas e cores, cada uma só a camisa e a cabeça em placas inclinadas
+ * que se vê de frente e de cima: 4 triângulos em vez de ~55) */
+export function crowdGeo(seed = 23, lift = 0, far = false) {
   const b = new GB();
   const shirts = ["#e32222", "#1f5fbf", "#f6d21a", "#18b04f", "#ffffff", "#f07a1a", "#8a2be2", "#111111", "#ff6fa8", "#2ec4c4", "#7a4a2a", "#9aa3ab"].map(C);
   const pants = ["#2b3445", "#1b1b1f", "#5a6470", "#3a2c22"].map(C);
@@ -644,6 +647,19 @@ export function crowdGeo(seed = 23, lift = 0) {
     for (let x = -6.6; x <= 6.6; x += 0.62) {
       if (Math.abs(x) < 0.6 || rnd() < 0.22) continue;
       const zs = z0 + 0.6, shirt = pick(shirts);
+      if (far) {
+        // (sorteia igual à de perto, pra ninguém trocar de roupa ao chegar perto)
+        rnd();
+        const sk = pick(skin);
+        rnd() < 0.3 ? rnd() : rnd();
+        const r = rnd();
+        if (r < 0.1) pick(flags);
+        // (mesma volta da face da frente da caixa: olha pra -z, pra pista)
+        const lean = 0.22;
+        b.quad([x - 0.17, top + 0.4, zs], [x - 0.17, top + 0.95, zs + lean], [x + 0.17, top + 0.95, zs + lean], [x + 0.17, top + 0.4, zs], shirt);
+        b.quad([x - 0.11, top + 0.95, zs + lean], [x - 0.11, top + 1.24, zs + lean + 0.12], [x + 0.11, top + 1.24, zs + lean + 0.12], [x + 0.11, top + 0.95, zs + lean], sk);
+        continue;
+      }
       // pernas (sentado: pra frente do assento), tronco, cabeça e às vezes boné
       b.box(x - 0.15, top + 0.12, zs - 0.35, x + 0.15, top + 0.42, zs + 0.05, pick(pants));
       b.box(x - 0.17, top + 0.4, zs, x + 0.17, top + 0.95, zs + 0.28, shirt);

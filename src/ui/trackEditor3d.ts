@@ -4,6 +4,7 @@
 // o que foi salvo. Só desenho: não muda nada da corrida (o traçado continua o mesmo).
 import * as THREE from "three";
 import { MapControls } from "three/addons/controls/MapControls.js";
+import { SCENE_LOD_DIST, gfx } from "../render/gfx";
 import { ACTIVE_TRACKS, CIRCUITS, getTrack, type Track } from "../sim/track";
 import { buildTrack3d, slugOf } from "../render/track3d";
 import { DEFAULT_SIZE, PIECES, standV, clearPieces, pathsFromJson, piecesFromJson, piecesToJson, savePieces, type Piece, type PieceKind, type PieceLayer } from "../render/pieces";
@@ -1483,6 +1484,7 @@ export function showTrackEditor3d(onDone: () => void = () => {}, startIndex = AC
     sun.position.set(sx - 60, 150, sz - 80);
     sun.target.position.set(sx, 0, sz);
     sun.target.updateMatrixWorld();
+    layer?.lod(camera.position, SCENE_LOD_DIST[gfx().sceneQ]);
     renderer.render(scene, camera);
   };
   loop();

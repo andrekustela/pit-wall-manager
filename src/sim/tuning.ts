@@ -121,7 +121,10 @@ export function optimalTuning(track: Track, cond: Conditions = NEUTRAL, d?: Driv
 export function aiTuning(track: Track, quality: number, rng: Rng, cond?: Conditions, d?: Driver): Tuning {
   const opt = optimalTuning(track, cond, d).tuning;
   const fb = (d?.profile?.feedback ?? 70) / 100;
-  const err = (0.3 + (1 - quality) * 0.75 + (1 - fb) * 0.35) * 10;
+  // (desvio por ajuste: engenheiro bom ~2, médio ~4,5, ruim ~8,5. Antes todos erravam muito (médio ~8) e a
+  // classificação virava sorteio — 57% do grid era sorte; com todos acertando igual o engenheiro não
+  // importava mais. Agora cresce rápido conforme ele piora: bom acerta, ruim erra)
+  const err = (0.12 + Math.pow(1 - quality, 1.5) * 0.8 + (1 - fb) * 0.2) * 10;
   const hErr = rng.gauss(err * 0.6);
   return clampTuning({
     fw: opt.fw + rng.gauss(err),

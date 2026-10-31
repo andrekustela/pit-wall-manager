@@ -134,7 +134,7 @@ export function fuelPerLap(laps: number): number {
 /** campos do carro que mudam durante a corrida (vão no snapshot da rede) */
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
-  "boxRequest", "boxFuel", "pit", "pitTimer", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
+  "boxRequest", "boxFuel", "pit", "pitTimer", "pitTotal", "pitClean", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
   "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "restYaw", "recover", "retireAtBox", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
@@ -1216,6 +1216,16 @@ export class Race {
         // largada: cada um segura a sua fila até a primeira curva (chegam lado a lado)
         const opening = c.lap < 0 || (c.lap === 0 && this.dist(c) < 550);
         let want = c.finished ? 4 : opening ? Math.round(c.lateral / LANE_STEP) * LANE_STEP : this.track.lineAt(c.s + 12);
+        if (!c.finished && !opening) {
+          // cada piloto com o seu jeito: o traçado dele varia devagar até ~35 cm pra um lado ou pro outro
+          // (todo mundo exatamente na mesma linha parecia trenzinho, não gente dirigindo)
+          let ph = 0;
+          for (const ch of c.driver.id) ph = (ph * 31 + ch.charCodeAt(0)) % 6283;
+          ph /= 1000;
+          want += 0.35 * Math.sin(c.s / 170 + ph) * Math.sin(c.s / 410 + ph * 2.3);
+          // atrás do safety car: ziguezague pra esquentar os pneus (como na F1)
+          if (sc.active && sc.onTrack && zone === "track") want += 1.1 * Math.sin(this.time * 1.8 + ph * 3);
+        }
         // reta com alguém até 80 m na frente: entra na esteira dele (perto da freada volta pro traçado)
         if (!c.finished && !opening && !sc.active && this.track.isStraight(c.s) && this.track.isStraight(c.s + 60)) {
           const a = this.towTarget(c);
@@ -1227,7 +1237,9 @@ export class Race {
         // carro rodado, voltando pra pista ou quase parado lá na frente: desvia cedo (até 80 m) pro lado
         // contrário de onde ele está escorregando, contando o tamanho dele atravessado, e tira o pé
         // (sem isso todo mundo freava atrás dele; quem não consegue desviar bate)
-        if (!c.finished && c.v > 15) {
+        // (em qualquer velocidade: só acima de 15 m/s, quem já estava devagar ou parado atrás dele nunca
+        // procurava saída)
+        if (!c.finished) {
           let haz: CarState | null = null, hd = 80, hLat = 0, hW = 0, drift = 0;
           for (const o of this.cars) {
             if (o === c || o.pit !== "none" || o.finished) continue;
@@ -1396,7 +1408,10 @@ export class Race {
         const d = this.rel(c, o);
         // (em relação ao traçado ideal: ele cruza a pista, e 30 m na frente a mesma fila fica em outra lateral)
         // safety car: fila indiana na pista toda, ninguém passa por fora (nem quem vai pro box)
-        const single = sc.active && zone === "track" && !c.finished && !o.finished;
+        // (só atrás de quem está andando: carro batido, rodando ou no guindaste não é fila, é obstáculo — os
+        // de trás ficavam parados atrás dele pra sempre)
+        const running = !o.retired && !o.slide && o.spin <= 0 && !o.recover;
+        const single = sc.active && zone === "track" && !c.finished && !o.finished && running;
         if (d <= 0 || d > 40 || (!single && Math.abs(d < 8 ? o.lateral - c.lateral : this.relLat(o) - this.relLat(c)) >= CAR_W + 0.3)) continue;
         const net = d - CAR_L;
         const desired = net < 0.5 ? o.v * 0.85 : o.v + 0.9 * (net - 2.5);
@@ -1431,7 +1446,10 @@ export class Race {
     // com inércia: a velocidade de lado muda aos poucos (senão o carro "deslizava" de lado de um quadro
     // pro outro) e diminui chegando no ponto (sem passar e voltar)
     const gap = c.lateralTarget - c.lateral;
-    const want = Math.max(-rate, Math.min(rate, gap * 1.8));
+    // (no máximo a velocidade de lado que ainda dá pra frear até o alvo com a aceleração de lado que o
+    // carro tem: com só "1,8 × distância" ele chegava rápido demais, passava do ponto e voltava)
+    const brake = Math.sqrt(2 * LAT_ACC * 0.7 * Math.abs(gap));
+    const want = Math.max(-rate, Math.min(rate, Math.sign(gap) * Math.min(brake, Math.abs(gap) * 1.8)));
     const acc = LAT_ACC * dt;
     let vl = c.latV ?? 0;
     vl += Math.max(-acc, Math.min(acc, want - vl));
@@ -1587,6 +1605,13 @@ export class Race {
         c.pit = "entering";
         c.overtaking = null;
         if (!c.finished) this.log(`${c.driver.name} entra nos boxes`, c.isHuman, c.team.id, "pitin");
+        // undercut: quem estava logo à frente (até ~4 s) e ainda não parou mais que ele. Quando esse
+        // rival voltar pra pista depois da parada dele, se o carro estiver na frente, deu certo
+        c.ucTarget = undefined;
+        if (c.isHuman && !c.finished) {
+          const ahead = this.cars.find((o) => o.position === c.position - 1);
+          if (ahead && !ahead.retired && ahead.pit === "none" && ahead.pitStops <= c.pitStops && (this.dist(ahead) - this.dist(c)) / Math.max(30, c.v) < 4) c.ucTarget = `${ahead.id}@${c.lap}`;
+        }
       }
       return;
     }
@@ -1614,6 +1639,7 @@ export class Race {
         const crew = this.crewOfCar(c);
         const lo = 2.9 - crew.pneus * 0.18;
         let tyres = this.rng.range(lo, lo + 1.0 - crew.pneus * 0.12);
+        const cleanTyres = tyres;
         if (this.rng.chance(crewErrorChance(crew.chefe))) {
           const team = c.isHuman ? c.team.id : undefined;
           if (this.rng.chance(0.75)) {
@@ -1634,13 +1660,25 @@ export class Race {
         // consertos (só das peças marcadas pra trocar); cada peça demora diferente
         let nose = 0;
         for (const part of PARTS) if (c.dmg[part.id] > 0 && c.repair[part.id]) nose += this.rng.range(part.repair[0], part.repair[1]) * repairMult(crew.pecas);
-        c.pitTimer = Math.max(tyres, refuel) + nose + (mate ? mate.pitTimer + 0.8 : 0);
+        const wait = nose + (mate ? mate.pitTimer + 0.8 : 0);
+        c.pitTimer = Math.max(tyres, refuel) + wait;
+        c.pitTotal = c.pitTimer;
+        c.pitClean = Math.max(cleanTyres, refuel) + wait;
       }
     } else if (c.pit === "leaving") {
       if (t.wrap(t.pitExitS - prevS) <= ds) {
         c.pit = "none";
         c.lateral = PIT_MERGE; // sai pela beira e volta pro traçado quando tiver espaço
         c.lateralTarget = 0;
+        // alguém tinha parado antes pra passar este carro (undercut): voltou pra pista atrás dele?
+        // (só vale se o rival parou até 3 voltas depois; mais que isso não é mais undercut)
+        for (const u of this.cars) {
+          const [tid, lap] = (u.ucTarget ?? "").split("@");
+          if (tid !== c.id) continue;
+          u.ucTarget = undefined;
+          if (c.lap - Number(lap) <= 3 && !u.retired && u.pit === "none" && this.dist(u) > this.dist(c))
+            this.log(`UNDERCUT! ${u.driver.short} parou antes e voltou na frente de ${c.driver.short}`, true, u.team.id, "undercut", u.id);
+        }
       }
     }
   }
@@ -2016,7 +2054,33 @@ export class Race {
     const scChance =
       this.sc.active && q > 0.35 && lapsLeft > 3 && best === "dry" &&
       ((nextPlanned !== undefined && nextPlanned - c.lap <= this.laps * 0.25) || c.wear > 0.5);
-    if (lapsLeft >= 1 && (weatherSwap || wornOut || planDue || lastChance || lowFuel || scChance || damaged)) {
+
+    // ---- leitura da corrida: quem está logo na frente e logo atrás, e a quantos segundos ----
+    const ahead = this.cars.find((o) => o.position === c.position - 1 && !o.retired && !o.finished);
+    const behind = this.cars.find((o) => o.position === c.position + 1 && !o.retired && !o.finished);
+    const secs = (a: CarState, b: CarState) => (this.dist(a) - this.dist(b)) / Math.max(30, c.v);
+    const gapA = ahead && ahead.pit === "none" ? secs(ahead, c) : 99;
+    const gapB = behind && behind.pit === "none" ? secs(c, behind) : 99;
+    // (decisões com sorteio: uma vez por volta; engenheiro bom acerta mais)
+    const newLap = c.aiLapSeen !== c.lap;
+    if (newLap) {
+      c.aiLapSeen = c.lap;
+      c.aiStuck = gapA < 1.2 && !this.sc.active ? (c.aiStuck ?? 0) + 1 : 0;
+    }
+    const windowNear = nextPlanned !== undefined && nextPlanned - c.lap <= Math.max(2, Math.round(this.laps * 0.2));
+    const dryRace = best === "dry" && !this.sc.active && lapsLeft > 4;
+    // cobre o undercut: o carro logo atrás (até 2,5 s) entrou no box e a minha parada já estava perto
+    const cover = dryRace && windowNear && !!behind && behind.pit === "entering" && gapB < 2.5 && c.aiCovered !== behind.id && this.rng.chance(0.25 + q * 0.6);
+    if (behind && behind.pit === "entering") c.aiCovered = behind.id;
+    // tenta o undercut: preso atrás de alguém há 2+ voltas, com a parada perto
+    const undercut = dryRace && newLap && windowNear && (c.aiStuck ?? 0) >= 2 && q > 0.3 && this.rng.chance(q * 0.55);
+    // overcut: quem está na frente parou e o meu pneu ainda aguenta: acelera umas voltas antes de parar
+    if (ahead && ahead.pit === "entering" && c.wear < 0.55 && q > 0.4) c.aiPushTill = c.lap + 2;
+    const human = (o?: CarState) => (o?.isHuman ? o : undefined);
+    if (cover && human(behind)) this.log(`Rádio: "${c.driver.short} viu a gente parar e vai pro box no mesmo giro pra cobrir o undercut."`, true, behind!.team.id, "radio", c.id);
+    if (undercut && human(ahead)) this.log(`Rádio: "Atenção, ${c.driver.short} está chamando pro box antes da gente: tentando o undercut!"`, true, ahead!.team.id, "radio", c.id);
+
+    if (lapsLeft >= 1 && (weatherSwap || wornOut || planDue || lastChance || lowFuel || scChance || damaged || cover || undercut)) {
       const after = c.aiPlan[c.pitStops + 1];
       const until = after !== undefined && after > c.lap + 2 ? after : this.laps;
       const atStop = Math.max(0, c.fuel - cons * 0.5);
@@ -2024,9 +2088,28 @@ export class Race {
       c.boxFuel = Math.max(0, Math.ceil(this.aiStintFuel(c, c.lap + 1, until) - atStop));
     }
 
-    if (lapsLeft <= 3 && c.wear < 0.6 && fuelLaps > this.lapsLeft(c) * 1.1) c.pace = "push";
+    // ---- ritmo e motor: o que a situação pede ----
+    const fuelOk = fuelLaps > this.lapsLeft(c) * 1.1;
+    const tyresOk = c.wear < 0.7;
+    // volta antes de parar (pneu velho não importa mais) e volta de saída (pneu novo): tudo
+    const inLap = nextPlanned !== undefined && c.lap + 1 >= nextPlanned && c.wear < 0.9;
+    const outLap = c.pitStops > 0 && c.tyreLaps < 1;
+    // colado em quem está na frente: ataca; sendo pressionado por alguém mais rápido: defende
+    const attack = gapA < 1.0 && tyresOk && q > 0.25;
+    const defend = gapB < 0.7 && !!behind && behind.targetLap < c.targetLap && tyresOk;
+    // sozinho (3 s pros dois lados) com pneu já gasto e parada pela frente: poupa pra esticar o stint
+    const alone = gapA > 3 && gapB > 3 && c.wear > 0.45 && nextPlanned !== undefined && q > 0.4;
+    const overcut = (c.aiPushTill ?? -1) >= c.lap && tyresOk;
+    if (this.sc.active) c.pace = "normal";
+    else if (lapsLeft <= 3 && c.wear < 0.6 && fuelOk) c.pace = "push";
     else if (c.wear > 0.75 && nextPlanned === undefined && lapsLeft > 3) c.pace = "conserve";
+    // ("atacar" multiplica o risco de erro: só nas voltas curtas que decidem a parada, e com engenheiro bom;
+    // pra brigar roda a roda vai o motor rico, que gasta combustível mas não aumenta o risco)
+    else if ((inLap || outLap || overcut) && q > 0.5) c.pace = "push";
+    else if (alone) c.pace = "conserve";
     else c.pace = "normal";
+    // motor rico pra brigar (atacar/defender) e nas voltas do box, se o combustível sobra
+    if (c.engine === "normal" && (attack || defend || inLap || outLap) && fuelLaps > lapsToEnd * 1.08 && q > 0.3) c.engine = "rich";
   }
 
   private log(text: string, important: boolean, teamId?: string, kind?: string, carId?: string) {

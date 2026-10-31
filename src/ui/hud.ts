@@ -19,6 +19,8 @@ import {
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import { OnboardCam } from "../render/onboard";
+import { gfx } from "../render/gfx";
+import { sound } from "../audio/sound";
 import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
 
@@ -757,10 +759,16 @@ export class Hud {
           if (Math.abs(dy) < 1) return;
           // desliza da posição antiga pra nova (ease-out forte)
           el.animate([{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }], { duration: 420, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
-          // ganhou posição = verde, perdeu = vermelho (curto, volta ao normal)
+          // ganhou posição = verde, perdeu = vermelho (curto, volta ao normal; "reduzir flashes": mais fraco)
           const gained = (prevPos.get(c.id) ?? i) > i;
           const col = gained ? "59,209,111" : "255,59,59";
-          el.animate([{ boxShadow: `inset 0 0 0 999px rgba(${col},.32)` }, { boxShadow: `inset 0 0 0 999px rgba(${col},0)` }], { duration: 900, easing: "ease-out" });
+          const calm = !!gfx().calm;
+          el.animate([{ boxShadow: `inset 0 0 0 999px rgba(${col},${calm ? 0.12 : 0.32})` }, { boxShadow: `inset 0 0 0 999px rgba(${col},0)` }], { duration: 900, easing: "ease-out" });
+          // seu carro: a linha dá um pulinho elástico e toca o som (sobe ou desce)
+          if (c.team.id === my && race.phase === "racing") {
+            if (!calm) el.animate([{ transform: `translateY(${dy}px) scale(1)` }, { transform: "translateY(0) scale(1.06)", offset: 0.55 }, { transform: "translateY(0) scale(1)" }], { duration: 520, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)", composite: "replace" });
+            sound.position(gained);
+          }
           // carro da sua equipe ganhou posição: o "P" do painel dele dá um pulinho
           if (gained && c.team.id === my) {
             const pEl = this.el.querySelector<HTMLElement>(`.driver[data-id="${c.id}"] .p`);

@@ -110,6 +110,8 @@ export class Room {
 
   /** chamado no solo depois de cada etapa do campeonato (null = acabou, apaga o save) */
   onSave: ((s: ChampSave | null) => void) | null = null;
+  /** barreiras do autódromo da pista (o servidor lê o .pecas.json; no solo quem põe é o autódromo 3D) */
+  static wallsFor: ((trackName: string) => [number, number][] | null) | null = null;
 
   private saveChamp() {
     const ch = this.champ;
@@ -734,6 +736,8 @@ export class Room {
       opts.grid = grid;
     }
     this.race = new Race(opts);
+    const walls = Room.wallsFor?.(this.race.track.name);
+    if (walls?.length) this.race.setWalls(walls);
     this.lastStart = opts;
     this.speed = 1;
     this.sentEvents = 0;

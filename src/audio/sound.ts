@@ -516,6 +516,17 @@ class Sound {
     this.noise(1.2, 0.1, 150, "lowpass");
   }
 
+  /** seu carro ganhou (sobe) ou perdeu (desce) posição: dois bipes curtos; no máximo um a cada 0,4 s */
+  private posAt = 0;
+  position(gained: boolean) {
+    const now = performance.now();
+    if (now - this.posAt < 400) return;
+    this.posAt = now;
+    const [a, b] = gained ? [880, 1319] : [659, 440];
+    this.beep(a, 0.08, 0.05, "triangle");
+    this.beep(b, 0.12, 0.05, "triangle", 0.08);
+  }
+
   /** som pros eventos novos da corrida */
   events(list: RaceEvent[], myTeam: string) {
     for (const e of list) {
@@ -542,6 +553,10 @@ class Sound {
         case "checkered": this.fanfare(); break;
         case "rain": this.thunderRain(); break;
         case "fastest": if (mine) this.beep(1568, 0.12, 0.06, "triangle"); break;
+        // estratégia que deu certo: arpejo subindo
+        case "undercut": if (mine) [784, 988, 1175, 1568].forEach((n, i) => this.beep(n, 0.14, 0.07, "triangle", i * 0.09)); break;
+        // seu carro abandonou por quebra: dois tons descendo, graves
+        case "out": if (mine) { this.beep(294, 0.3, 0.08, "sawtooth"); this.beep(196, 0.5, 0.08, "sawtooth", 0.28); } break;
       }
     }
   }

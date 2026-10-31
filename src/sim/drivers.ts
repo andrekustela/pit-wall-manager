@@ -153,8 +153,8 @@ export function toDriver(p: DriverProfile, teamId: string): Driver {
     name: p.name,
     short: p.short,
     teamId,
-    // velocidade 100 = 0 s; 60 = ~0,18 s mais lento por volta (o acerto pesa mais que o piloto)
-    skill: ((100 - p.pace) / 100) * 0.45,
+    // velocidade 100 = 0 s; 60 = ~0,36 s mais lento por volta (era a metade: o piloto quase não importava)
+    skill: ((100 - p.pace) / 100) * 0.9,
     // cuidado com pneu 100 = gasta ~7% menos; 20 = ~5% mais
     tyreCare: 1.075 - (p.tyreCare / 100) * 0.15,
     profile: p,

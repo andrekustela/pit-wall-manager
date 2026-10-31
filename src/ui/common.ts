@@ -236,7 +236,7 @@ export function trackTags(trackIndex: number): { t: string; c: string; tip: stri
   if (d.night) tags.push({ t: "NOTURNA", c: "noite", tip: "Corrida de noite, com refletores" });
   if (d.rainChance >= 0.4) tags.push({ t: "CHUVOSA", c: "chuva", tip: `Chance de chuva de ${Math.round(d.rainChance * 100)}%` });
   else if (d.rainChance <= 0.05) tags.push({ t: "SECA", c: "seca", tip: "Quase nunca chove" });
-  if (d.marks?.t0 !== undefined) tags.push({ t: "TÚNEL", c: "tunel", tip: "Tem um trecho coberto" });
+  if (d.marks?.t0 !== undefined || d.tunnelAt) tags.push({ t: "TÚNEL", c: "tunel", tip: "Tem um trecho coberto" });
   if (d.minHeight >= 6) tags.push({ t: "ONDULADA", c: "ond", tip: "Asfalto irregular: carro baixo bate no chão" });
   if ((d.overtake ?? 1) <= 0.8) tags.push({ t: "DIFÍCIL ULTRAPASSAR", c: "ultra-", tip: "Pouco espaço pra ultrapassar" });
   else if ((d.overtake ?? 1) >= 1.2) tags.push({ t: "FÁCIL ULTRAPASSAR", c: "ultra", tip: "Boas zonas de ultrapassagem" });

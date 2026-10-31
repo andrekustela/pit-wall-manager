@@ -1,15 +1,38 @@
 // Servidor do modo online: cria salas com código e liga cada WebSocket a uma
 // Room (a mesma lógica que roda no navegador no modo solo). Também serve o
 // build do jogo (dist/), então dá pra hospedar tudo num lugar só.
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { ClientMsg, ServerMsg } from "../src/net/protocol";
 import { Room } from "../src/net/room";
+import { slugOf, wallPointsFromJson } from "../src/sim/walls";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = resolve(process.cwd(), "dist");
+
+// barreiras do autódromo de cada pista (as mesmas que o jogo usa no 3D), lidas uma vez
+const wallCache = new Map<string, [number, number][] | null>();
+Room.wallsFor = (name) => {
+  const slug = slugOf(name);
+  if (!wallCache.has(slug)) {
+    let pts: [number, number][] | null = null;
+    for (const dir of [resolve(process.cwd(), "public"), DIST]) {
+      const f = join(dir, "autodromos", `${slug}.pecas.json`);
+      if (!existsSync(f)) continue;
+      try {
+        pts = wallPointsFromJson(readFileSync(f, "utf8"));
+        console.log(`barreiras de ${name}: ${pts.length} pontos`);
+      } catch (e) {
+        console.error(`erro lendo ${f}`, e);
+      }
+      break;
+    }
+    wallCache.set(slug, pts);
+  }
+  return wallCache.get(slug) ?? null;
+};
 
 const rooms = new Map<string, Room>();
 /** versão publicada (commit no Render); o jogo do navegador manda a dele pra comparar */
