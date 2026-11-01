@@ -518,6 +518,19 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       return tv;
     };
     view.toggleTv = toggleTv;
+    // câmera TV (MultiCam): o botão do lado do TV liga e desliga (desligando, volta pra câmera de antes)
+    let camBefore: Exclude<ReturnType<typeof currentCam3d>, "multicam"> = "lado";
+    const toggleMultiCam = () => {
+      if (car3dPref.style !== "real") {
+        toast("Câmeras: só com os carros em 3D (Configurações > Gráficos)");
+        return false;
+      }
+      const cur = currentCam3d(), on = cur !== "multicam";
+      if (on) camBefore = cur as typeof camBefore;
+      setCam3d(on ? "multicam" : camBefore);
+      toast(on ? "🎥 TV (MultiCam): a câmera troca sozinha" : "🎥 MultiCam desligada");
+      return on;
+    };
     const tvPick = () => {
       if (!tv) return;
       // prioridade: rodada, saída de pista, batida e o guindaste (corta na hora, como na transmissão);
@@ -630,7 +643,9 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       send: (cmd) => conn.send({ t: "cmd", cmd }),
       skip: () => conn.send({ t: "skip" }),
       toggleTv,
+      toggleMultiCam,
     });
+    view.hud.setMultiCam(currentCam3d() === "multicam");
     view.minimap = new Minimap(view.hud.minimapCanvas, race, setFollow);
     view.onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
@@ -663,6 +678,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         if (car3dPref.style !== "real") toast("Câmeras: só com os carros em 3D (Configurações > Gráficos)");
         else if (camKey !== currentCam3d()) {
           setCam3d(camKey);
+          view.hud.setMultiCam((camKey as string) === "multicam");
           toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro", piloto: "piloto (botão direito gira)", multicam: "TV (MultiCam): troca sozinha" }[camKey]}`);
         }
       }

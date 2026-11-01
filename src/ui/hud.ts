@@ -39,6 +39,8 @@ export interface HudHooks {
   skip(): void;
   /** liga/desliga o modo TV (câmera corta sozinha pras disputas); devolve se ficou ligado */
   toggleTv?(): boolean;
+  /** câmera TV (MultiCam) liga/desliga; devolve se ficou ligada */
+  toggleMultiCam?(): boolean;
 }
 
 interface CardState {
@@ -65,6 +67,9 @@ export class Hud {
   /** botão do modo TV aceso/apagado */
   setTv(on: boolean) {
     this.top.querySelector("[data-tv]")?.classList.toggle("on", on);
+  }
+  setMultiCam(on: boolean) {
+    this.top.querySelector("[data-multicam]")?.classList.toggle("on", on);
   }
 
   /** mensagem sua no feed (some em 8 s) */
@@ -322,13 +327,14 @@ export class Hud {
     this.top.innerHTML =
       [0, ...SPEEDS].map((s, i) => `<button data-speed="${s}" ${host ? "" : "disabled"} title="${s === 0 ? "Pausar (Espaço)" : `${s}x (tecla ${i})`}">${s === 0 ? "❚❚" : `${s}x`}</button>`).join("") +
       // sair da corrida: botão ⌂ do canto
-      `<button data-tv title="Modo TV: a câmera corta sozinha pras disputas (T)">📺 TV</button><button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button>`;
+      `<button data-tv title="Modo TV: a câmera corta sozinha pras disputas (T)">📺 TV</button><button data-multicam title="TV (MultiCam): a câmera troca sozinha de ângulo, como na transmissão (5)">🎥 MULTICAM</button><button data-skip style="display:none">PULAR P/ PÓDIO ⏭</button>`;
     this.top.querySelectorAll<HTMLButtonElement>("[data-speed]").forEach((b) =>
       b.addEventListener("click", () => this.hooks.setSpeed(Number(b.dataset.speed))),
     );
     this.top.querySelector("[data-skip]")!.addEventListener("click", () => this.hooks.skip());
     const tv = this.top.querySelector<HTMLButtonElement>("[data-tv]")!;
     tv.addEventListener("click", () => this.setTv(this.hooks.toggleTv?.() ?? false));
+    this.top.querySelector("[data-multicam]")?.addEventListener("click", () => this.setMultiCam(this.hooks.toggleMultiCam?.() ?? false));
     if (!host) this.top.title = "Só o host controla a velocidade";
   }
 
