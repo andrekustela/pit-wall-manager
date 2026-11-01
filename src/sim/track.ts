@@ -47,6 +47,8 @@ export interface TrackDef {
   /** pista editada: onde ficavam a entrada e a saída do túnel no mapa (as `marks` não valem pro traçado
    * novo; o túnel vai pro ponto mais perto do traçado editado) */
   tunnelAt?: [[number, number], [number, number]];
+  /** pacote de mod que vem com o jogo: "real" = as pistas reais (aba MODS; jogam campeonato e online) */
+  pack?: "real";
 }
 
 import { turtle } from "./trackShape";
@@ -54,6 +56,7 @@ import { REAL_CIRCUITS } from "./realCircuits";
 import { REAL_TRACKS } from "./realTracks";
 import { LINE_STEP, RACING_LINES } from "./racingLines";
 import { loadEdits, loadMods } from "./trackMods";
+import { INVENTED } from "./inventedTracks";
 
 export const TRACK_WIDTH = 18;
 export const PIT_LATERAL = TRACK_WIDTH / 2 + 10;
@@ -180,8 +183,20 @@ const HANDMADE: TrackDef[] = [
   ...REAL_CIRCUITS,
 ];
 
-/** todas as pistas, na ordem dos índices (saves e recordes guardam o índice: só acrescentar no fim) */
-export const CIRCUITS: TrackDef[] = [...HANDMADE.map((t) => ({ ...t, standby: true })), ...REAL_TRACKS].map((t) => ({ ...t, lineKey: t.name }));
+// as 40 pistas OFICIAIS do jogo: inventadas no estilo das reais (scripts/gen-pistas.ts)
+for (const t of INVENTED) RACING_LINES[t.name] = { o: t.line, gain: 0, lap: 0 };
+const INVENTED_DEFS: TrackDef[] = INVENTED.map((t) => ({
+  name: t.name, blurb: t.blurb, minHeight: t.minHeight, balance: t.balance, rainChance: t.rainChance, grass: t.grass,
+  street: t.street, night: t.night, overtake: t.overtake, ...turtle(t.shape),
+}));
+
+/** todas as pistas, na ordem dos índices (saves e recordes guardam o índice: só acrescentar no fim).
+ * As reais viraram MOD (pack "real": aba MODS, jogam campeonato e online); as oficiais são as inventadas */
+export const CIRCUITS: TrackDef[] = [
+  ...HANDMADE.map((t) => ({ ...t, standby: true })),
+  ...REAL_TRACKS.map((t) => ({ ...t, pack: "real" as const })),
+  ...INVENTED_DEFS,
+].map((t) => ({ ...t, lineKey: t.name }));
 /** índices das pistas em uso (sorteio, seletor, menu, ranking) */
 export const ACTIVE_TRACKS: number[] = [];
 /** as pistas do jogo como vieram (o editor de traçado mexe por cima, e "voltar ao original" volta pra estas) */
@@ -220,11 +235,19 @@ export function applyTrackMods() {
   CIRCUITS.forEach((t, i) => !t.standby && ACTIVE_TRACKS.push(i));
   trackCache?.clear();
 }
-/** uma pista em uso, sorteada (sem repetir a pista "evitar", se der; as não oficiais ficam de fora) */
-export function randomTrack(rnd: () => number = Math.random, avoid = -1): number {
-  const official = ACTIVE_TRACKS.filter((i) => !CIRCUITS[i].mod);
-  const pool = official.length > 1 ? official.filter((i) => i !== avoid) : official;
-  return pool[Math.floor(rnd() * pool.length)];
+/** pista oficial do jogo (as inventadas); mods = as reais (pack) e as feitas no editor (mod) */
+export const isOfficial = (i: number) => !!CIRCUITS[i] && !CIRCUITS[i].standby && !CIRCUITS[i].mod && !CIRCUITS[i].pack;
+/** de qual grupo é a pista: "oficial", "real" (mod que vem com o jogo) ou "mod" (feita/importada no editor) */
+export const trackGroup = (i: number): "oficial" | "real" | "mod" => (CIRCUITS[i]?.mod ? "mod" : CIRCUITS[i]?.pack === "real" ? "real" : "oficial");
+
+/** uma pista em uso, sorteada (sem repetir a pista "evitar", se der). `pool`: oficiais (padrão), mods
+ * (as reais; as do editor só no solo) ou todas */
+export function randomTrack(rnd: () => number = Math.random, avoid = -1, pool: "oficiais" | "mods" | "todas" = "oficiais"): number {
+  const list = ACTIVE_TRACKS.filter((i) => (pool === "oficiais" ? isOfficial(i) : pool === "mods" ? trackGroup(i) === "real" : !CIRCUITS[i].mod));
+  // (sem oficiais carregadas, as reais)
+  const use = list.length ? list : ACTIVE_TRACKS.filter((i) => !CIRCUITS[i].mod);
+  const p = use.length > 1 ? use.filter((i) => i !== avoid) : use;
+  return p[Math.floor(rnd() * p.length)];
 }
 
 const BRAKE = 40;

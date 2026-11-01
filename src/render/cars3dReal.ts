@@ -7,6 +7,7 @@ import { gearOf } from "./gear";
 import { buildSafetyCar } from "./safetyCar";
 import { takeTrack3d } from "./track3d";
 import { wallPoints } from "../sim/walls";
+import { GLOVE_RULES, HELMET_RULES, SHOE_RULES, SUIT_RULES } from "./uniformStyles";
 import type { PieceLayer } from "./pieces";
 
 /** linhas e peças que são barreira de verdade (a corrida bate nelas) */
@@ -23,8 +24,11 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Team } from "../sim/types";
 import type { CarLook } from "./car3d";
 import { SCENE_LOD_DIST, gfx } from "./gfx";
-import { patternShapes } from "./carArt";
+import { drawStickers, patternShapes } from "./carArt";
 import { liveryKey } from "../sim/livery";
+import { SPOT_COLOR, type Skid, type Spot } from "./carFx";
+import type { GroundSrc } from "./ground";
+import { orderOf, samplePath } from "./paths3d";
 
 /** comprimento do carro na pista (m): o mesmo porte dos outros modos */
 const SHOW_LEN = 4.8;
@@ -152,39 +156,154 @@ function load() {
 // desenho da pintura (faixas, xadrez...): projetado de cima na carroceria, igual ao do 2D estilizado
 // (128 px por metro: de perto, na câmera piloto, 64 ficava borrado)
 const PAD = 0.15, TEX_PX = 128;
-let paintBox = { cx: 0, cz: 0, L: 1, W: 1 };
-/** coordenadas de textura da carroceria pintada vindo de cima (frente = x da imagem, lado direito = y) */
-function paintUV(root: THREE.Object3D, box: THREE.Box3) {
-  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
-  paintBox = { cx: c.x, cz: c.z, L: sz.z + 2 * PAD, W: sz.x + 2 * PAD };
+/** caixa da textura da pintura (a do primeiro modelo carregado; os outros mapeiam na proporção deles) */
+let paintBox: { cx: number; cz: number; L: number; W: number; slope: number } | null = null;
+/** eixo da carroceria pintada (x no meio da caixa e a inclinação dx/dz), depois de carregar um modelo */
+export const paintAxis = () => paintBox;
+/**
+ * coordenadas de textura da carroceria pintada vindo de cima (frente = x da imagem, lado direito = y).
+ * O meio de lado é o EIXO da carroceria pintada: o modelo vem levemente girado (o meio vai de x 0,07 na
+ * traseira a 0,04 no bico), então o eixo é uma reta ajustada no meio de cada fatia de 25 cm, e não um
+ * centro só (a faixa saía torta no bico). Cada modelo (leve, normal, detalhado) mapeia pela caixa dele,
+ * em fração, e todos usam a mesma textura
+ */
+export function paintUV(root: THREE.Object3D, box: THREE.Box3) {
   root.updateMatrixWorld(true);
   const v = new THREE.Vector3();
+  const bodies: THREE.Mesh[] = [];
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || (mesh.material as THREE.Material).name !== "pintura") return;
+    if (mesh.isMesh && (mesh.material as THREE.Material).name === "pintura") bodies.push(mesh);
+  });
+  // fatias: menor e maior x de cada 25 cm de comprimento
+  const bins = new Map<number, [number, number, number]>();
+  for (const mesh of bodies) {
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const k = Math.floor(v.z * 4), b = bins.get(k);
+      if (b) {
+        b[0] = Math.min(b[0], v.x);
+        b[1] = Math.max(b[1], v.x);
+        b[2]++;
+      } else bins.set(k, [v.x, v.x, 1]);
+    }
+  }
+  // reta x = a + b*z pelos meios das fatias com pontos e largura de sobra
+  let n = 0, sz = 0, sx = 0, szz = 0, szx = 0;
+  for (const [k, [x0, x1, cnt]] of bins) {
+    if (cnt < 30 || x1 - x0 < 0.1) continue;
+    const z = (k + 0.5) / 4, x = (x0 + x1) / 2;
+    n++;
+    sz += z;
+    sx += x;
+    szz += z * z;
+    szx += z * x;
+  }
+  const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  const slope = n > 2 ? (n * szx - sz * sx) / (n * szz - sz * sz) : 0;
+  const cx = n > 2 ? (sx - slope * sz) / n + slope * c.z : c.x;
+  // (largura simétrica em volta do eixo)
+  const half = Math.max(box.max.x - cx, cx - box.min.x);
+  const mine = { cx, cz: c.z, L: size.z + 2 * PAD, W: 2 * half + 2 * PAD, slope };
+  paintBox ??= mine;
+  const axisAt = (z: number) => mine.cx + slope * (z - mine.cz);
+  const lats = wrapLateral(bodies, axisAt);
+  bodies.forEach((mesh, bi) => {
     const pos = mesh.geometry.attributes.position;
     const uv = new Float32Array(pos.count * 2);
+    const lat = lats[bi];
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
       // (o lado direito do carro é -X no modelo; a textura vira de cabeça pra baixo no WebGL)
-      uv[i * 2] = (v.z - (paintBox.cz - paintBox.L / 2)) / paintBox.L;
-      uv[i * 2 + 1] = 1 - (paintBox.cx + paintBox.W / 2 - v.x) / paintBox.W;
+      uv[i * 2] = (v.z - (mine.cz - mine.L / 2)) / mine.L;
+      uv[i * 2 + 1] = 1 - (mine.W / 2 - lat[i]) / mine.W;
     }
     mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   });
 }
 
-/** a pintura da equipe vista de cima (cor de base + desenho), no tamanho da caixa do carro */
-function paintTexture(team: Team): THREE.CanvasTexture {
-  const lv = team.livery;
+/**
+ * lateral de cada ponto da carroceria pra textura (m, com sinal: + = lado esquerdo, +X). Fatia por fatia
+ * (25 cm), acha a BORDA mais larga de cada lado (largura e altura dela). Acima da borda vale a projeção de
+ * cima de sempre (distância até o eixo); abaixo, o desenho continua descendo pela lateral na medida da
+ * superfície (largura da borda + quanto desceu + quanto voltou pra dentro), sem virar listra esticada.
+ * A volta pra dentro entra aos poucos nos primeiros 5 cm (sem degrau em peça de dentro na altura da borda)
+ */
+function wrapLateral(bodies: THREE.Mesh[], axisAt: (z: number) => number): Float32Array[] {
+  const v = new THREE.Vector3();
+  // borda por fatia e lado: [largura, altura]
+  const edge = new Map<number, [number, number]>();
+  for (const mesh of bodies) {
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const dx = v.x - axisAt(v.z), key = Math.floor(v.z * 4) * 2 + (dx >= 0 ? 1 : 0);
+      const e = edge.get(key);
+      if (!e || Math.abs(dx) > e[0]) edge.set(key, [Math.abs(dx), v.y]);
+    }
+  }
+  // (entre os meios de duas fatias, mistura linear; fatia vazia usa a vizinha)
+  const at = (k: number, s: number) => edge.get(k * 2 + s) ?? edge.get((k - 1) * 2 + s) ?? edge.get((k + 1) * 2 + s);
+  const prof = (z: number, s: number): [number, number] | undefined => {
+    const t = z * 4 - 0.5, k = Math.floor(t), f = t - k;
+    const a = at(k, s), b = at(k + 1, s);
+    if (!a || !b) return a ?? b;
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+  };
+  const n = new THREE.Vector3();
+  return bodies.map((mesh) => {
+    const pos = mesh.geometry.attributes.position, nor = mesh.geometry.attributes.normal, out = new Float32Array(pos.count);
+    const fade = new Float32Array(pos.count), nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const dx = v.x - axisAt(v.z), s = dx >= 0 ? 1 : 0, d = Math.abs(dx), p = prof(v.z, s);
+      if (nor) n.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize();
+      else n.set(0, 1, 0);
+      let L = d;
+      // (só desce pela lateral o que não olha pra cima: o topo do chassi entre os sidepods fica abaixo da borda
+      // deles e é visto de cima — puxava desenho de longe, borrão na frente do cockpit)
+      if (p && v.y < p[1]) {
+        const down = p[1] - v.y, w = Math.min(1, down / 0.05) * (1 - Math.min(1, Math.max(0, (n.y - 0.3) / 0.3)));
+        L = d + (down + Math.max(0, p[0] - d)) * w;
+      }
+      out[i] = (s ? 1 : -1) * L;
+      // desbotar pra cor de base onde a projeção de cima estica: superfície quase em pé que não olha pro lado de
+      // fora (lá o desenho desce pela lateral): a frente do cockpit, as paredes de dentro, a boca do sidepod
+      const steep = Math.min(1, Math.max(0, (0.45 - Math.abs(n.y)) / 0.25)), outward = n.x * (s ? 1 : -1);
+      fade[i] = steep * (1 - Math.min(1, Math.max(0, (outward - 0.5) / 0.3)));
+    }
+    mesh.geometry.setAttribute("aFade", new THREE.BufferAttribute(fade, 1));
+    return out;
+  });
+}
+
+
+
+/** tela da textura da pintura e o encaixe das formas (metros do carro 2D, bico em +2,4 m): o mesmo do 2D estilizado */
+function paintCanvas() {
+  const pb = paintBox ?? { L: 5.1, W: 2.3 };
   const cv = document.createElement("canvas");
-  cv.width = Math.round(paintBox.L * TEX_PX);
-  cv.height = Math.round(paintBox.W * TEX_PX);
+  cv.width = Math.round(pb.L * TEX_PX);
+  cv.height = Math.round(pb.W * TEX_PX);
   const g = cv.getContext("2d")!;
+  return { cv, g, fit: () => g.setTransform(TEX_PX * 1.02, 0, 0, TEX_PX, cv.width / 2 + 0.25 * TEX_PX, cv.height / 2) };
+}
+
+function canvasTex(cv: HTMLCanvasElement) {
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** a pintura da equipe vista de cima (cor de base + desenho), no tamanho da caixa do carro */
+export function paintTexture(team: Team): THREE.CanvasTexture {
+  const lv = team.livery;
+  const { cv, g, fit } = paintCanvas();
   g.fillStyle = lv?.base ?? team.color;
   g.fillRect(0, 0, cv.width, cv.height);
-  // as formas foram desenhadas pro carro 2D (bico em +2,4 m): mesmo encaixe do 2D estilizado
-  g.setTransform(TEX_PX * 1.02, 0, 0, TEX_PX, cv.width / 2 + 0.25 * TEX_PX, cv.height / 2);
+  fit();
   if (!lv || lv.pattern === "classica") {
     g.beginPath();
     g.moveTo(-2.3, -0.07);
@@ -197,10 +316,326 @@ function paintTexture(team: Team): THREE.CanvasTexture {
     g.fillStyle = lv?.patternColor ?? team.accent;
     g.fill();
   } else patternShapes(g, lv);
-  const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
+  // adesivos (Premium) por cima; passam pra lateral e por baixo junto com o desenho
+  drawStickers(g, lv);
+  return canvasTex(cv);
+}
+
+/** material da carroceria com a pintura da equipe (cor, desenho e adesivos na textura) */
+export function paintMaterial(base: THREE.Material, team: Team): THREE.MeshStandardMaterial {
+  const c = (base as THREE.MeshStandardMaterial).clone();
+  c.name = base.name;
+  c.map = paintTexture(team);
+  c.color.set("#ffffff");
+  // (onde a projeção de cima estica, aFade de paintUV: o desenho vira a cor de base)
+  const bc = new THREE.Color(team.livery?.base ?? team.color);
+  c.onBeforeCompile = (sh) => {
+    sh.uniforms.uBase = { value: bc };
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float aFade;\nvarying float vFade;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vFade;\nuniform vec3 uBase;")
+      .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uBase, vFade);");
+  };
+  c.customProgramCacheKey = () => "pintura-desbota";
+  return c;
+}
+
+// (as regras dos desenhos do capacete e do macacão ficam em uniformStyles.ts: a mesma da prévia do editor)
+const HELMET_COND = HELMET_RULES.map((r) => r.glsl), SUIT_COND = SUIT_RULES.map((r) => r.glsl), GLOVE_COND = GLOVE_RULES.map((r) => r.glsl), SHOE_COND = SHOE_RULES.map((r) => r.glsl);
+
+const styledCache = new Map<string, THREE.Material>();
+/**
+ * o capacete do arquivo do carro vem deitado junto com o piloto: 47,1° (medido no encaixe do piloto em pé,
+ * viewer3dScene.fitHelmet, erro 0,1 mm). O desenho do capacete é calculado com ele endireitado: com o eixo do
+ * carro, de cima as faixas pareciam certas e de lado saíam tortas
+ */
+export const HELMET_UPRIGHT = 0.822;
+/**
+ * onde a luva começa, em aGlove.y (pulso 0, ponta 1): -0,15 ≈ 3,5 cm acima do pulso. O corte é feito em cada pixel
+ * (pela posição contínua), e não ponto a ponto: assim a borda do punho sai reta, não em escada
+ */
+export const GLOVE_T0 = -0.15;
+/** caixa dos pontos da peça girados `ang` em volta do lado (guardada na peça) */
+export function upBox(geo: THREE.BufferGeometry, ang: number): THREE.Box3 {
+  if (!ang) {
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    return geo.boundingBox!;
+  }
+  const k = `upBox${ang}`;
+  if (geo.userData[k]) return geo.userData[k];
+  const pos = geo.attributes.position, v = new THREE.Vector3(), b = new THREE.Box3(), X = new THREE.Vector3(1, 0, 0);
+  for (let i = 0; i < pos.count; i++) b.expandByPoint(v.fromBufferAttribute(pos, i).applyAxisAngle(X, ang));
+  return (geo.userData[k] = b);
+}
+/**
+ * capacete/macacão do jogador (pintura dele): a cor e o desenho (SUIT_RULES/HELMET_RULES, uniformStyles.ts).
+ * Sem mapa de textura confiável nessas peças: o desenho sai de onde cada ponto fica (q: -1..1 de lado, de
+ * altura e de frente), pra que lado a superfície aponta (n) e de que parte do corpo ele é (part).
+ * - capacete: pelos pontos da peça endireitados (HELMET_UPRIGHT), dentro da caixa dela;
+ * - macacão do piloto em pé: pelos atributos aBody/aBodyN/aPart (o corpo de braços abaixados, calculado pelo
+ *   esqueleto em viewer3dScene) e pela caixa do corpo inteiro (`box`);
+ * - macacão do piloto sentado no carro: pelos pontos da peça e pela caixa dela (parte do corpo não se sabe: -1);
+ * - luvas: onde a peça do macacão tem aGlove (luva sim/não, do pulso à ponta, dedo, costas/palma), com a cor e o
+ *   desenho delas (GLOVE_RULES)
+ */
+export function uniformMaterial(base: THREE.Material, kind: "h" | "s", lv: NonNullable<Team["livery"]>, geo: THREE.BufferGeometry, box?: THREE.Box3) {
+  const style = kind === "h" ? (lv.helmetStyle ?? 1) : (lv.suitStyle ?? 1);
+  const col = kind === "h" ? lv.helmet : lv.suit, det = kind === "h" ? lv.helmetDetail : lv.suitDetail;
+  const body = kind === "s" && !!geo.attributes.aBody;
+  const glove = kind === "s" && !!geo.attributes.aGlove;
+  const gStyle = lv.gloveStyle ?? 0, gCol = lv.glove ?? lv.suit, gDet = lv.gloveDetail ?? lv.suitDetail;
+  const ang = kind === "h" ? HELMET_UPRIGHT : 0;
+  const b = box ?? upBox(geo, ang);
+  const key = `${kind}|${col}|${det}|${style}|${body ? "b" : ""}|${glove ? `${gCol}|${gDet}|${gStyle}` : ""}|${b.min.toArray().map((v) => v.toFixed(3))}|${b.max.toArray().map((v) => v.toFixed(3))}`;
+  let m = styledCache.get(key);
+  if (m) return m;
+  const mm = base.clone() as THREE.MeshStandardMaterial;
+  mm.name = base.name;
+  mm.color.set(col);
+  if (style > 0 || glove) {
+    const cond = (kind === "h" ? HELMET_COND : SUIT_COND).at(style) || "false", gCond = GLOVE_COND.at(gStyle) || "false";
+    const lo = b.min.clone(), hi = b.max.clone(), dc = new THREE.Color(det), gc = new THREE.Color(gCol), gd = new THREE.Color(gDet);
+    mm.onBeforeCompile = (sh) => {
+      sh.uniforms.uLo = { value: lo };
+      sh.uniforms.uHi = { value: hi };
+      sh.uniforms.uDet = { value: dc };
+      sh.uniforms.uAng = { value: ang };
+      sh.uniforms.uGCol = { value: gc };
+      sh.uniforms.uGDet = { value: gd };
+      sh.vertexShader = sh.vertexShader
+        .replace(
+          "#include <common>",
+          `#include <common>\nvarying vec3 vPL;\nvarying vec3 vNL;\nvarying float vPart;\nvarying float vNeck;\nvarying vec4 vGlove;${body ? "\nattribute vec3 aBody;\nattribute vec3 aBodyN;\nattribute float aPart;\nattribute float aNeck;" : ""}${glove ? "\nattribute vec4 aGlove;" : ""}`,
+        )
+        .replace("#include <skinnormal_vertex>", `#include <skinnormal_vertex>\n${body ? "vNL = aBodyN;" : "vNL = objectNormal;"}`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>\n${body ? "vPL = aBody;\nvPart = aPart;\nvNeck = aNeck;" : "vPL = position;\nvPart = -1.0;\nvNeck = 0.0;"}\n${glove ? "vGlove = aGlove;" : "vGlove = vec4(0.0);"}`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nvarying vec3 vPL;\nvarying vec3 vNL;\nvarying float vPart;\nvarying float vNeck;\nvarying vec4 vGlove;\nuniform vec3 uLo;\nuniform vec3 uHi;\nuniform vec3 uDet;\nuniform float uAng;\nuniform vec3 uGCol;\nuniform vec3 uGDet;",
+        )
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+float ca = cos(uAng), sa = sin(uAng);
+vec3 p = vec3(vPL.x, vPL.y * ca - vPL.z * sa, vPL.y * sa + vPL.z * ca);
+vec3 n = normalize(vNL);
+n = vec3(n.x, n.y * ca - n.z * sa, n.y * sa + n.z * ca);
+float part = vPart;
+vec3 q = (p - (uLo + uHi) * 0.5) / max((uHi - uLo) * 0.5, vec3(1e-4));
+if (vGlove.x > 0.5 && vGlove.y > ${GLOVE_T0.toFixed(2)}) {
+  float gt = vGlove.y, gf = vGlove.z, gb = vGlove.w, gs = sign(q.x);
+  diffuseColor.rgb = (${gCond}) ? uGDet : uGCol;
+} else if (vNeck < 0.5 && (${cond})) diffuseColor.rgb = uDet;`,
+        );
+    };
+    mm.customProgramCacheKey = () => `uniforme-${kind}${style}${body ? "b" : ""}${glove ? `g${gStyle}` : ""}`;
+  }
+  if (styledCache.size > 60) styledCache.clear();
+  styledCache.set(key, (m = mm));
+  return m;
+}
+
+/**
+ * tênis do piloto em pé (viewer3dScene.shoeSpace dá aShoe = (tênis, calcanhar→bico, sola→cano, lado)). Peças do
+ * modelo: a faixa (part 1) leva o detalhe; o resto (cabedal 0 e a peça preta 2) leva a cor do tênis e o desenho
+ * (SHOE_RULES) — só a peça preta abaixo de SHOE_SOLE da altura é sola (preta; o detalhe em "Sola colorida"). A
+ * peça preta cobre a lateral inteira do tênis: com ela toda na sola, a cor escolhida quase não aparecia
+ */
+export const SHOE_SOLE = 0.2;
+const SHOE_BLACK = "#151517";
+const shoeCache = new Map<string, THREE.Material>();
+export function shoeMaterial(base: THREE.Material, lv: NonNullable<Team["livery"]>, part: number) {
+  const style = lv.shoeStyle ?? 0, col = lv.shoe ?? lv.suit, det = lv.shoeDetail ?? lv.suitDetail;
+  const key = `${col}|${det}|${style}|${part}`;
+  let m = shoeCache.get(key);
+  if (m) return m;
+  const mm = base.clone() as THREE.MeshStandardMaterial;
+  mm.name = base.name;
+  if (part === 1) mm.color.set(det);
+  else {
+    mm.color.set("#ffffff");
+    // ("Sola colorida" só pinta a sola; no cabedal ela não desenha nada)
+    const cond = style === 4 ? "false" : SHOE_COND.at(style) || "false";
+    const uc = new THREE.Color(col), ud = new THREE.Color(det), us = new THREE.Color(style === 4 ? det : SHOE_BLACK);
+    mm.onBeforeCompile = (sh) => {
+      sh.uniforms.uCol = { value: uc };
+      sh.uniforms.uDet = { value: ud };
+      sh.uniforms.uSole = { value: us };
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute vec4 aShoe;\nvarying vec4 vShoe;").replace("#include <begin_vertex>", "#include <begin_vertex>\nvShoe = aShoe;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying vec4 vShoe;\nuniform vec3 uCol;\nuniform vec3 uDet;\nuniform vec3 uSole;")
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>\nfloat ft = vShoe.y, fh = vShoe.z, fs = vShoe.w, fp = ${part}.0;\nif (fp > 1.5 && fh < ${SHOE_SOLE.toFixed(2)}) diffuseColor.rgb = uSole;\nelse diffuseColor.rgb = (${cond}) ? uDet : uCol;`,
+        );
+    };
+    mm.customProgramCacheKey = () => `tenis-${part}-${style}`;
+  }
+  if (shoeCache.size > 40) shoeCache.clear();
+  shoeCache.set(key, (m = mm));
+  return m;
+}
+
+/**
+ * luvas do piloto sentado no carro (sem esqueleto). As mãos estão no aro do volante, e o arquivo tem as poses
+ * do volante virado (giro_p3/giro_m3, ±50°): quem mais anda nelas são as mãos. O centro de cada mão = a média
+ * dos pontos que mais andam, de cada lado; a mão é o que fica a até GLOVE_REACH dele (e anda junto com o
+ * volante, pra não pegar a perna que passa perto), e o punho é cortado em GLOVE_T0 (atrás do pulso já é o antebraço). aGlove = luva, do punho (0) ao meio da mão (1), dedo (a metade
+ * de perto do meio), costas (pra fora) — o mesmo que o piloto em pé tem pelos ossos (viewer3dScene.bodySpace).
+ * (Pela caixa do nó "volante" não dava: ele tem coluna e aletas, 50 cm de largura)
+ */
+const GLOVE_REACH = 0.12;
+export function gloveByWheel(pilot: THREE.Object3D | undefined) {
+  const n = new THREE.Vector3(), dv = new THREE.Vector3();
+  pilot?.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const dict = mesh.morphTargetDictionary, morphs = mesh.geometry?.morphAttributes.position;
+    // (a peça é a mesma em todos os carros do mesmo modelo: calcula uma vez)
+    if (!mesh.isMesh || !dict || !morphs || mesh.geometry.attributes.aGlove || (mesh.material as THREE.Material).name !== "macacao") return;
+    const mp = morphs[dict.giro_p3], mm = morphs[dict.giro_m3];
+    if (!mp || !mm) return;
+    const pos = mesh.geometry.attributes.position, nor = mesh.geometry.attributes.normal, cnt = pos.count;
+    const sc = mesh.matrixWorld.getMaxScaleOnAxis();
+    // quanto cada ponto anda com o volante virado (no mundo), e onde fica
+    const disp = new Float32Array(cnt), at: THREE.Vector3[] = [];
+    let top = 0;
+    for (let i = 0; i < cnt; i++) {
+      disp[i] = Math.max(dv.fromBufferAttribute(mp, i).length(), dv.fromBufferAttribute(mm, i).length()) * sc;
+      top = Math.max(top, disp[i]);
+      at.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld));
+    }
+    if (!top) return;
+    // centro de cada mão: a média dos pontos que mais andam, de cada lado do meio deles; só a metade da frente
+    // (o antebraço também anda muito e puxava o centro pro pulso)
+    const most = [...disp.keys()].filter((i) => disp[i] > top * 0.7);
+    const mid = most.reduce((s, i) => s + at[i].x, 0) / most.length;
+    const hands = [true, false].map((left) => {
+      const ids = most.filter((i) => at[i].x > mid === left).sort((a, b) => at[b].z - at[a].z);
+      const front = ids.slice(0, Math.max(1, Math.ceil(ids.length / 2)));
+      return front.reduce((s, i) => s.add(at[i]), new THREE.Vector3()).divideScalar(front.length);
+    });
+    const nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+    const out = new Float32Array(cnt * 4);
+    for (let i = 0; i < cnt; i++) {
+      if (disp[i] < top * 0.2) continue;
+      const left = at[i].x > mid, h = hands[left ? 0 : 1];
+      if (at[i].distanceTo(h) >= GLOVE_REACH) continue;
+      // (do pulso, atrás, à ponta dos dedos, na frente: a mão segura o aro com os dedos pra frente)
+      const t = 0.5 + (at[i].z - h.z) / 0.12;
+      n.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize();
+      out.set([1, t, t > 0.6 ? 1 : 0, n.x * (left ? 1 : -1)], i * 4);
+    }
+    mesh.geometry.setAttribute("aGlove", new THREE.BufferAttribute(out, 4));
+  });
+}
+
+/** linha de cada marca no atlas (markAtlas) */
+const MARK_ROW: Record<Skid["k"], number> = { pneu: 0, brita: 1, lama: 2, areia: 3, risco: 4 };
+/**
+ * o desenho de cada marca no chão (linhas de 64 px; ao longo, 256 px = 1,2 m, repete): borracha com os frisos do
+ * pneu; sulco na brita (fundo escuro e a pedra empurrada pras bordas); trilha de lama com tufos de grama
+ * arrancada; sulco na areia; risco do assoalho (raspado claro com borda escura)
+ */
+let atlasT: THREE.CanvasTexture | null = null;
+function markAtlas() {
+  if (atlasT) return atlasT;
+  const W = 256, R = 64, c = document.createElement("canvas");
+  c.width = W;
+  c.height = R * 5;
+  const g = c.getContext("2d")!;
+  const rr = (a: number, b: number) => a + Math.random() * (b - a);
+  const dots = (row: number, n: number, v0: number, v1: number, rad: [number, number], cols: string[]) => {
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = cols[i % cols.length];
+      g.beginPath();
+      g.arc(rr(0, W), row * R + rr(v0, v1) * R, rr(rad[0], rad[1]), 0, Math.PI * 2);
+      g.fill();
+    }
+  };
+  // faixa ao longo com borda macia (de v0 a v1, em fração da linha)
+  const band = (row: number, v0: number, v1: number, color: string, soft = 0.12) => {
+    const y0 = row * R + v0 * R, y1 = row * R + v1 * R, gr = g.createLinearGradient(0, y0, 0, y1);
+    gr.addColorStop(0, "rgba(0,0,0,0)");
+    gr.addColorStop(Math.min(0.49, soft / (v1 - v0)), color);
+    gr.addColorStop(Math.max(0.51, 1 - soft / (v1 - v0)), color);
+    gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr;
+    g.fillRect(0, y0, W, y1 - y0);
+  };
+  // 0) borracha: faixa escura com os frisos (sulcos do pneu) mais escuros e grãos
+  // (bem preta: no asfalto escuro a de 55% sumia)
+  band(0, 0.08, 0.92, "rgba(6,6,8,0.78)");
+  for (const f of [0.26, 0.42, 0.58, 0.74]) band(0, f - 0.035, f + 0.035, "rgba(0,0,0,0.7)", 0.02);
+  dots(0, 260, 0.12, 0.88, [0.6, 1.4], ["rgba(0,0,0,0.25)", "rgba(40,40,44,0.2)"]);
+  // 1) brita: fundo do sulco escuro e assentado; a pedra empurrada forma uma borda clara de cada lado
+  band(1, 0.22, 0.78, "rgba(92,62,38,0.62)", 0.06);
+  dots(1, 220, 0.25, 0.75, [0.8, 1.8], ["rgba(60,40,25,0.55)", "rgba(150,104,64,0.5)"]);
+  for (const [a, b] of [[0.0, 0.26], [0.74, 1.0]] as const) {
+    dots(1, 520, a, b, [1, 2.6], ["rgba(236,176,112,0.95)", "rgba(206,140,80,0.95)", "rgba(246,206,150,0.95)", "rgba(170,110,66,0.9)"]);
+    dots(1, 90, a, b, [0.8, 1.6], ["rgba(70,48,30,0.6)"]);
+  }
+  // 2) lama: terra escura com a borda irregular e tufos de grama arrancada
+  for (let x = 0; x < W; x += 2) {
+    const e = 0.16 + 0.06 * Math.sin(x * 0.11) + rr(-0.03, 0.03), f = 0.84 - 0.06 * Math.sin(x * 0.07 + 1) + rr(-0.03, 0.03);
+    g.fillStyle = "rgba(62,42,24,0.82)";
+    g.fillRect(x, 2 * R + e * R, 2, (f - e) * R);
+  }
+  dots(2, 200, 0.2, 0.8, [1, 2.4], ["rgba(38,24,12,0.7)", "rgba(96,68,40,0.6)"]);
+  dots(2, 160, 0.02, 0.22, [1, 2.2], ["rgba(70,140,48,0.9)", "rgba(48,110,36,0.9)", "rgba(90,62,36,0.8)"]);
+  dots(2, 160, 0.78, 0.98, [1, 2.2], ["rgba(70,140,48,0.9)", "rgba(48,110,36,0.9)", "rgba(90,62,36,0.8)"]);
+  // 3) areia: sulco médio e a areia clara nas bordas
+  band(3, 0.2, 0.8, "rgba(150,120,82,0.55)", 0.08);
+  dots(3, 300, 0.0, 0.22, [0.8, 2], ["rgba(232,208,162,0.9)", "rgba(214,186,140,0.9)"]);
+  dots(3, 300, 0.78, 1.0, [0.8, 2], ["rgba(232,208,162,0.9)", "rgba(214,186,140,0.9)"]);
+  // 4) risco: o asfalto raspado fica claro, com a borda queimada escura e falhas
+  band(4, 0.2, 0.8, "rgba(24,24,26,0.6)", 0.06);
+  band(4, 0.36, 0.64, "rgba(214,214,218,0.85)", 0.05);
+  for (let i = 0; i < 18; i++) g.clearRect(rr(0, W), 4 * R + 0.36 * R, rr(2, 10), 0.28 * R);
+  atlasT = new THREE.CanvasTexture(c);
+  atlasT.wrapS = THREE.RepeatWrapping;
+  atlasT.colorSpace = THREE.SRGBColorSpace;
+  atlasT.anisotropy = 4;
+  return atlasT;
+}
+
+/** mancha de óleo: várias manchas macias juntas, borda irregular (branca: a cor vem da marca) */
+let stainT: THREE.CanvasTexture | null = null;
+function stainTex() {
+  if (stainT) return stainT;
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  for (let i = 0; i < 16; i++) {
+    const x = 64 + (Math.random() - 0.5) * 50, y = 64 + (Math.random() - 0.5) * 50, r = 12 + Math.random() * 24;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, "rgba(255,255,255,0.55)");
+    gr.addColorStop(0.7, "rgba(255,255,255,0.35)");
+    gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  return (stainT = new THREE.CanvasTexture(c));
+}
+/** pedrisco/terra espalhado: pontinhos de tamanhos diferentes, mais juntos no meio */
+let dotT: THREE.CanvasTexture | null = null;
+function dotTex() {
+  if (dotT) return dotT;
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  for (let i = 0; i < 90; i++) {
+    const a = Math.random() * Math.PI * 2, d = Math.pow(Math.random(), 0.8) * 58, r = 1 + Math.random() * 3.2;
+    g.fillStyle = `rgba(255,255,255,${(0.55 + Math.random() * 0.45).toFixed(2)})`;
+    g.beginPath();
+    g.arc(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  return (dotT = new THREE.CanvasTexture(c));
 }
 
 /** tracinhos brancos da lateral do pneu (um material só pra todos) */
@@ -363,14 +798,11 @@ export class RealCars {
         if (!mesh.isMesh) return;
         for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
           if (m![mat.name]) continue;
-          const c = (mat as THREE.MeshStandardMaterial).clone();
+          // (pintura: cor, desenho e adesivos vêm da textura)
+          const c = mat.name === "pintura" ? paintMaterial(mat, team) : (mat as THREE.MeshStandardMaterial).clone();
           // (de perto, superfície muito lisa fazia o brilho do sol piscar: um pouco mais fosco)
           if (c.roughness != null) c.roughness = Math.max(c.roughness, 0.5);
-          if (c.name === "pintura") {
-            // cor e desenho vêm da textura
-            c.map = paintTexture(team);
-            c.color.set("#ffffff");
-          } else if (colors[c.name]) c.color.set(colors[c.name]);
+          if (c.name !== "pintura" && colors[c.name]) c.color.set(colors[c.name]);
           m![mat.name] = c;
         }
       });
@@ -389,10 +821,13 @@ export class RealCars {
     b = m.clone();
     b.userData.backBlack = true;
     b.side = THREE.DoubleSide;
-    b.onBeforeCompile = (sh) => {
+    // (soma ao shader que o material já tinha: adesivos da pintura)
+    const prev = m.onBeforeCompile.bind(m), prevKey = m.customProgramCacheKey();
+    b.onBeforeCompile = (sh, r) => {
+      prev(sh, r);
       sh.fragmentShader = sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n  if (!gl_FrontFacing) gl_FragColor = vec4(0.015, 0.015, 0.02, 1.0);");
     };
-    b.customProgramCacheKey = () => "costas-pretas";
+    b.customProgramCacheKey = () => "costas-pretas" + prevKey;
     this.backMats.set(m, b);
     return b;
   }
@@ -420,6 +855,11 @@ export class RealCars {
     this.helmets.set(id, mt);
     return mt;
   }
+
+  private styledMat(base: THREE.Material, kind: "h" | "s", lv: NonNullable<Team["livery"]>, geo: THREE.BufferGeometry) {
+    return uniformMaterial(base, kind, lv, geo);
+  }
+
 
   /** carro seguido (a câmera piloto usa o modelo detalhado nele) */
   followId = "";
@@ -538,6 +978,7 @@ export class RealCars {
       root.updateMatrixWorld(true);
       const vol = inner.getObjectByName("volante");
       const volC = vol ? new THREE.Box3().setFromObject(vol).getCenter(new THREE.Vector3()) : undefined;
+      gloveByWheel(inner.getObjectByName("piloto"));
       const steer = pivotOf(vol), arms = pivotOf(inner.getObjectByName("bracos"), volC), head = pivotOf(inner.getObjectByName("capacete"));
       // a tela do volante é peça própria: vai junto com o volante
       const tel = inner.getObjectByName("telinha");
@@ -631,10 +1072,17 @@ export class RealCars {
         const y = x.name === "capacete" ? hm : x;
         return hd || shell(y.name) ? this.backBlack(y) : y;
       };
+      // (carro de jogador: capacete e macacão com a cor e o desenho da pintura dele)
+      const lvP = d.team.livery;
       c.root.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
-        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
+        const sw = (x: THREE.Material) => {
+          if (lvP && x.name === "capacete") return this.styledMat(x, "h", lvP, mesh.geometry);
+          if (lvP && x.name === "macacao") return this.styledMat(x, "s", lvP, mesh.geometry);
+          return swap(x);
+        };
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(sw) : sw(mesh.material);
       });
     }
     return c;
@@ -830,37 +1278,169 @@ export class RealCars {
   private camGh: number | null = null;
   private trackGroup: THREE.Object3D | null = null;
   private skidMesh: THREE.Mesh | null = null;
+  private stainMesh: THREE.Mesh | null = null;
+  private dotMesh: THREE.Mesh | null = null;
+  private chips: THREE.InstancedMesh | null = null;
 
   /**
-   * câmeras 3D: marcas de pneu no chão da cena (desenhadas por cima da imagem pronta elas passavam por
-   * cima dos carros). Faixa de 28 cm por trecho, mais clara conforme a idade; null = esconde
+   * câmeras 3D: o que fica no chão (desenhado por cima da imagem pronta passava por cima dos carros):
+   * - as marcas (carFx.Skid): borracha, sulco na brita, trilha de lama/areia, raspão — cada uma com a cor e a
+   *   largura dela, mais clara conforme a idade;
+   * - as manchas (carFx.Spot): óleo (mancha irregular), pedrisco e terra que o carro trouxe pra pista (pontinhos);
+   * - os pedaços do carro: lascas de fibra e da carenagem (cor da equipe) deitadas no chão.
+   * null = esconde
    */
-  skidMarks(list: readonly { x1: number; y1: number; x2: number; y2: number; t: number }[] | null) {
-    if (!list || !list.length) {
+  skidMarks(list: readonly Skid[] | null, spots: readonly Spot[] | null = null) {
+    const ground = (x: number, y: number, up: number) => this.groundY + this.hAt(x, y) + up;
+    // (iluminado como o chão: na sombra dos carros e das arquibancadas a marca escurece junto)
+    const flat = (mesh: THREE.Mesh | null, order: number, map?: THREE.Texture) => {
+      if (mesh) return mesh;
+      const mat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 - order, ...(map ? { map } : {}) });
+      const m = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+      m.frustumCulled = false;
+      m.receiveShadow = this.realShadow;
+      m.renderOrder = 4 + order;
+      this.scene.add(m);
+      return m;
+    };
+    // ---- marcas: cada tipo com o desenho dele (markAtlas), a cor vem da textura e a idade apaga ----
+    if (!list?.length) {
       if (this.skidMesh) this.skidMesh.visible = false;
-      return;
+    } else {
+      this.skidMesh = flat(this.skidMesh, 1, markAtlas());
+      const n = list.length, pos = new Float32Array(n * 18), col = new Float32Array(n * 24), uv = new Float32Array(n * 12), nor = new Float32Array(n * 18);
+      list.forEach((s, i) => {
+        const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l = Math.hypot(dx, dy) || 1, nx = (-dy / l) * (s.w / 2), ny = (dx / l) * (s.w / 2);
+        const ya = ground(s.x1, s.y1, 0.008), yb = ground(s.x2, s.y2, 0.008);
+        pos.set([s.x1 - nx, ya, s.y1 - ny, s.x1 + nx, ya, s.y1 + ny, s.x2 + nx, yb, s.y2 + ny, s.x1 - nx, ya, s.y1 - ny, s.x2 + nx, yb, s.y2 + ny, s.x2 - nx, yb, s.y2 - ny], i * 18);
+        // (linha do tipo no atlas; ao longo, o desenho repete a cada 1,2 m — começa num ponto qualquer, sem emenda)
+        const row = MARK_ROW[s.k], v0 = 1 - (row * 64 + 61) / 320, v1 = 1 - (row * 64 + 3) / 320;
+        const u0 = (((s.x1 * 7.3 + s.y1 * 3.1) % 1) + 1) % 1, u1 = u0 + l / 1.2;
+        uv.set([u0, v0, u0, v1, u1, v1, u0, v0, u1, v1, u1, v0], i * 12);
+        // (apaga no último terço da vida)
+        const life = s.k === "pneu" ? 45 : 135, a = Math.min(1, Math.max(0, (life - s.t) / (life * 0.35)));
+        for (let k = 0; k < 6; k++) {
+          col.set([1, 1, 1, a], i * 24 + k * 4);
+          nor.set([0, 1, 0], i * 18 + k * 3);
+        }
+      });
+      const g = this.skidMesh.geometry;
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      g.setAttribute("color", new THREE.BufferAttribute(col, 4));
+      this.skidMesh.visible = true;
     }
-    if (!this.skidMesh) {
-      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
-      this.skidMesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
-      this.skidMesh.frustumCulled = false;
-      this.skidMesh.renderOrder = 5;
-      this.scene.add(this.skidMesh);
+    // ---- manchas: óleo (mancha) e pedrisco/terra (pontinhos), cada uma um quadrado deitado e girado ----
+    const quads = (mesh: THREE.Mesh, items: Spot[], up: number) => {
+      const n = items.length, pos = new Float32Array(n * 18), uv = new Float32Array(n * 12), col = new Float32Array(n * 24), nor = new Float32Array(n * 18);
+      for (let k = 0; k < n * 6; k++) nor.set([0, 1, 0], k * 3);
+      items.forEach((s, i) => {
+        const c = Math.cos(s.rot) * s.r, sn = Math.sin(s.rot) * s.r, y = ground(s.x, s.y, up);
+        const P = [
+          [s.x - c + sn, s.y - sn - c],
+          [s.x + c + sn, s.y + sn - c],
+          [s.x + c - sn, s.y + sn + c],
+          [s.x - c - sn, s.y - sn + c],
+        ];
+        [0, 1, 2, 0, 2, 3].forEach((k, j) => {
+          pos.set([P[k][0], y, P[k][1]], i * 18 + j * 3);
+          uv.set([k === 1 || k === 2 ? 1 : 0, k >= 2 ? 1 : 0], i * 12 + j * 2);
+        });
+        const [r, g, b, al] = SPOT_COLOR[s.k as Exclude<Spot["k"], "detrito">];
+        for (let k = 0; k < 6; k++) col.set([r / 255, g / 255, b / 255, al * Math.max(0, 1 - s.t / 600)], i * 24 + k * 4);
+      });
+      const g = mesh.geometry;
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      g.setAttribute("color", new THREE.BufferAttribute(col, 4));
+      mesh.visible = n > 0;
+    };
+    const stains = spots?.filter((s) => s.k === "oleo") ?? [], dots = spots?.filter((s) => s.k === "pedrisco" || s.k === "terra") ?? [];
+    if (stains.length || this.stainMesh) quads((this.stainMesh = flat(this.stainMesh, 0, stainTex())), stains, 0.006);
+    if (dots.length || this.dotMesh) quads((this.dotMesh = flat(this.dotMesh, 2, dotTex())), dots, 0.012);
+    // ---- pedaços do carro no chão: lascas finas, giradas ----
+    const chips = spots?.filter((s) => s.k === "detrito") ?? [];
+    if (chips.length && !this.chips) {
+      this.chips = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.25 }), 600);
+      this.chips.frustumCulled = false;
+      this.scene.add(this.chips);
     }
-    const n = list.length, pos = new Float32Array(n * 18), col = new Float32Array(n * 24);
-    list.forEach((s, i) => {
-      const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l = Math.hypot(dx, dy) || 1, nx = (-dy / l) * 0.14, ny = (dx / l) * 0.14;
-      const ya = this.groundY + this.hAt(s.x1, s.y1) + 0.008, yb = this.groundY + this.hAt(s.x2, s.y2) + 0.008;
-      const v = [s.x1 - nx, ya, s.y1 - ny, s.x1 + nx, ya, s.y1 + ny, s.x2 + nx, yb, s.y2 + ny, s.x1 - nx, ya, s.y1 - ny, s.x2 + nx, yb, s.y2 + ny, s.x2 - nx, yb, s.y2 - ny];
-      pos.set(v, i * 18);
-      const a = 0.45 * Math.max(0, 1 - s.t / 45);
-      for (let k = 0; k < 6; k++) col.set([0.06, 0.06, 0.06, a], i * 24 + k * 4);
-    });
-    const g = this.skidMesh.geometry;
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("color", new THREE.BufferAttribute(col, 4));
-    this.skidMesh.visible = true;
+    if (this.chips) {
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), col = new THREE.Color();
+      const n = Math.min(chips.length, 600);
+      for (let i = 0; i < n; i++) {
+        const s = chips[i];
+        // (um pouco torta: lasca caída não fica reta)
+        e.set(((i * 37) % 7) * 0.05 - 0.15, -s.rot, ((i * 53) % 5) * 0.06 - 0.12);
+        m4.compose(new THREE.Vector3(s.x, ground(s.x, s.y, 0.02), s.y), q.setFromEuler(e), new THREE.Vector3(s.r * 2, 0.03, s.r * 0.8));
+        this.chips.setMatrixAt(i, m4);
+        this.chips.setColorAt(i, col.set(s.c));
+      }
+      this.chips.count = n;
+      this.chips.instanceMatrix.needsUpdate = true;
+      if (this.chips.instanceColor) this.chips.instanceColor.needsUpdate = true;
+      this.chips.visible = n > 0;
+    }
   }
+
+  /** pedaços grandes que soltaram do carro (asa, roda) — as peças 3D do próprio carro, e não figuras chapadas */
+  private flying = new Map<object, { wrap: THREE.Group; tumble: THREE.Group; half: number; spin: [number, number]; rest: [number, number] }>();
+  /**
+   * câmeras 3D: as asas e rodas que soltaram (renderer.debris). Cada uma é uma cópia da peça do carro (com a
+   * pintura dele), no lugar e na direção do pedaço; no ar (até 0,6 s) sobe num arco e capota, depois fica
+   * deitada no chão (a roda de lado). null = tira todas
+   */
+  debris3d(list: readonly { x: number; y: number; h: number; t: number; node?: string; carId?: string }[] | null) {
+    const alive = new Set<object>();
+    for (const d of list ?? []) {
+      if (!d.node || !d.carId) continue;
+      let f = this.flying.get(d);
+      if (!f) {
+        const car = this.cars.get(d.carId) ?? this.cars.get(`${d.carId}#lo`) ?? this.cars.get(`${d.carId}#hd`);
+        const src = car?.parts[d.node as Part];
+        if (!src?.parent) continue;
+        const piece = src.clone(true);
+        piece.visible = true;
+        piece.position.set(0, 0, 0);
+        piece.rotation.set(0, 0, 0);
+        const tumble = new THREE.Group(), wrap = new THREE.Group();
+        tumble.add(piece);
+        wrap.add(tumble);
+        wrap.scale.copy(src.parent.getWorldScale(new THREE.Vector3()));
+        wrap.updateMatrixWorld(true);
+        // (o centro da peça no meio do pedaço; metade da altura pra deitar no chão sem afundar)
+        const b = new THREE.Box3().setFromObject(piece), ctr = b.getCenter(new THREE.Vector3()).applyMatrix4(wrap.matrixWorld.clone().invert());
+        piece.position.sub(ctr);
+        const wheel = d.node.startsWith("roda");
+        const half = wheel ? (b.max.x - b.min.x) / 2 : (b.max.y - b.min.y) / 2;
+        piece.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = this.realShadow) : null));
+        this.scene.add(wrap);
+        const sg = () => (Math.random() < 0.5 ? -1 : 1);
+        f = { wrap, tumble, half, spin: [sg() * (6 + Math.random() * 6), sg() * (4 + Math.random() * 5)], rest: wheel ? [0, Math.PI / 2] : [(Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.25] };
+        this.flying.set(d, f);
+      }
+      alive.add(d);
+      const air = Math.min(1, d.t / 0.6), lift = d.t < 0.6 ? 0.9 * Math.sin(air * Math.PI) : 0;
+      f.wrap.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + f.half + lift, d.y);
+      f.wrap.rotation.y = Math.PI / 2 - d.h;
+      // no ar capota; pousando vai pra posição de deitado
+      if (d.t < 0.6) f.tumble.rotation.set(f.spin[0] * d.t, 0, f.spin[1] * d.t);
+      else {
+        const k = Math.min(1, (d.t - 0.6) * 4);
+        f.tumble.rotation.set(f.spin[0] * 0.6 * (1 - k) + f.rest[0] * k, 0, f.spin[1] * 0.6 * (1 - k) + f.rest[1] * k);
+      }
+    }
+    for (const [d, f] of this.flying)
+      if (!alive.has(d)) {
+        this.scene.remove(f.wrap);
+        this.flying.delete(d);
+      }
+  }
+
+  /** o chão do autódromo 3D desta pista (pro carFx saber se é brita, grama, asfalto...) */
+  groundSrc: GroundSrc | null = null;
 
   /** começa a montar o autódromo 3D desta pista; true quando pronto */
   ensureTrack(track: Track): boolean {
@@ -898,6 +1478,8 @@ export class RealCars {
           this.trackFor = track.name;
           // barreiras: as linhas (amostradas a cada 1 m) e as peças (o meio e as pontas, ~4 m)
           this.wallPts = wallPoints(res.paths.items, res.layer.pieces);
+          // (o chão do autódromo: pros efeitos de acidente saberem se é brita, grama, asfalto)
+          this.groundSrc = { items: res.paths.items, orderOf, samplePath };
           this.trackLayer = res.layer;
           console.info(`pista 3D: ${track.name}, ${tris.toLocaleString("pt-BR")} triângulos${real ? ", com o entorno real" : ""}`);
           (window as unknown as { __pista3d: unknown }).__pista3d = { tris, real };

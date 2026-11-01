@@ -3,3 +3,5 @@ dist
 
 # saídas do electron-builder
 desktop/release*/
+
+plus-codigos.txt

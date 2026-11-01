@@ -34,6 +34,11 @@ export class LocalConnection implements Connection {
     this.room.handle(this.id, msg);
   }
 
+  /** as barreiras do autódromo 3D (só no solo: no online quem roda a corrida é o servidor) */
+  setWalls(trackName: string, pts: [number, number][]) {
+    this.room.setWalls(trackName, pts);
+  }
+
   close() {
     this.room.leave(this.id);
     this.room.dispose();

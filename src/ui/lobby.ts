@@ -4,7 +4,7 @@ import { isPct, lapChoiceLabel, officialLaps, resolveLaps } from "../sim/officia
 import { TEAMS } from "../sim/data";
 import { carImage } from "../render/carArt";
 import { previewCanvas } from "../render/car3d";
-import { ACTIVE_TRACKS, CIRCUITS, randomTrack } from "../sim/track";
+import { ACTIVE_TRACKS, CIRCUITS, randomTrack, trackGroup } from "../sim/track";
 import { champRounds } from "../sim/championship";
 import { drawTrackThumb, esc, storeSet, teamName } from "./common";
 import { editMyLivery } from "./liveryEditor";
@@ -13,6 +13,8 @@ import { emblemSvg } from "../render/emblem";
 export class LobbyScreen {
   private el: HTMLElement;
   private thumbsDrawn = false;
+  /** aba da lista de pistas */
+  private trackTab: "oficiais" | "mods" = "oficiais";
   private lobby: LobbyState;
 
   constructor(root: HTMLElement, private conn: Connection, lobby: LobbyState, onExit: () => void) {
@@ -42,7 +44,8 @@ export class LobbyScreen {
         <p class="hint" style="margin-top:-4px">Escolha o carro. Os pilotos são sorteados depois, quando o fim de semana começar (de uma base de 100 pilotos, cada um com seu estilo).</p>
         <div class="teams" id="l-teams"></div>
         <h2>PISTA <span id="l-trackhint" style="color:var(--muted)"></span></h2>
-        <div class="trackbar"><input class="txt" id="l-tsearch" placeholder="Buscar pista (${ACTIVE_TRACKS.length} no total)..."><button class="btn" id="l-trand">🎲 SORTEAR</button></div>
+        <div class="trackbar"><div class="seg" id="l-ttab" style="min-width:220px"><button data-tab="oficiais" class="on">OFICIAIS</button><button data-tab="mods">MODS</button></div><input class="txt" id="l-tsearch" placeholder="Buscar pista..."><button class="btn" id="l-trand">🎲 SORTEAR</button></div>
+        <p class="hint" id="l-tabhint" style="margin:-4px 0 8px"></p>
         <div class="trackinfo box" id="l-tinfo"></div>
         <div class="tracks many" id="l-tracks"></div>
         <h2>REGRAS</h2>
@@ -136,18 +139,35 @@ export class LobbyScreen {
     const tracks = root.querySelector("#l-tracks")!;
     if (!this.thumbsDrawn) {
       // (pistas não oficiais do editor: só no solo; o servidor do online não tem elas)
+      // abas: OFICIAIS (as do jogo) e MODS (as reais, que vêm com o jogo, e as feitas/importadas no editor)
       tracks.innerHTML = ACTIVE_TRACKS.filter((i) => lobby.solo || !CIRCUITS[i].mod).map(
         (i) => [CIRCUITS[i], i] as const,
       ).map(
-        ([c, i]) => `<button class="trackcard" data-track="${i}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
-          <div class="st">${c.mod ? "Não oficial · " : c.edited ? "Editada · " : ""}${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
+        ([c, i]) => `<button class="trackcard" data-track="${i}" data-group="${trackGroup(i) === "oficial" ? "oficiais" : "mods"}" data-name="${esc(c.name.toLowerCase())}"><canvas></canvas><div class="tn">${esc(c.name)}</div>
+          <div class="st">${c.mod ? "Mod do editor · " : c.pack === "real" ? "Mod · pista real · " : ""}${c.edited ? "Editada · " : ""}${c.street ? "Rua · " : ""}chuva ${Math.round(c.rainChance * 100)}%</div></button>`,
       ).join("");
-      root.querySelector<HTMLInputElement>("#l-tsearch")!.addEventListener("input", (e) => {
-        const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
-        tracks.querySelectorAll<HTMLElement>("[data-track]").forEach((b) => (b.hidden = !!q && !b.dataset.name!.includes(q)));
-      });
+      // (abre na aba da pista escolhida)
+      if (CIRCUITS[lobby.trackIndex] && trackGroup(lobby.trackIndex) !== "oficial") this.trackTab = "mods";
+      const filter = () => {
+        const q = root.querySelector<HTMLInputElement>("#l-tsearch")!.value.trim().toLowerCase();
+        tracks.querySelectorAll<HTMLElement>("[data-track]").forEach((b) => (b.hidden = b.dataset.group !== this.trackTab || (!!q && !b.dataset.name!.includes(q))));
+        root.querySelectorAll<HTMLButtonElement>("#l-ttab [data-tab]").forEach((x) => x.classList.toggle("on", x.dataset.tab === this.trackTab));
+        const n = tracks.querySelectorAll(`[data-group="${this.trackTab}"]`).length;
+        root.querySelector("#l-tabhint")!.textContent =
+          this.trackTab === "oficiais"
+            ? `${n} pistas oficiais do Pit Wall Manager.`
+            : `${n} mods: as pistas reais (valem no campeonato e no online)${lobby.solo ? " e as feitas ou importadas no Editor (só no solo)" : ""}.`;
+      };
+      root.querySelector<HTMLInputElement>("#l-tsearch")!.addEventListener("input", filter);
+      root.querySelectorAll<HTMLButtonElement>("#l-ttab [data-tab]").forEach((b) =>
+        b.addEventListener("click", () => {
+          this.trackTab = b.dataset.tab as "oficiais" | "mods";
+          filter();
+        }),
+      );
+      filter();
       root.querySelector("#l-trand")!.addEventListener("click", () =>
-        this.conn.send({ t: "options", trackIndex: randomTrack() }),
+        this.conn.send({ t: "options", trackIndex: randomTrack(Math.random, -1, this.trackTab) }),
       );
       // miniaturas desenhadas aos poucos (uma por quadro), pra tela abrir na hora
       const cvs = [...tracks.querySelectorAll<HTMLCanvasElement>("canvas")];
@@ -178,9 +198,9 @@ export class LobbyScreen {
       <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:center">
         <div><div class="hint" style="margin:0 0 6px">Voltas da corrida</div>
           <div class="seg" style="min-width:240px">${LAP_OPTIONS.map(
-            (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"} title="${isPct(n) ? `${-n}% das voltas oficiais da pista (arredonda pra cima)` : ""}">${lapChoiceLabel(n).toLowerCase()}</button>`,
+            (n) => `<button data-laps="${n}" class="${n === lobby.laps ? "on" : ""}" ${isHost ? "" : "disabled"} title="${isPct(n) ? `${-n}% das voltas de uma corrida completa na pista (arredonda pra cima)` : ""}">${lapChoiceLabel(n).toLowerCase()}</button>`,
           ).join("")}</div>
-          ${isPct(lobby.laps) && lobby.trackIndex >= 0 ? `<div class="hint" style="margin:4px 0 0">${officialLaps(lobby.trackIndex)} voltas oficiais → ${resolveLaps(lobby.laps, lobby.trackIndex)} voltas</div>` : isPct(lobby.laps) ? `<div class="hint" style="margin:4px 0 0">${-lobby.laps}% das voltas oficiais de cada pista</div>` : ""}</div>
+          ${isPct(lobby.laps) && lobby.trackIndex >= 0 ? `<div class="hint" style="margin:4px 0 0">${officialLaps(lobby.trackIndex)} voltas numa corrida completa → ${resolveLaps(lobby.laps, lobby.trackIndex)} voltas</div>` : isPct(lobby.laps) ? `<div class="hint" style="margin:4px 0 0">${-lobby.laps}% das voltas de uma corrida completa em cada pista</div>` : ""}</div>
         <div><div class="hint" style="margin:0 0 6px">Pilotos de cada jogador</div>
           <div class="seg" style="min-width:220px">
             <button data-pick="draw" class="${lobby.pickMode !== "choose" ? "on" : ""}" ${isHost ? "" : "disabled"} title="Sorteados (dá pra trocar 1 pelo reserva)">🎲 sorteados</button>
@@ -189,12 +209,14 @@ export class LobbyScreen {
         <label class="toggle"><input type="checkbox" id="l-real" ${lobby.realDrivers ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Lendas da F1</b><br><span class="hint" style="margin:0">Sorteia entre 100 pilotos reais de todas as eras (Senna, Schumacher, Hamilton, Verstappen…). Desligado = pilotos fictícios.</span></span></label>
         <label class="toggle"><input type="checkbox" id="l-champ" ${lobby.champMode ? "checked" : ""} ${isHost ? "" : "disabled"}>
-          <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas entre as ${ACTIVE_TRACKS.length}, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+          <span><b>Campeonato</b><br><span class="hint" style="margin:0">Pistas sorteadas, em ordem aleatória. Pontos 25-18-15-12-10-8-6-4-2-1.</span></span></label>
+        ${lobby.champMode ? `<div><div class="hint" style="margin:0 0 6px">Pistas do campeonato</div>
+          <div class="seg" style="min-width:260px">${([["oficiais", "OFICIAIS"], ["mods", "MODS (REAIS)"], ["todas", "TODAS"]] as const).map(([v, l]) => `<button data-pool="${v}" class="${(lobby.champPool ?? "oficiais") === v ? "on" : ""}" ${isHost ? "" : "disabled"}>${l}</button>`).join("")}</div></div>` : ""}
         ${lobby.champMode ? `<div style="min-width:240px"><div class="hint" style="margin:0 0 6px">Nome do campeonato</div>
           <input class="txt" id="l-cname" maxlength="40" placeholder="Ex.: Copa dos Amigos 2026" value="${esc(lobby.champName)}" ${isHost ? "" : "disabled"}></div>` : ""}
         ${lobby.champMode ? `<div><div class="hint" style="margin:0 0 6px">Quantas pistas no campeonato</div>
-          <div class="seg pctseg">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((p) => `<button data-pct="${p}" class="${p === lobby.champPct ? "on" : ""}" ${isHost ? "" : "disabled"} title="${champRounds(p)} etapas">${p}%</button>`).join("")}</div>
-          <div class="hint" style="margin:4px 0 0">${champRounds(lobby.champPct)} etapas</div></div>` : ""}
+          <div class="seg pctseg">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((p) => `<button data-pct="${p}" class="${p === lobby.champPct ? "on" : ""}" ${isHost ? "" : "disabled"} title="${champRounds(p, lobby.champPool)} etapas">${p}%</button>`).join("")}</div>
+          <div class="hint" style="margin:4px 0 0">${champRounds(lobby.champPct, lobby.champPool)} etapas</div></div>` : ""}
         <label class="toggle"><input type="checkbox" id="l-equal" ${lobby.equalCars ? "checked" : ""} ${isHost ? "" : "disabled"}>
           <span><b>Carros iguais</b><br><span class="hint" style="margin:0">Todo mundo com o mesmo carro e piloto. Ganha quem acertar melhor o carro e a estratégia.</span></span></label>
       </div>
@@ -214,6 +236,9 @@ export class LobbyScreen {
     root.querySelectorAll<HTMLButtonElement>("[data-pct]").forEach((b) =>
       b.addEventListener("click", () => this.conn.send({ t: "options", champPct: Number(b.dataset.pct) })),
     );
+    root.querySelectorAll<HTMLButtonElement>("[data-pool]").forEach((b) =>
+      b.addEventListener("click", () => this.conn.send({ t: "options", champPool: b.dataset.pool as "oficiais" | "mods" | "todas" })),
+    );
     root.querySelector<HTMLInputElement>("#l-cname")?.addEventListener("change", (e) =>
       this.conn.send({ t: "options", champName: (e.target as HTMLInputElement).value }),
     );
@@ -221,7 +246,7 @@ export class LobbyScreen {
       this.conn.send({ t: "options", equalCars: (e.target as HTMLInputElement).checked }),
     );
 
-    root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? `· campeonato: ${champRounds(lobby.champPct)} pistas sorteadas` : "";
+    root.querySelector("#l-trackhint")!.textContent = lobby.champMode ? `· campeonato: ${champRounds(lobby.champPct, lobby.champPool)} pistas sorteadas` : "";
     root.querySelector("#l-start")!.textContent = lobby.resumed ? "CONTINUAR O CAMPEONATO ▶" : lobby.champMode ? "INICIAR CAMPEONATO ▶" : "INICIAR FIM DE SEMANA ▶";
     // campeonato online retomado: quem ainda falta voltar
     const rb = root.querySelector<HTMLElement>("#l-resumed")!;

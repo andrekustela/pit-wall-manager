@@ -37,7 +37,8 @@ function starterPoints(): [number, number][] {
 
 type Target = { t: "edit"; idx: number } | { t: "mod"; id: string };
 
-export function showTrackLayoutEditor(onDone: () => void = () => {}) {
+/** `startIndex`: abre direto nessa pista (do jogo ou mod do editor) */
+export function showTrackLayoutEditor(onDone: () => void = () => {}, startIndex?: number) {
   if (!document.getElementById("tle-css")) {
     const st = document.createElement("style");
     st.id = "tle-css";
@@ -52,7 +53,12 @@ export function showTrackLayoutEditor(onDone: () => void = () => {}) {
   const bar = root.querySelector<HTMLElement>(".tlebar")!, side = root.querySelector<HTMLElement>(".tleside")!, hint = root.querySelector<HTMLElement>(".tlehint")!;
 
   // ---- estado ----
-  let target: Target = { t: "edit", idx: ACTIVE_TRACKS.find((i) => !CIRCUITS[i].mod) ?? ACTIVE_TRACKS[0] };
+  // (vindo do Editor com uma pista escolhida: mod do editor = pela id dela; as outras = edição da pista do jogo)
+  const startDef = startIndex !== undefined ? CIRCUITS[startIndex] : undefined;
+  let target: Target = startDef?.mod && startDef.lineKey?.startsWith("mod:")
+    ? { t: "mod", id: startDef.lineKey.slice(4) }
+    : { t: "edit", idx: startIndex !== undefined && startDef && !startDef.mod ? ORIGINAL_CIRCUITS.findIndex((c) => c.name === (startDef.lineKey?.replace(/^editado:/, "") ?? startDef.name)) : (ACTIVE_TRACKS.find((i) => !CIRCUITS[i].mod) ?? ACTIVE_TRACKS[0]) };
+  if (target.t === "edit" && target.idx < 0) target = { t: "edit", idx: ACTIVE_TRACKS[0] };
   /** pontos de controle no mundo (m) */
   let pts: [number, number][] = [];
   let meta: Omit<ModTrack, "points" | "targetLength" | "line"> = { id: "", name: "", blurb: "", minHeight: 5, balance: 0, rainChance: 0.25, grass: ["#3d8a3a", "#418f3d"] };

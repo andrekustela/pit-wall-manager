@@ -238,8 +238,9 @@ label.fld span { display: block; margin-bottom: 4px; }
 .helpbtns { position: fixed; left: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 40; }
 .hbtn { width: 34px; height: 34px; background: #1d2331; border: 2px solid var(--line); font-family: var(--pix); font-size: 15px; box-shadow: 0 0 0 2px #000; }
 .hbtn:hover { border-color: #fff; }
-.helpmodal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
-.helpbox { width: min(760px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel-solid); padding: 14px 18px 18px; }
+/* modal encostado em cima (centralizado, ele pulava a cada troca de aba: a altura muda) */
+.helpmodal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding: max(16px, 5vh) 16px 16px; }
+.helpbox { width: min(760px, 100%); max-height: calc(100vh - max(16px, 5vh) - 16px); overflow-y: auto; background: var(--panel-solid); padding: 14px 18px 18px; }
 .helphead { display: flex; justify-content: space-between; align-items: center; font-family: var(--pix); margin-bottom: 10px; }
 .helptabs { flex-wrap: wrap; margin-bottom: 12px; }
 .helpbody { font-size: 15px; line-height: 1.55; }
@@ -727,7 +728,9 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .mkhead { display: flex; flex-direction: column; gap: 2px; }
 
 /* editor de pintura */
-.livbox { width: min(980px, 96vw); max-height: 94vh; overflow-y: auto; }
+.livbox { width: min(980px, 96vw); max-height: calc(100vh - max(16px, 5vh) - 16px); overflow-y: auto; }
+.livsub { margin-bottom: 12px; }
+.livsub button { font-size: 12px; padding: 6px 0; }
 .livgrid { display: grid; grid-template-columns: 280px 1fr; gap: 18px; }
 @media (max-width: 760px) { .livgrid { grid-template-columns: 1fr; } }
 .livprev { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -995,6 +998,8 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .teams { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 /* seletor de pista com busca/validação */
 .tpick { position: relative; }
+.tpick-filter { margin-bottom: 6px; }
+.tpick-filter button { font-size: 12px; padding: 5px 0; }
 .tpick-box { display: grid; grid-template-columns: 92px 1fr 40px; align-items: stretch; border: 2px solid var(--line); background: #0d1119; }
 .tpick-box:focus-within { border-color: #5a6680; }
 .tpick-thumb { width: 92px; height: 46px; border-right: 1px solid var(--line); }
@@ -1014,6 +1019,33 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 /* etiquetas das pistas */
 .ttags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .ttag { font-style: normal; font-family: var(--pix); font-size: 10px; letter-spacing: .07em; padding: 1px 5px; border: 1px solid currentColor; color: #aab3c5; white-space: nowrap; }
+.ttag.mod { color: #4fd1ff; }
+/* CRIAR MEU CARRO (adesivos, Premium) */
+.stkbox { width: min(1000px, 100%); }
+.stkgrid { display: grid; grid-template-columns: 1fr 260px; gap: 12px; }
+.stkcv { width: 100%; height: min(340px, 42vh); background: #2b2f38; cursor: grab; touch-action: none; }
+.stkcv:active { cursor: grabbing; }
+.stkpal { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.stkside .sndrow { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
+@media (max-width: 760px) { .stkgrid { grid-template-columns: 1fr; } }
+.livpat.plus span, .livstyles .plus { color: #ffd23b; }
+/* aba PILOTO: cada desenho com a miniatura da peça (capacete, macacão, luva, tênis) */
+.seg.livstyles { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 4px; }
+.livstyles button { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-left: 0; padding: 4px 2px 5px; }
+.livstyles .livth { display: block; width: 48px; height: 48px; }
+/* Editor > PISTAS: uma linha por pista, com miniatura e os botões dela */
+.edtrkbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
+.edtrk { display: grid; grid-template-columns: 72px 1fr auto; gap: 12px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.edtrk:hover { background: rgba(255,255,255,.03); }
+.edtrk canvas { width: 72px; height: 44px; background: #10141c; }
+.edtname { display: flex; flex-direction: column; min-width: 0; }
+.edtname b { font-family: var(--pix); font-size: 15px; letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edtname small { color: var(--muted); font-size: 12px; }
+.edtname input { display: none; margin-top: 6px; }
+.edtrk.naming .edtname input { display: block; }
+.edtbtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.edtbtns .btn { font-size: 12px; padding: 5px 9px; }
+@media (max-width: 760px) { .edtrk { grid-template-columns: 56px 1fr; } .edtbtns { grid-column: 1 / -1; justify-content: flex-start; } }
 .ttag.rua { color: #ffb02e; }
 .ttag.noite { color: #9d8cff; }
 .ttag.chuva { color: #4cb4ff; }
@@ -1525,6 +1557,9 @@ body.inrace .helpbtns { display: none; }
 .floatgear { position: fixed; left: 14px; bottom: 14px; z-index: 9500; width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1; opacity: .85; }
 .racecorner .floatgear { position: static; width: auto; height: auto; padding: inherit; font-size: inherit; line-height: inherit; opacity: 1; min-width: 34px; align-self: stretch; }
 .floatgear:hover { opacity: 1; }
+/* (na fileira de botões do canto: do mesmo tamanho e jeito dos vizinhos) */
+.helpbtns .floatgear { position: static; width: 34px; height: 34px; padding: 0; font-size: 16px; opacity: 1; background: #1d2331; border: 2px solid var(--line); box-shadow: 0 0 0 2px #000; }
+.helpbtns .floatgear:hover { border-color: #fff; }
 
 /* painel dos pilotos só com os nomes (tecla M): a linha de cima (posição, nome, frente/atrás) */
 .team.names .driver { display: block; width: 330px; padding: 6px 8px; }

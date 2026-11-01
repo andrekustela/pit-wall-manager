@@ -1,15 +1,15 @@
 // Carro de F1 em vetor, visto de cima (frente pra +x), desenhado UMA vez por
 // equipe numa imagem de alta resolução e depois só girado/escalado a cada frame.
 import type { Team } from "../sim/types";
-import { liveryKey, type Livery } from "../sim/livery";
+import { liveryKey, type Livery, type Sticker } from "../sim/livery";
 
 /** tamanho real do carro (m) */
 export const CAR_LEN_M = 4.3;
 /** o desenho foi feito com 5,6 m; encolhe no comprimento pra não parecer espichado */
-const SQUASH = CAR_LEN_M / 5.6;
+export const SQUASH = CAR_LEN_M / 5.6;
 export const CAR_WID_M = 2.0;
 /** resolução da imagem pré-desenhada (pixels por metro) */
-const RES = 40;
+export const RES = 40;
 /** sobra em volta (m), pra sombra */
 const PAD = 0.35;
 
@@ -133,7 +133,7 @@ function drawF1(g: CanvasRenderingContext2D, team: Team, rainLight: boolean) {
   g.fillStyle = bodyGrad;
   g.fill();
   // pintura escolhida pelo jogador (fica só dentro da carroceria)
-  if (lv && lv.pattern !== "classica") paintPattern(g, lv);
+  if (lv && (lv.pattern !== "classica" || lv.stickers?.length)) paintPattern(g, lv);
   bodyPath(g);
   g.strokeStyle = "rgba(0,0,0,0.35)";
   g.lineWidth = 0.025;
@@ -287,6 +287,7 @@ function paintPattern(g: CanvasRenderingContext2D, lv: Livery) {
   bodyPath(g);
   g.clip();
   patternShapes(g, lv);
+  drawStickers(g, lv);
   g.restore();
 }
 
@@ -333,7 +334,173 @@ export function patternShapes(g: CanvasRenderingContext2D, lv: Livery) {
       for (const s of [-1, 1]) poly([[-0.75, 0.66 * s], [0.45, 0.4 * s], [0.45, 0.5 * s], [-0.75, 0.75 * s]]);
       g.fillRect(-2.5, -0.3, 0.45, 0.6);
       break;
+    // ---- pacote Plus ----
+    case "xadrez":
+      // faixa quadriculada no meio da carroceria (bandeirada)
+      for (let x = -2.4; x < 2.4; x += 0.16) for (let k = 0; k < 4; k++) if ((Math.round(x / 0.16) + k) % 2 === 0) g.fillRect(x, -0.32 + k * 0.16, 0.16, 0.16);
+      break;
+    case "ondas":
+      for (const y0 of [-0.42, 0, 0.42]) {
+        g.beginPath();
+        for (let x = -2.5; x <= 2.5; x += 0.05) g[x === -2.5 ? "moveTo" : "lineTo"](x, y0 + Math.sin(x * 3.2) * 0.1 - 0.05);
+        for (let x = 2.5; x >= -2.5; x -= 0.05) g.lineTo(x, y0 + Math.sin(x * 3.2) * 0.1 + 0.05);
+        g.closePath();
+        g.fill();
+      }
+      break;
+    case "raio":
+      // um raio grande de trás pra frente, dos dois lados
+      for (const s of [-1, 1]) poly([[-2.3, 0.15 * s], [-0.6, 0.55 * s], [-0.7, 0.32 * s], [1.0, 0.5 * s], [2.35, 0.05 * s], [0.6, 0.3 * s], [0.7, 0.12 * s], [-1.1, 0.22 * s]]);
+      break;
+    case "tigre":
+      // listras irregulares atravessando, da lateral pro meio
+      [-1.9, -1.35, -0.85, -0.3, 0.25, 0.8, 1.35].forEach((x, i) => {
+        for (const s of [-1, 1]) poly([[x, 0.75 * s], [x + 0.22, 0.75 * s], [x + 0.08 + (i % 2) * 0.06, 0.12 * s], [x - 0.02, 0.3 * s]]);
+      });
+      break;
+    case "pixel": {
+      // blocos que se desmancham da traseira pra frente (sempre o mesmo desenho)
+      let h = 7;
+      const rnd = () => ((h = (h * 16807) % 2147483647) / 2147483647);
+      for (let x = -2.4; x < 2.4; x += 0.2)
+        for (let y = -0.8; y < 0.8; y += 0.2) if (rnd() < 0.85 - (x + 2.4) / 5.5) g.fillRect(x + 0.01, y + 0.01, 0.18, 0.18);
+      break;
+    }
+    case "aneis":
+      // anéis atravessando o carro (de lado a lado)
+      for (const x of [-1.6, -0.2, 1.2]) g.fillRect(x, -1, 0.22, 2);
+      for (const x of [-1.3, 0.1, 1.5]) g.fillRect(x, -1, 0.07, 2);
+      break;
+    case "estrelas": {
+      const star = (cx: number, cy: number, r: number) => {
+        g.beginPath();
+        for (let k = 0; k < 10; k++) {
+          const a = (k * Math.PI) / 5 - Math.PI / 2, rr = k % 2 ? r * 0.45 : r;
+          g[k ? "lineTo" : "moveTo"](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+        }
+        g.closePath();
+        g.fill();
+      };
+      for (const [x, y, r] of [[-1.8, 0.35, 0.16], [-1.1, -0.4, 0.2], [-0.3, 0.45, 0.14], [0.5, -0.3, 0.18], [1.3, 0.1, 0.13], [-1.5, -0.05, 0.1], [0.1, 0.05, 0.11]]) star(x, y, r);
+      break;
+    }
+    case "camuflada": {
+      // manchas arredondadas espalhadas (sempre o mesmo desenho)
+      let h = 11;
+      const rnd = () => ((h = (h * 16807) % 2147483647) / 2147483647);
+      for (let k = 0; k < 26; k++) {
+        const x = -2.3 + rnd() * 4.6, y = -0.75 + rnd() * 1.5, rx = 0.12 + rnd() * 0.22, ry = 0.06 + rnd() * 0.14;
+        g.beginPath();
+        g.ellipse(x, y, rx, ry, rnd() * Math.PI, 0, Math.PI * 2);
+        g.fill();
+      }
+      break;
+    }
+    case "retro":
+      // faixa larga no meio, de ponta a ponta, com dois filetes finos de cada lado
+      g.fillRect(-2.5, -0.17, 5, 0.34);
+      for (const s of [-1, 1]) g.fillRect(-2.5, s > 0 ? 0.23 : -0.27, 5, 0.04);
+      break;
+    case "chamas":
+      // chamas saindo do bico pra trás, dos dois lados
+      for (const s of [-1, 1])
+        poly([[2.3, 0.06 * s], [1.0, 0.2 * s], [0.6, 0.62 * s], [0.25, 0.3 * s], [-0.3, 0.7 * s], [-0.5, 0.35 * s], [-1.2, 0.62 * s], [-1.1, 0.18 * s], [-1.8, 0.38 * s], [-1.3, 0.04 * s]]);
+      break;
   }
+}
+
+/** um adesivo no lugar dele (centro em 0,0, tamanho 1 = o `s` do adesivo) */
+function stickerShape(g: CanvasRenderingContext2D, st: Sticker, lv: Livery) {
+  const poly = (pts: number[][]) => {
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.closePath();
+    g.fill();
+  };
+  switch (st.k) {
+    case "estrela":
+      g.beginPath();
+      for (let k = 0; k < 10; k++) {
+        const a = (k * Math.PI) / 5 - Math.PI / 2, rr = k % 2 ? 0.22 : 0.5;
+        g[k ? "lineTo" : "moveTo"](Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      g.closePath();
+      g.fill();
+      break;
+    case "raio":
+      poly([[-0.5, -0.12], [0.05, -0.18], [-0.05, -0.02], [0.5, -0.06], [-0.05, 0.2], [0.05, 0.04]]);
+      break;
+    case "chama":
+      poly([[0.5, 0], [0.1, -0.12], [0.18, -0.3], [-0.1, -0.15], [-0.15, -0.38], [-0.32, -0.12], [-0.5, -0.22], [-0.42, 0], [-0.5, 0.22], [-0.32, 0.12], [-0.15, 0.38], [-0.1, 0.15], [0.18, 0.3], [0.1, 0.12]]);
+      break;
+    case "circulo":
+      g.beginPath();
+      g.arc(0, 0, 0.5, 0, Math.PI * 2);
+      g.fill();
+      break;
+    case "anel":
+      g.beginPath();
+      g.arc(0, 0, 0.5, 0, Math.PI * 2);
+      g.arc(0, 0, 0.36, 0, Math.PI * 2, true);
+      g.fill();
+      break;
+    case "triangulo":
+      poly([[0.5, 0], [-0.4, -0.45], [-0.4, 0.45]]);
+      break;
+    case "seta":
+      poly([[0.5, 0], [0.05, -0.4], [0.05, -0.16], [-0.5, -0.16], [-0.5, 0.16], [0.05, 0.16], [0.05, 0.4]]);
+      break;
+    case "coracao":
+      g.beginPath();
+      g.moveTo(0.42, 0);
+      g.bezierCurveTo(0.1, -0.25, -0.05, -0.5, -0.3, -0.38);
+      g.bezierCurveTo(-0.55, -0.25, -0.45, 0, -0.3, 0);
+      g.bezierCurveTo(-0.45, 0, -0.55, 0.25, -0.3, 0.38);
+      g.bezierCurveTo(-0.05, 0.5, 0.1, 0.25, 0.42, 0);
+      g.fill();
+      break;
+    case "xadrez":
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if ((i + j) % 2 === 0) g.fillRect(-0.5 + i * 0.25, -0.5 + j * 0.25, 0.25, 0.25);
+      break;
+    case "listra":
+      g.fillRect(-0.5, -0.06, 1, 0.12);
+      break;
+    case "coroa":
+      poly([[-0.4, -0.45], [0.35, -0.45], [0.35, 0.45], [-0.4, 0.45], [-0.1, 0.25], [-0.4, 0], [-0.1, -0.25]]);
+      break;
+    case "asa":
+      for (const s of [-1, 1]) poly([[0.2, 0.04 * s], [-0.1, 0.5 * s], [-0.35, 0.42 * s], [-0.2, 0.28 * s], [-0.42, 0.25 * s], [-0.25, 0.12 * s], [-0.4, 0.06 * s]]);
+      break;
+    case "numero":
+    case "texto": {
+      const txt = st.k === "numero" ? String(lv.number) : (st.t ?? "");
+      if (!txt) break;
+      // (texto em pé no carro: lido de lado, como numa pintura de verdade)
+      g.font = "900 100px Oswald, Impact, sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      const w = g.measureText(txt).width || 1;
+      const k = Math.min(1 / w, 0.008);
+      g.scale(k, k);
+      g.fillText(txt, 0, 4);
+      break;
+    }
+  }
+}
+
+/** os adesivos (Premium) por cima da pintura, no desenho de cima do carro (m; frente pra +x) */
+export function drawStickers(g: CanvasRenderingContext2D, lv: Livery | undefined) {
+  if (!lv?.stickers?.length) return;
+  for (const st of lv.stickers)
+    for (const my of st.m ? [1, -1] : [1]) {
+      g.save();
+      g.translate(st.x, st.y * my);
+      g.rotate(st.r * my);
+      g.scale(st.s, st.s * my);
+      g.fillStyle = st.c;
+      stickerShape(g, st, lv);
+      g.restore();
+    }
 }
 
 /** safety car: esportivo amarelo (estilo superesportivo italiano), giroflex no teto */

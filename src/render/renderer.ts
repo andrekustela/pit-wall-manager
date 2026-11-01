@@ -7,6 +7,7 @@ import { fmtLap, type Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
 import { CarFx } from "./carFx";
+import { groundMap } from "./ground";
 import { OnboardCam } from "./onboard";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH, angDiff } from "../sim/track";
@@ -292,6 +293,8 @@ export class Renderer {
   /** rodada, batida, fumaça, poeira, faíscas, marcas de pneu, tremor */
   private fx = new CarFx();
   private wallsFor = "";
+  /** quem roda a corrida de verdade recebe as barreiras do autódromo 3D (main.ts: a sala, no solo) */
+  onWalls: ((trackName: string, pts: [number, number][]) => void) | null = null;
   /** lateral desenhada (suavizada) e quanto o carro tinha andado, por carro */
   private latSm = new Map<string, { lat: number; d: number; trail: [number, number][] }>();
   private lastRt = 0;
@@ -310,8 +313,13 @@ export class Renderer {
   private pitSeen = new Map<string, string>();
   /** câmera piloto: quanto ela está virada (botão direito; volta pra frente ao trocar de câmera) */
   private pilotYaw = 0;
-  /** pedaços de asa voando / caídos na pista (metros do mundo) */
-  private debris: { img: CarImage; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
+  /**
+   * pedaços de asa e roda voando / caídos na pista (metros do mundo): a figura (2D e vista de cima) e qual peça do
+   * carro é (câmeras 3D: RealCars.debris3d põe a peça 3D de verdade)
+   */
+  private debris: { img: CarImage | null; node: string; carId: string; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
+  /** o chão que os efeitos de acidente estão usando (pista e se veio do autódromo 3D) */
+  private groundKey = "";
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
   readonly interp = new Map<string, { s: number; lat: number }>();
   /** online: etiqueta dos carros dos jogadores mostra o engenheiro */
@@ -443,10 +451,12 @@ export class Renderer {
     let drew3d = false;
     // onboard em 3D de verdade quando o autódromo 3D está pronto (senão, o desenho de sempre)
     OnboardCam.world3d = real3?.wallPts && gfx().onboard3d ? (g, W, H, id, x, y, h) => real3.drawOnboard(g, W, H, id, x, y, h) : null;
-    // a corrida bate nas barreiras do autódromo 3D (quando ele fica pronto)
+    // a corrida bate nas barreiras do autódromo 3D (quando ele fica pronto): na de verdade (onWalls: a sala, no
+    // solo) e na da tela
     if (real3?.wallPts && this.wallsFor !== race.track.name) {
       this.wallsFor = race.track.name;
       race.setWalls(real3.wallPts);
+      this.onWalls?.(race.track.name, real3.wallPts);
     }
     // câmera inclinada (protótipo): a cena 3D cobre tudo, a pista 2D nem é desenhada
     if (real3 && TILT && real3.ensureTrack(race.track)) drew3d = true;
@@ -482,7 +492,7 @@ export class Renderer {
     // pedaços de asa: voam um pouco, escorregam e ficam na pista até sumir
     // pausado: fumaça, faíscas e pedaços param junto com a corrida
     const dt = speed === 0 ? 0 : Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed));
-    this.debris = this.debris.filter((d) => (d.t += dt) < 14);
+    this.debris = this.debris.filter((d) => (d.t += dt) < 30);
     for (const d of this.debris) {
       const f = Math.exp(-2.2 * dt);
       d.vx *= f;
@@ -502,12 +512,22 @@ export class Renderer {
       return Math.atan2(b.y - a.y, b.x - a.x);
     };
     const drawDebris = (cv: typeof toCss, mm: number) => {
+      // (câmeras 3D: os pedaços são as peças 3D do carro, na cena — RealCars.debris3d)
+      if (tiltOn) return;
       for (const d of this.debris) {
+        if (!d.img) continue;
         const air = d.t < 0.6 ? 1 + 0.35 * Math.sin((d.t / 0.6) * Math.PI) : 1; // no ar parece maior
         const { x, y } = cv(d);
-        this.drawCar(o, x, y, hOn(cv, d, d.h), d.img, mm * air, d.t > 11 ? (14 - d.t) / 3 : 1);
+        this.drawCar(o, x, y, hOn(cv, d, d.h), d.img, mm * air, d.t > 27 ? (30 - d.t) / 3 : 1);
       }
     };
+    // o chão dos efeitos de acidente: o do autódromo 3D, se montado; senão a regra da beira da pista
+    const gsrc = real3?.groundSrc ?? null, gkey = `${race.track.name}|${gsrc ? "3d" : "2d"}`;
+    if (this.groundKey !== gkey) {
+      this.groundKey = gkey;
+      this.fx.ground = groundMap(race.track, gsrc);
+      this.fx.pose = (s, lat) => race.track.pose(s, lat);
+    }
     this.fx.step(dt);
     const under = (cv: typeof toCss, mm: number, soft = 1, scaleAt?: (x: number, y: number) => number, skipNear?: { x: number; y: number } | null) => {
       drawDebris(cv, mm);
@@ -546,8 +566,9 @@ export class Renderer {
         else this.spray(o, x, y, p.h, wet, m, p, v, dt);
       }
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
-      const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s));
-      const crashed = this.fx.crashed(c);
+      const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s), this.interp.get(c.id));
+      // (o estrago aparece quando o carro desenhado chega no muro, não quando a corrida avisa)
+      const crashed = this.fx.crashed(c) && this.fx.landed(c.id);
       // saída de curva lenta acelerando forte: às vezes a traseira escapa um pouco e o piloto corrige (2-4°,
       // some em ~0,6 s). Mais comum com piloto agressivo e na chuva. Só no desenho: a corrida não muda
       let wig = this.wiggle.get(c.id);
@@ -639,7 +660,8 @@ export class Renderer {
       real.scMode = race.sc.active;
       real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" && TILT !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: TILT, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw, cover: this.inset } : null;
       real.liveScreen(race);
-      real.skidMarks(tiltOn ? this.fx.skidList : null);
+      real.skidMarks(tiltOn ? this.fx.skidList : null, tiltOn ? this.fx.spotList : null);
+      real.debris3d(tiltOn ? this.debris : null);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
     }
     // câmera inclinada: os efeitos por cima da cena 3D, e as posições na tela (etiquetas, clique) pela câmera 3D
@@ -807,27 +829,34 @@ export class Renderer {
   private dropParts(c: Race["cars"][number], look: CarLook, p: { x: number; y: number; h: number }) {
     const prev = this.lookSeen.get(c.id);
     this.lookSeen.set(c.id, look);
-    if (!prev || !car3dPref.on) return;
-    const out: ReturnType<typeof partPiece>[] = [];
+    if (!prev) return;
+    // (a figura do carro estilizado só existe com ele carregado; a peça do 3D vem do próprio carro 3D)
+    const fig = (part: "asa_d" | "asa_t" | "roda", which: "full" | "l" | "r" | number) => (car3dPref.on ? partPiece(c.team, part, which) : null);
+    // onde cada peça fica no carro (m), quando não tem a figura
+    const AT: Record<string, [number, number]> = { asa_d: [2.35, 0], asa_t: [-2.4, 0], roda_fe: [1.55, 0.72], roda_fd: [1.55, -0.72], roda_te: [-1.6, 0.72], roda_td: [-1.6, -0.72] };
+    const out: { node: string; piece: ReturnType<typeof partPiece> }[] = [];
     const wing = (part: "asa_d" | "asa_t", a: CarLook["fw"], b: CarLook["fw"]) => {
       if (a.state === b.state) return;
-      if (b.state === "half") out.push(partPiece(c.team, part, b.side));
-      else if (b.state === "none") out.push(partPiece(c.team, part, a.state === "half" ? (a.side === "l" ? "r" : "l") : "full"));
+      if (b.state === "half") out.push({ node: part, piece: fig(part, b.side) });
+      else if (b.state === "none") out.push({ node: part, piece: fig(part, a.state === "half" ? (a.side === "l" ? "r" : "l") : "full") });
     };
     wing("asa_d", prev.fw, look.fw);
     wing("asa_t", prev.rw, look.rw);
     look.wheels.forEach((w, i) => {
-      if (w === "off" && prev.wheels[i] !== "off") out.push(partPiece(c.team, "roda", i));
+      if (w === "off" && prev.wheels[i] !== "off") out.push({ node: (["roda_fe", "roda_fd", "roda_te", "roda_td"] as const)[i], piece: fig("roda", i) });
     });
-    const fx = Math.cos(p.h), fy = Math.sin(p.h);
-    for (const piece of out) {
-      if (!piece) continue;
-      const side = (Math.random() - 0.5) * 8 + piece.dy * 3;
+    const fx = Math.cos(p.h), fy = Math.sin(p.h), v0 = Math.min(55, Math.max(c.v, this.fx.recentSpeed(c.id)));
+    // (bateu fora da pista: o muro fica do lado de fora, o pedaço volta pro lado da pista)
+    const toTrack = c.offTrack > 0 || Math.abs(c.lateral) > TRACK_WIDTH / 2 ? -Math.sign(c.lateral) : 0;
+    for (const { node, piece } of out) {
+      const [dx, dy] = piece ? [piece.dx, piece.dy] : AT[node];
+      const side = toTrack ? toTrack * (3 + Math.random() * 6) : (Math.random() - 0.5) * 8 + dy * 3;
       // sai de onde a peça estava no carro e gira em volta de si mesma
-      const x = p.x + fx * piece.dx - fy * piece.dy, y = p.y + fy * piece.dx + fx * piece.dy;
-      this.debris.push({ img: piece.img, x, y, h: p.h, vx: fx * c.v * 0.55 - fy * side, vy: fy * c.v * 0.55 + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
+      const x = p.x + fx * dx - fy * dy, y = p.y + fy * dx + fx * dy;
+      const fwd = v0 * (0.3 + Math.random() * 0.3);
+      this.debris.push({ img: piece?.img ?? null, node, carId: c.id, x, y, h: p.h, vx: fx * fwd - fy * side, vy: fy * fwd + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
     }
-    while (this.debris.length > 16) this.debris.shift();
+    while (this.debris.length > 24) this.debris.shift();
   }
 
 

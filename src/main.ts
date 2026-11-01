@@ -1,4 +1,4 @@
-﻿import { CIRCUITS } from "./sim/track";
+import { CIRCUITS } from "./sim/track";
 import { toggleFullscreen } from "./ui/help";
 import { showRaceMenu } from "./ui/raceMenu";
 import { showSettings } from "./ui/menu";
@@ -18,6 +18,7 @@ import { mountFlagBackdrop } from "./ui/flagField";
 import { DriversScreen } from "./ui/drivers";
 import { car3dReady } from "./render/car3d";
 import { applyDisplay } from "./render/display";
+import { startTranslator } from "./ui/i18n";
 import { setForceRain } from "./sim/weather";
 import { actionOf, isKey } from "./ui/keys";
 import { getTrack } from "./sim/track";
@@ -28,6 +29,8 @@ import { getTrack } from "./sim/track";
  */
 // brilho/contraste/saturação/tom (Configurações > TELA)
 applyDisplay();
+// idioma (Configurações > TELA): troca os textos da página pelo dicionário
+startTranslator();
 
 function preload3d(trackIndex: number) {
   const tilt = new URLSearchParams(location.search).get("camera");
@@ -270,6 +273,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         equalCars: s.equalCars,
         champ: s.kind === "campeonato",
         champPct: s.champPct,
+        champPool: s.champPool,
         champName: s.champName,
         quick: s.kind === "corrida",
       });
@@ -550,6 +554,8 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       }
     };
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
+    // (solo: as barreiras do autódromo 3D vão pra corrida da sala, a que roda de verdade)
+    if (conn instanceof LocalConnection) view.renderer.onWalls = (name, pts) => conn.setWalls(name, pts);
     // canto de baixo: FPS e o MENU (pausa no solo; online não pausa)
     const corner = document.createElement("div");
     corner.className = "racecorner";
@@ -723,6 +729,8 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     this.view = view;
     // depuração: ?debug expõe a corrida na tela (window.__view)
     if (params.has("debug")) (window as unknown as { __view: RaceView }).__view = view;
+    // teste: ?tv liga o Modo TV na largada (a câmera corre pra cada rodada e batida; com ?caos dá pra ver muitas)
+    if (params.has("tv")) view.hud.setTv(toggleTv());
     if (AUTO && params.get("speed")) setSpeed(Number(params.get("speed")));
     // teste: ?auto&podio pula direto pro pódio (com a ordem do começo da corrida)
     if (params.has("podio"))
@@ -1047,9 +1055,13 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
   });
   document.body.appendChild(gear);
   setInterval(() => {
-    const corner = document.querySelector(".racecorner");
-    const home = corner ?? document.body;
-    if (gear.parentElement !== home) home.appendChild(gear);
+    // (fora da corrida entra como o primeiro da fileira de botões do canto: solto por cima dela, um tampava o outro)
+    const corner = document.querySelector(".racecorner"), row = document.querySelector(".helpbtns");
+    const home = corner ?? row ?? document.body;
+    if (gear.parentElement !== home) {
+      if (home === row) row.prepend(gear);
+      else home.appendChild(gear);
+    }
     // (nas telas de carregamento não aparece)
     gear.hidden = !!document.querySelector(".loadscreen");
   }, 400);

@@ -4,7 +4,7 @@
 import { TEAMS } from "../sim/data";
 import { resolveLaps } from "../sim/officialLaps";
 import { drawLineup, drawReserves, poolOf, type Lineup } from "../sim/drivers";
-import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, migrateSpares, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState } from "../sim/championship";
+import { CHAMP_ENGINE_WEAR, aiDevelop, awardPoints, engineCheck, initContracts, investDev, ensureTrophies, migratePerCar, migrateSpares, moveCar, newChampionship, openMarket, renewDriver, repairEngine, signDriver, startNewSeason, swapEngine, upgradeCrew, type ChampState, type TrackPool } from "../sim/championship";
 import { DEV_AREAS } from "../sim/development";
 import { makeEngineers } from "../sim/entrants";
 import { Race, type RaceOptions } from "../sim/race";
@@ -77,6 +77,8 @@ export class Room {
   equalCars = false;
   champMode = false;
   champPct = 10;
+  /** pistas do campeonato: oficiais, mods (as reais) ou todas */
+  champPool: TrackPool = "oficiais";
   champName = "";
   private champ: ChampState | null = null;
   private weekend: WeekendInfo | null = null;
@@ -112,6 +114,17 @@ export class Room {
   onSave: ((s: ChampSave | null) => void) | null = null;
   /** barreiras do autódromo da pista (o servidor lê o .pecas.json; no solo quem põe é o autódromo 3D) */
   static wallsFor: ((trackName: string) => [number, number][] | null) | null = null;
+  /** solo: as barreiras que o autódromo 3D montou, por pista (setWalls) */
+  private static localWalls = new Map<string, [number, number][]>();
+  /**
+   * solo: o autódromo 3D ficou pronto (renderer) — a corrida desta sala bate nas barreiras dele. Antes iam só pra
+   * cópia da corrida da tela (que só recebe o estado da sala) e a corrida de verdade usava a distância padrão:
+   * o carro batido atravessava o alambrado
+   */
+  setWalls(trackName: string, pts: [number, number][]) {
+    Room.localWalls.set(trackName, pts);
+    if (this.race?.track.name === trackName) this.race.setWalls(pts);
+  }
 
   private saveChamp() {
     const ch = this.champ;
@@ -324,7 +337,9 @@ export class Room {
       case "options":
         if (!isHost || this.phase !== "lobby") return;
         if (msg.laps !== undefined && LAP_OPTIONS.includes(msg.laps)) this.laps = msg.laps;
-        if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex]) this.trackIndex = msg.trackIndex;
+        // (pista feita no editor só no solo: o servidor do online não tem ela)
+        if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex] && (this.solo || !CIRCUITS[msg.trackIndex].mod)) this.trackIndex = msg.trackIndex;
+        if (msg.champPool === "oficiais" || msg.champPool === "mods" || msg.champPool === "todas") this.champPool = msg.champPool;
         if (msg.equalCars !== undefined) this.equalCars = !!msg.equalCars;
         if (msg.champ !== undefined) this.champMode = !!msg.champ;
         if (msg.champName !== undefined) this.champName = clean(String(msg.champName), 40);
@@ -345,7 +360,7 @@ export class Room {
           this.setPhase("hq");
           return;
         }
-        this.champ = this.champMode ? newChampionship(this.champPct) : null;
+        this.champ = this.champMode ? newChampionship(this.champPct, Math.random, this.champPool) : null;
         if (this.champ) this.champ.name = this.champName || `Campeonato ${new Date().toLocaleDateString("pt-BR")}`;
         this.startWeekend();
         // já aparece em "Meus campeonatos" desde o começo (não precisa esperar a 1ª corrida)
@@ -736,7 +751,7 @@ export class Room {
       opts.grid = grid;
     }
     this.race = new Race(opts);
-    const walls = Room.wallsFor?.(this.race.track.name);
+    const walls = Room.wallsFor?.(this.race.track.name) ?? Room.localWalls.get(this.race.track.name);
     if (walls?.length) this.race.setWalls(walls);
     this.lastStart = opts;
     this.speed = 1;
@@ -807,6 +822,7 @@ export class Room {
       equalCars: this.equalCars,
       champMode: this.champMode,
       champPct: this.champPct,
+      champPool: this.champPool,
       champName: this.champName,
       resumed: this.resumed && this.champ
         ? { name: this.champ.name ?? "Campeonato", done: this.champ.results.length, total: this.champ.rounds.length, waiting: this.reserved.filter((r) => ![...this.players.values()].some((p) => p.teamId === r.teamId)).map((r) => ({ name: r.name, teamId: r.teamId })) }

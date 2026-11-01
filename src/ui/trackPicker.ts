@@ -1,21 +1,27 @@
 // Escolher pista com validação (estilo "validação de dados" do Excel): um campo
 // que abre a lista de pistas, filtra enquanto digita e só aceita uma pista que
-// existe (ou "sorteada"). Setas + Enter escolhem, Esc fecha.
-import { CIRCUITS } from "../sim/track";
+// existe (ou "sorteada"). Setas + Enter escolhem, Esc fecha. Filtro em cima: TODAS / OFICIAIS / MODS (a
+// sorteada também sorteia só entre as do filtro).
+import { CIRCUITS, trackGroup } from "../sim/track";
 import { drawTrackThumb, esc, trackTags, trackTagsHtml } from "./common";
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
-/** monta o seletor em `host`; `value` -1 = sorteada. Devolve como ler o valor atual. */
+/** monta o seletor em `host`; `value` -1 = sorteada. Devolve como ler a pista e o filtro (o grupo da sorteada). */
 export function mountTrackPicker(host: HTMLElement, value: number, onChange?: (v: number) => void) {
-  const all = [{ i: -1, name: "🎲 Sorteada na hora", key: "sorteada aleatoria" }].concat(
-    CIRCUITS.flatMap((c, i) => (c.standby ? [] : [{ i, name: c.name, key: norm(`${c.name} ${c.official ?? ""} ${trackTags(i).map((x) => x.t).join(" ")}`) }])).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
-  );
+  type Pool = "todas" | "oficiais" | "mods";
+  // (começa no grupo da pista escolhida; a sorteada, nas oficiais)
+  let pool: Pool = value >= 0 && CIRCUITS[value] && trackGroup(value) !== "oficial" ? "mods" : "oficiais";
+  const inPool = (i: number) => pool === "todas" || (trackGroup(i) === "oficial") === (pool === "oficiais");
+  const every = CIRCUITS.flatMap((c, i) => (c.standby ? [] : [{ i, name: c.name, key: norm(`${c.name} ${c.official ?? ""} ${trackTags(i).map((x) => x.t).join(" ")}`) }])).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  let all = [{ i: -1, name: "🎲 Sorteada na hora", key: "sorteada aleatoria" }];
+  const refill = () => (all = [{ i: -1, name: `🎲 Sorteada na hora${pool === "todas" ? "" : pool === "oficiais" ? " (oficiais)" : " (mods)"}`, key: "sorteada aleatoria" }].concat(every.filter((x) => inPool(x.i))));
+  refill();
   let cur = value;
   let open = false;
   let hi = 0; // item destacado na lista
   host.classList.add("tpick");
-  host.innerHTML = `<div class="tpick-box"><canvas class="tpick-thumb"></canvas><input class="txt tpick-in" spellcheck="false" autocomplete="off"><button class="tpick-arrow" tabindex="-1">▾</button></div>
+  host.innerHTML = `<div class="seg tpick-filter">${(["todas", "oficiais", "mods"] as const).map((f) => `<button data-f="${f}" class="${f === pool ? "on" : ""}">${f.toUpperCase()}</button>`).join("")}</div><div class="tpick-box"><canvas class="tpick-thumb"></canvas><input class="txt tpick-in" spellcheck="false" autocomplete="off"><button class="tpick-arrow" tabindex="-1">▾</button></div>
     <div class="tpick-msg" hidden></div><div class="tpick-list" hidden></div>`;
   const input = host.querySelector<HTMLInputElement>(".tpick-in")!;
   const list = host.querySelector<HTMLElement>(".tpick-list")!;
@@ -147,6 +153,17 @@ export function mountTrackPicker(host: HTMLElement, value: number, onChange?: (v
   });
   input.addEventListener("blur", () => closeList(true));
 
+  // filtro: troca a lista; a pista escolhida fica se for do grupo, senão volta pra sorteada
+  host.querySelector(".tpick-filter")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-f]");
+    if (!b) return;
+    pool = b.dataset.f as Pool;
+    host.querySelectorAll<HTMLElement>(".tpick-filter [data-f]").forEach((x) => x.classList.toggle("on", x === b));
+    refill();
+    setValue(cur >= 0 && !inPool(cur) ? -1 : cur);
+    if (open) renderList();
+  });
+
   setValue(cur);
-  return { get: () => cur };
+  return { get: () => cur, pool: () => pool };
 }

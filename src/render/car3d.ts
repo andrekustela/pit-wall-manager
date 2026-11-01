@@ -6,7 +6,8 @@
 import type { Team } from "../sim/types";
 import { liveryKey } from "../sim/livery";
 import { gfx, type CarStyle } from "./gfx";
-import { patternShapes, type CarImage } from "./carArt";
+import { drawStickers, patternShapes, type CarImage } from "./carArt";
+import { HELMET_RULES } from "./uniformStyles";
 
 /** comprimento do carro na pista (m): o mesmo porte do 2D, pros carros não se sobreporem nas disputas */
 const SHOW_LEN = 4.8;
@@ -27,7 +28,11 @@ export type { CarStyle };
 type Tag = "corpo" | "asa_d" | "asa_t" | "roda_fe" | "roda_fd" | "roda_te" | "roda_td";
 interface Info { layers: Tag[]; pxPerM: number; lenM: number; widM: number; carLen: number; carWid: number }
 interface Layer { base: ImageData; mask: ImageData; box: [number, number, number, number] }
-let assets: { info: Info; W: number; H: number; layers: Record<Tag, Layer>; wheelOrder: Tag[]; helm: [number, number]; shadow: Record<Tag, HTMLCanvasElement> } | null = null;
+let assets: {
+  info: Info; W: number; H: number; layers: Record<Tag, Layer>; wheelOrder: Tag[]; helm: [number, number]; shadow: Record<Tag, HTMLCanvasElement>;
+  /** meio de lado da carroceria pintável (px) e a caixa do capacete (px, x0 y0 x1 y1) */
+  bodyCy: number; helmBox: [number, number, number, number] | null;
+} | null = null;
 /** folga em volta da sombra de cada peça (px), pro borrão não cortar */
 const SH_PAD = 16;
 
@@ -116,10 +121,31 @@ export function car3dReady(): boolean {
             sy += Math.floor(p / W);
             n++;
           }
+        // o meio de verdade da carroceria pintável (vermelho no molde): o meio da imagem não é o meio do carro e
+        // as faixas saíam de lado; e a caixa do capacete (azul), pro desenho dele
+        let by0 = H, by1 = -1, hx0 = W, hx1 = -1, hy0 = H, hy1 = -1;
+        for (let i = 0; i < m.length; i += 4) {
+          const p = i / 4, x = p % W, y = Math.floor(p / W);
+          if (m[i] > 128) {
+            if (y < by0) by0 = y;
+            if (y > by1) by1 = y;
+          }
+          if (m[i + 2] > 128) {
+            hx0 = Math.min(hx0, x);
+            hx1 = Math.max(hx1, x);
+            hy0 = Math.min(hy0, y);
+            hy1 = Math.max(hy1, y);
+          }
+        }
         // sombra de CADA peça (silhueta borrada, igual pra todas as equipes): peça que sai leva a sombra junto
         const shadow = {} as Record<Tag, HTMLCanvasElement>;
         for (const t of info.layers) shadow[t] = shadowOf(layers[t]);
-        assets = { info, W, H, layers, wheelOrder, helm: n ? [sx / n, sy / n] : [W / 2, H / 2], shadow };
+        assets = {
+          info, W, H, layers, wheelOrder, helm: n ? [sx / n, sy / n] : [W / 2, H / 2], shadow,
+          // (o capacete fica no eixo do carro: referência melhor que a borda da carroceria, que não é simétrica)
+          bodyCy: n ? sy / n : by1 >= 0 ? (by0 + by1) / 2 : H / 2,
+          helmBox: hx1 >= 0 ? [hx0, hy0, hx1 + 1, hy1 + 1] : null,
+        };
       })
       .catch(() => {
         /* sem os arquivos: fica no 2D */
@@ -142,9 +168,10 @@ function tintMaps(team: Team, info: Info, W: number, H: number, helm: [number, n
   const g = mk();
   g.fillStyle = lv?.base ?? team.color;
   g.fillRect(0, 0, W, H);
-  // as formas foram desenhadas pro carro 2D (bico em +2,4 m): encaixa no comprimento da carroceria 3D
+  // as formas foram desenhadas pro carro 2D (bico em +2,4 m): encaixa no comprimento da carroceria 3D; de lado,
+  // no meio de verdade da carroceria (o da imagem fica fora: as faixas saíam tortas)
   const px = info.pxPerM;
-  g.setTransform(px * 1.02, 0, 0, px, W / 2 + 0.25 * px, H / 2);
+  g.setTransform(px * 1.02, 0, 0, px, W / 2 + 0.25 * px, assets?.bodyCy ?? H / 2);
   if (!lv || lv.pattern === "classica") {
     g.beginPath();
     g.moveTo(-2.3, -0.07);
@@ -157,9 +184,30 @@ function tintMaps(team: Team, info: Info, W: number, H: number, helm: [number, n
     g.fillStyle = lv?.patternColor ?? team.accent;
     g.fill();
   } else patternShapes(g, lv);
+  // adesivos (Premium) por cima
+  drawStickers(g, lv);
   const h = mk();
   h.fillStyle = lv?.helmet ?? team.accent;
   h.fillRect(0, 0, W, H);
+  const hb = assets?.helmBox;
+  const rule = HELMET_RULES.at(lv?.helmetStyle ?? 1);
+  if (lv && hb && rule) {
+    // o mesmo desenho do capacete do carro 3D (uniformStyles.ts), visto de cima: lado = y da imagem, frente =
+    // x, e a altura sai da cúpula (no meio é o topo)
+    const img = h.getImageData(0, 0, W, H), d = img.data, dc = rgb(lv.helmetDetail).map((v) => v * 255);
+    const [x0, y0, x1, y1] = hb, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hx = (x1 - x0) / 2, hy = (y1 - y0) / 2;
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        const qx = (y - cy) / hy, qz = (x - cx) / hx;
+        const qy = 2 * Math.sqrt(Math.max(0, 1 - qx * qx - qz * qz)) - 1;
+        if (!rule.js({ x: qx, y: qy, z: qz })) continue;
+        const i = (y * W + x) * 4;
+        d[i] = dc[0];
+        d[i + 1] = dc[1];
+        d[i + 2] = dc[2];
+      }
+    return { body: g.getImageData(0, 0, W, H), helmet: img };
+  }
   h.fillStyle = lv?.helmetDetail ?? team.color;
   h.fillRect(helm[0] - 0.16 * px, helm[1] - 0.028 * px, 0.32 * px, 0.056 * px); // faixa de trás pra frente
   return { body: g.getImageData(0, 0, W, H), helmet: h.getImageData(0, 0, W, H) };

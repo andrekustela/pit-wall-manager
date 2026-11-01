@@ -53,6 +53,8 @@ export interface LobbyState {
   champMode: boolean;
   /** porcentagem das pistas que entram no campeonato (sorteadas) */
   champPct: number;
+  /** de onde saem as pistas do campeonato: oficiais, mods (as reais) ou todas */
+  champPool?: import("../sim/championship").TrackPool;
   /** nome do campeonato (o jogador escolhe) */
   champName: string;
   /** campeonato online retomado (sala nova): quem ainda falta voltar */
@@ -86,7 +88,7 @@ export type ClientMsg =
   | { t: "chat"; text: string }
   | { t: "profile"; name: string; teamName: string }
   | { t: "team"; teamId: string }
-  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; quick?: boolean; champName?: string; realDrivers?: boolean; pickMode?: PickMode }
+  | { t: "options"; laps?: number; trackIndex?: number; equalCars?: boolean; champ?: boolean; champPct?: number; champPool?: import("../sim/championship").TrackPool; quick?: boolean; champName?: string; realDrivers?: boolean; pickMode?: PickMode }
   | { t: "startWeekend" }
   | { t: "practiceLap"; carId: string; tuning: Tuning }
   | { t: "finalTuning"; carId: string; tuning: Tuning }

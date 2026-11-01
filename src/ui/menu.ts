@@ -20,6 +20,8 @@ function displayHtml() {
   const row = (k: keyof Display, label: string, min: number, max: number, unit: string, hint: string) =>
     `<label class="sndrow"><span>${label}</span><input type="range" min="${min}" max="${max}" data-tela="${k}" value="${d[k]}"><b data-telav="${k}">${d[k]}${unit}</b></label><p class="hint gfxhint" style="margin:0 0 8px">${hint}</p>`;
   return `<div class="sndpanel">
+    <div class="fld"><span>Idioma · Language · Idioma</span><div class="seg" data-lang>${LANGS.map(([k, l]) => `<button data-lang="${k}" class="${lang() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+    <p class="hint gfxhint" style="margin:0 0 10px">Menus, botões e telas. Algumas mensagens da corrida e do rádio ainda ficam em português.</p>
     ${row("brilho", "Brilho", 50, 150, "%", "Mais claro ou mais escuro (bom pra tela escura ou ambiente claro).")}
     ${row("contraste", "Contraste", 50, 150, "%", "Diferença entre o claro e o escuro.")}
     ${row("saturacao", "Saturação", 0, 200, "%", "Cores mais vivas ou mais apagadas (0 = preto e branco).")}
@@ -29,6 +31,8 @@ function displayHtml() {
   </div>`;
 }
 import { esc, storeGet, storeSet, toast } from "./common";
+import { LANGS, lang, setLang, type Lang } from "./i18n";
+import { showSupport } from "./support";
 import type { ChampSave } from "../net/room";
 import { CIRCUITS, randomTrack } from "../sim/track";
 import { account } from "../net/account";
@@ -43,7 +47,7 @@ import { getLivery } from "./liveryStore";
 import { emblemSvg } from "../render/emblem";
 import { LAP_OPTIONS } from "../net/protocol";
 import { isPct, lapChoiceLabel, officialLaps, resolveLaps } from "../sim/officialLaps";
-import { champRounds } from "../sim/championship";
+import { champRounds, type TrackPool } from "../sim/championship";
 import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
@@ -89,6 +93,8 @@ export interface SoloSetup {
   realDrivers: boolean;
   equalCars: boolean;
   champPct: number;
+  /** de onde saem as pistas do campeonato */
+  champPool: TrackPool;
   champName: string;
   /** pilotos sorteados ou escolhidos */
   pickMode: "draw" | "choose";
@@ -101,10 +107,11 @@ interface SoloPrefs {
   realDrivers: boolean;
   equalCars: boolean;
   champPct: number;
+  champPool: TrackPool;
   pickMode: "draw" | "choose";
 }
 function soloPrefs(): SoloPrefs {
-  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30, pickMode: "draw" };
+  const d: SoloPrefs = { track: -1, laps: LAP_OPTIONS[0], realDrivers: true, equalCars: false, champPct: 30, champPool: "oficiais", pickMode: "draw" };
   const x = loadJson<Partial<SoloPrefs>>("pwm.soloCfg") ?? {};
   return {
     track: typeof x.track === "number" && (x.track === -1 || (CIRCUITS[x.track] && !CIRCUITS[x.track].standby)) ? x.track : d.track,
@@ -113,8 +120,12 @@ function soloPrefs(): SoloPrefs {
     pickMode: x.pickMode === "choose" ? "choose" : "draw",
     equalCars: x.equalCars ?? d.equalCars,
     champPct: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(x.champPct as number) ? (x.champPct as number) : d.champPct,
+    champPool: x.champPool === "mods" || x.champPool === "todas" ? x.champPool : "oficiais",
   };
 }
+
+/** ordem dos botões "Pistas do campeonato" */
+const POOLS: TrackPool[] = ["oficiais", "mods", "todas"];
 
 type Panel = "solo" | "online" | "carreira" | "solo-tipo" | "cfg-corrida" | "cfg-fds" | "cfg-camp" | null;
 /** pra onde o "voltar" leva em cada vista */
@@ -228,11 +239,12 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       <button class="m2gear" id="m-edit" title="Editar perfil e pintura">⚙</button>
     </div>
     <nav class="m2nav">
-      <button class="m2btn mode" data-panel="solo"><b>MODO SOLO</b><span>Você contra 9 equipes da IA${soloSaves.length ? ` · ${soloSaves.length} campeonato${soloSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
-      <button class="m2btn mode" data-panel="online"><b>MODO ONLINE</b><span>Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
+      <button class="m2btn mode small" data-panel="solo"><b>MODO SOLO</b><span>Você contra 9 equipes da IA${soloSaves.length ? ` · ${soloSaves.length} campeonato${soloSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
+      <button class="m2btn mode small" data-panel="online"><b>MODO ONLINE</b><span>Jogue com os amigos${onlineSaves.length ? ` · ${onlineSaves.length} campeonato${onlineSaves.length > 1 ? "s" : ""}` : ""}</span><i>▶</i></button>
       <button class="m2btn mode small" data-editor><b>EDITOR</b><span>Nomes de pistas e pilotos, vozes do rádio</span><i>▶</i></button>
-      <button class="m2btn mode" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
+      <button class="m2btn mode small" data-panel="carreira"><b>CARREIRA E RANKING</b><span>${account.profile ? "Suas estatísticas e o ranking entre amigos" : "Precisa de conta"}</span><i>▶</i></button>
       <button class="m2btn mode small" data-settings><b>CONFIGURAÇÕES</b><span>Gráficos, desempenho e sons</span><i>▶</i></button>
+      <button class="m2btn mode small" data-support><b>❤ APOIAR O JOGO</b><span>Doação, pacote Plus, créditos e licenças</span><i>▶</i></button>
     </nav>`;
   const head = (t: string) => `<div class="m2vhead"><button class="m2back" data-back>◀ VOLTAR</button><b>${t}</b></div>`;
   const panelHtml = (p: Panel) => {
@@ -262,8 +274,9 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       return `${head(p === "cfg-corrida" ? "CORRIDA ÚNICA" : p === "cfg-fds" ? "FIM DE SEMANA" : "CAMPEONATO")}
         ${camp
           ? `<label class="fld"><span>Nome do campeonato</span><input class="txt" data-opt="champName" maxlength="40" placeholder="Ex.: Temporada ${new Date().getFullYear()}"></label>
-             <div class="fld"><span>Quantas pistas</span><div class="seg pctseg" data-seg="champPct">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((x) => `<button data-v="${x}" class="${x === sp.champPct ? "on" : ""}" title="${champRounds(x)} etapas">${x}%</button>`).join("")}</div>
-             <span class="hint" style="margin:4px 0 0" data-rounds>${champRounds(sp.champPct)} etapas, em pistas sorteadas</span></div>`
+             <div class="fld"><span>Pistas do campeonato</span><div class="seg" data-seg="champPool">${([["0", "oficiais", "OFICIAIS"], ["1", "mods", "MODS (REAIS)"], ["2", "todas", "TODAS"]] as const).map(([v, k, l]) => `<button data-v="${v}" class="${k === sp.champPool ? "on" : ""}">${l}</button>`).join("")}</div></div>
+             <div class="fld"><span>Quantas pistas</span><div class="seg pctseg" data-seg="champPct">${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((x) => `<button data-v="${x}" class="${x === sp.champPct ? "on" : ""}" title="${champRounds(x, sp.champPool)} etapas">${x}%</button>`).join("")}</div>
+             <span class="hint" style="margin:4px 0 0" data-rounds>${champRounds(sp.champPct, sp.champPool)} etapas, em pistas sorteadas</span></div>`
           : `<div class="fld"><span>Pista</span><div data-tpick></div></div>`}
         <div class="fld"><span>Voltas da corrida</span><div class="seg lapseg" data-seg="laps">${LAP_OPTIONS.map((n) => `<button data-v="${n}" class="${n === sp.laps ? "on" : ""}" title="${isPct(n) ? `${-n}% das voltas da corrida oficial da pista (arredonda pra cima)` : `${n} voltas`}">${lapChoiceLabel(n)}</button>`).join("")}</div>
           <span class="hint" style="margin:4px 0 0" data-lapshint></span></div>
@@ -284,6 +297,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
     el.querySelector("[data-back]")?.addEventListener("click", () => show(openPanel ? PARENT[openPanel] ?? null : null));
     el.querySelector("#m-edit")?.addEventListener("click", () => showProfileEditor(redraw, onLogout));
     el.querySelector("[data-settings]")?.addEventListener("click", () => showSettings(redraw));
+    el.querySelector("[data-support]")?.addEventListener("click", () => showSupport(redraw));
     // voltando do teste de FPS: abre direto as Configurações
     if (new URLSearchParams(location.search).get("config") === "graficos") {
       history.replaceState(null, "", location.pathname);
@@ -297,7 +311,7 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         if (!bt) return;
         seg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === bt));
         const r = el.querySelector<HTMLElement>("[data-rounds]");
-        if (r && seg.dataset.seg === "champPct") r.textContent = `${champRounds(Number(bt.dataset.v))} etapas, em pistas sorteadas`;
+        if (r && (seg.dataset.seg === "champPct" || seg.dataset.seg === "champPool")) r.textContent = `${champRounds(Number(el.querySelector<HTMLElement>("[data-seg=champPct] .on")?.dataset.v ?? 30), POOLS[Number(el.querySelector<HTMLElement>("[data-seg=champPool] .on")?.dataset.v ?? 0)])} etapas, em pistas sorteadas`;
         if (seg.dataset.seg === "laps") lapsHint();
       }),
     );
@@ -313,8 +327,8 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
       h.textContent = !isPct(v)
         ? ""
         : tpHost && trackNow >= 0
-          ? `${officialLaps(trackNow)} voltas oficiais → ${resolveLaps(v, trackNow)} voltas`
-          : `${-v}% das voltas oficiais de cada pista (arredonda pra cima)`;
+          ? `${officialLaps(trackNow)} voltas numa corrida completa → ${resolveLaps(v, trackNow)} voltas`
+          : `${-v}% das voltas de uma corrida completa em cada pista (arredonda pra cima)`;
     }
     lapsHint();
     el.querySelector("#m-start")?.addEventListener("click", (e) => {
@@ -328,17 +342,19 @@ export function showMenu(root: HTMLElement, onChoose: (c: MenuChoice) => void, o
         realDrivers: chk("realDrivers"),
         equalCars: chk("equalCars"),
         champPct: segV("champPct", sp.champPct),
+        champPool: POOLS[segV("champPool", POOLS.indexOf(sp.champPool))] ?? "oficiais",
         pickMode: segV("pick", sp.pickMode === "choose" ? 1 : 0) === 1 ? "choose" : "draw",
       };
       storeSet("pwm.soloCfg", JSON.stringify(prefs));
       const setup: SoloSetup = {
         kind,
         teamId: storeGet("pwm.myCar") || "fal",
-        trackIndex: prefs.track >= 0 ? prefs.track : randomTrack(),
+        trackIndex: prefs.track >= 0 ? prefs.track : randomTrack(Math.random, -1, tp?.pool() ?? "oficiais"),
         laps: prefs.laps,
         realDrivers: prefs.realDrivers,
         equalCars: prefs.equalCars,
         champPct: prefs.champPct,
+        champPool: prefs.champPool,
         pickMode: prefs.pickMode,
         champName: el.querySelector<HTMLInputElement>("[data-opt=champName]")?.value.trim() ?? "",
       };
@@ -602,6 +618,8 @@ export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "s
     if (o) o.textContent = `${r.value}${k === "tom" ? "" : "%"}`;
   });
   tela.addEventListener("click", (e) => {
+    const lb = (e.target as HTMLElement).closest<HTMLElement>("button[data-lang]");
+    if (lb) return setLang(lb.dataset.lang as Lang);
     if (!(e.target as HTMLElement).closest("[data-telareset]")) return;
     setDisplay({ ...DISPLAY_DEF });
     tela.innerHTML = displayHtml();
@@ -696,39 +714,13 @@ function showProfileEditor(onDone: () => void, onLogout?: () => void) {
         <div class="row-btns" style="margin:0"><button class="btn" data-x>CANCELAR</button><button class="btn primary" data-save>SALVAR</button></div>
       </div></div>`;
   document.body.appendChild(m);
-  // atalhos: esperando a tecla nova de uma ação
-  const kp = m.querySelector<HTMLElement>('[data-pane="atalhos"]')!;
-  let waitKey: Action | null = null;
-  kp.addEventListener("click", (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("[data-keyreset]")) {
-      resetKeys();
-      waitKey = null;
-      kp.innerHTML = keysHtml();
-      return;
-    }
-    const b = t.closest<HTMLElement>("[data-key]");
-    if (!b) return;
-    waitKey = b.dataset.key as Action;
-    kp.innerHTML = keysHtml(waitKey);
-  });
+  // (aqui tinha um pedaço da aba ATALHOS das Configurações: ela não existe nesta janela, dava erro e o resto
+  // não era ligado — o botão da pintura e do emblema não abria nada)
   const close = () => {
     m.remove();
     window.removeEventListener("keydown", onKey, true);
   };
   const onKey = (e: KeyboardEvent) => {
-    if (waitKey) {
-      // (a tecla vai pro atalho e não faz mais nada: nem fecha a janela, nem muda a corrida)
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key !== "Escape" && !["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"].includes(e.code)) {
-        const other = setKey(waitKey, e.code);
-        if (other) toast(`A tecla ${keyName(waitKey)} era de "${ACTIONS.find((x) => x.id === other)!.label}": agora essa ficou com ${keyName(other)}`);
-      }
-      waitKey = null;
-      kp.innerHTML = keysHtml();
-      return;
-    }
     if (e.key === "Escape") {
       e.stopPropagation();
       close();

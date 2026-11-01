@@ -26,27 +26,6 @@ const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -Math.m
 const mat = (color: string, _rough = 0.9, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
 
-/** faixa no chão ao longo de uma linha (rua, caminho, pista de kart), com largura w e altura y */
-function ribbon(pts: [number, number][], w: number, y: number): THREE.BufferGeometry | null {
-  if (pts.length < 2) return null;
-  const pos: number[] = [], idx: number[] = [];
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
-    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
-    const nx = (-dy / l) * (w / 2), ny = (dx / l) * (w / 2);
-    pos.push(pts[i][0] + nx, y, pts[i][1] + ny, pts[i][0] - nx, y, pts[i][1] - ny);
-    if (i) {
-      const k = i * 2;
-      idx.push(k - 2, k - 1, k, k - 1, k + 1, k);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
 const merge = (gs: (THREE.BufferGeometry | null)[]) => {
   const ok = gs.filter((g): g is THREE.BufferGeometry => !!g).map((g) => (g.index ? g.toNonIndexed() : g));
   for (const g of ok) {
@@ -671,14 +650,29 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   }
   for (const [x, z, c] of tyres) P.push({ k: "pneu", x, z, r: 0, c: c ? "#f2f2f2" : "#1c1c1c" });
   boards.forEach((list, bi) => list.forEach((m) => fromM("placa", m, { v: bi })));
-  // box: faixa de asfalto do pit lane
-  const pitPts: [number, number][] = [];
+  // box: o pit lane, do mesmo asfalto da pista, seguindo o caminho dos carros (Track.pitLateralAt: sai da pista
+  // na entrada e volta na saída), com linha branca nas duas bordas. (Era uma faixa lisa virada pra baixo: de
+  // cima não aparecia e o carro andava na grama)
   const ps = track.pitEntryS, pe = track.pitExitS + track.L;
-  for (let s = ps; s <= pe; s += 3) {
-    const p = track.pose(s % track.L, track.pitLateralAt(s % track.L));
-    pitPts.push([p.x, p.y]);
-  }
-  add(ribbon(pitPts, pitW, 0.09), mat("#45474d", 0.85));
+  /** faixa do pit lane entre `o0` e `o1` metros do meio dele */
+  const pitBand = (o0: number, o1: number, y: number, uvScale = 0.08) => {
+    const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+    let i = 0;
+    for (let s = ps; s <= pe + 0.01; s += 2, i++) {
+      const c = track.pitLateralAt(s % track.L), a = track.pose(s % track.L, c + o0), b = track.pose(s % track.L, c + o1);
+      pos.push(a.x, y, a.y, b.x, y, b.y);
+      uv.push(s * uvScale, 0, s * uvScale, 1);
+      if (i) idx.push(i * 2 - 2, i * 2 - 1, i * 2, i * 2 - 1, i * 2 + 1, i * 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  };
+  add(pitBand(-pitW / 2, pitW / 2, 0.09), mat("#ffffff", 1, { map: asphaltTex, side: THREE.DoubleSide }));
+  add(merge([pitBand(-pitW / 2 + 0.15, -pitW / 2 + 0.45, 0.11), pitBand(pitW / 2 - 0.45, pitW / 2 - 0.15, 0.11)]), mat("#f2f2f2", 0.6, { side: THREE.DoubleSide, ...over(2) }));
   // largada: faixa quadriculada
   const chk: THREE.BufferGeometry[] = [];
   for (let q = 0; q < 12; q++) chk.push(band(-W2 + (q * TRACK_WIDTH) / 12, -W2 + ((q + 1) * TRACK_WIDTH) / 12, 0.14, q % 2 ? 0 : 1.5, q % 2 ? 1.5 : 3, 1.5));
@@ -758,7 +752,16 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   group.add(paths.group);
   // relevo: o salvo, o que vem no jogo, ou plano (plano não liga nada: não pesa)
   const saved = loadTerrain(slugOf(track.name));
-  const terrain = (saved !== undefined ? saved : shippedTerrain) ?? Terrain.around(x0, z0, x1, z1, MAP_MARGIN);
+  // (pistas reais: o relevo de verdade, do SRTM — scripts/osm-relief.ts; só o visual, a corrida não muda)
+  let realRelief: Terrain | null = null;
+  if (saved === undefined && !shippedTerrain && track.def.pack === "real" && !track.def.edited)
+    try {
+      const r = await fetch(`/autodromos/${slugOf(track.name)}.relevo.json`);
+      if (r.ok) realRelief = Terrain.fromJson(await r.json());
+    } catch {
+      /* sem o arquivo: plano */
+    }
+  const terrain = (saved !== undefined ? saved : (shippedTerrain ?? realRelief)) ?? Terrain.around(x0, z0, x1, z1, MAP_MARGIN);
   const relief = !!opts.terrain || !terrain.flat;
   if (relief) {
     // chão com um ponto em cada ponto da grade de alturas (sobe e desce junto, sem sobrar pedaço reto)

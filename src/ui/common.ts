@@ -232,6 +232,8 @@ export function trackTags(trackIndex: number): { t: string; c: string; tip: stri
   const d = CIRCUITS[trackIndex];
   if (!d) return [];
   const tags: { t: string; c: string; tip: string }[] = [];
+  if (d.mod) tags.push({ t: "MOD", c: "mod", tip: "Pista feita ou importada no Editor (só no solo)" });
+  else if (d.pack === "real") tags.push({ t: "MOD REAL", c: "mod", tip: "Pista real (mod que vem com o jogo): vale no campeonato e no online" });
   if (d.street) tags.push({ t: "RUA", c: "rua", tip: "Circuito de rua: muro colado na pista" });
   if (d.night) tags.push({ t: "NOTURNA", c: "noite", tip: "Corrida de noite, com refletores" });
   if (d.rainChance >= 0.4) tags.push({ t: "CHUVOSA", c: "chuva", tip: `Chance de chuva de ${Math.round(d.rainChance * 100)}%` });
