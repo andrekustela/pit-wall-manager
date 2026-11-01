@@ -1,4 +1,5 @@
 import { CREW_DEFAULT, crewErrorChance, normCrew, refuelMult, repairMult, type Crew } from "./crew";
+import { outerCorner, slideStep, wallImpulse, type SlideBody } from "./slidePhysics";
 import { TEAMS } from "./data";
 import { buildEntrants, carTeam, type Engineer } from "./entrants";
 import { Rng } from "./rng";
@@ -135,7 +136,7 @@ export function fuelPerLap(laps: number): number {
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
   "boxRequest", "boxFuel", "pit", "pitTimer", "pitTotal", "pitClean", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
-  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "restYaw", "recover", "retireAtBox", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
+  "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "impact", "restYaw", "recover", "retireAtBox", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
 export interface SafetyCar {
@@ -247,12 +248,43 @@ export class Race {
         else wl[k] = Math.min(wl[k], w);
       }
     }
+    // sem barreira nenhuma por perto (onde outra parte da pista passa perto e o alambrado não cabe): o limite fica
+    // no meio entre as duas partes, pela mesma regra do alambrado do autódromo (track3d), e não a 22 m
+    const otherNear = (x: number, y: number, s0: number) => {
+      let best = Infinity;
+      const ci = Math.floor(x / cell), cj = Math.floor(y / cell);
+      for (let i = ci - 2; i <= ci + 2; i++)
+        for (let j = cj - 2; j <= cj + 2; j++)
+          for (const s of grid.get(key(i, j)) ?? []) {
+            const ds = Math.abs(s - s0), arc = Math.min(ds, L - ds);
+            if (arc < 60) continue;
+            const p = t.pose(s, 0);
+            best = Math.min(best, Math.hypot(p.x - x, p.y - y));
+          }
+      return best;
+    };
+    for (const [arr, side] of [[wl, -1], [wr, 1]] as const)
+      for (let s = 0; s < L; s++) {
+        if (arr[s] < def) continue;
+        let lat = def + 1;
+        let p = t.pose(s, side * lat);
+        while (lat > edge + 2.5 && otherNear(p.x, p.y, s) < lat - 1.5) {
+          lat -= 1;
+          p = t.pose(s, side * lat);
+        }
+        arr[s] = Math.min(def, Math.max(edge + 0.8, lat - 1));
+      }
     this.wallL = wl;
     this.wallR = wr;
     if (typeof window !== "undefined") {
       const st = (w: Float32Array) => ({ min: Math.min(...w).toFixed(1), perto: w.filter((v) => v < def - 0.5).length });
       (window as unknown as { __muros: unknown }).__muros = { padrao: def, esq: st(wl), dir: st(wr), pontos: pts.length };
     }
+  }
+  /** onde fica a barreira de um lado da pista em s (m do meio; um carro reto encosta 1 m antes) */
+  barrierAt(s: number, side: number): number {
+    const t = this.track, wk = Math.floor(t.wrap(s)) % t.L;
+    return ((side > 0 ? this.wallR?.[wk] : this.wallL?.[wk]) ?? TRACK_WIDTH / 2 + (t.def.street ? STREET_RUNOFF : RUNOFF)) + 1;
   }
   private remoteGaps: Map<string, { seconds: number; laps: number }> | null = null;
   private lastLapAnnounced = false;
@@ -786,7 +818,8 @@ export class Race {
       psi: out * (mode === "off" ? r(0.03, 0.1) : mode === "crash" ? r(0.12, 0.3) : r(0.01, 0.06)),
       yaw: 0,
       // a traseira escapa pro lado de fora: o bico vira pra dentro
-      yawRate: mode === "off" ? 0 : -out * (mode === "crash" ? r(4, 7) : r(3, 5.5)),
+      // (giro inicial; daí pra frente quem manda é o atrito: src/sim/slidePhysics.ts)
+      yawRate: mode === "off" ? 0 : -out * (mode === "crash" ? r(3.5, 6) : r(2.5, 4.5)),
       stop: 0,
     };
     c.spin = mode === "off" ? 0 : 1;
@@ -797,56 +830,73 @@ export class Race {
     c.wear = Math.min(1.2, c.wear + (mode === "off" ? 0.03 : 0.07));
   }
 
-  /** um passo do carro solto */
+  /**
+   * um passo do carro solto: corpo rígido com as rodas travadas (slidePhysics), em 8 pedacinhos. O atrito médio é o
+   * de sempre (mesma distância até parar: o equilíbrio de abandonos não muda), mas o giro nasce do atrito. Na
+   * barreira quem encosta é o canto do carro (virado ele ocupa mais de lado: antes o carro de lado entrava 1,4 m no
+   * pneu) e o impulso no canto faz ele quicar e girar; batida forte destrói o carro, que ainda desliza até parar
+   */
   private stepSlide(c: CarState, dt: number) {
     if (c.slide!.mode === "rejoin") return this.stepRejoin(c, dt);
     const t = this.track, sl = c.slide!;
     const street = !!t.def.street, edge = TRACK_WIDTH / 2;
-    const wk = Math.floor(t.wrap(c.s)) % t.L;
-    const wall = (c.lateral > 0 ? this.wallR?.[wk] : this.wallL?.[wk]) ?? edge + (street ? STREET_RUNOFF : RUNOFF);
     const team = c.isHuman ? c.team.id : undefined;
-    const off = Math.abs(c.lateral) > edge + 0.5;
-    if (c.v > 0.3) {
-      // atrito: freando reto segura muito; de lado no asfalto escorrega; grama escorrega; brita segura
-      let dec = sl.mode === "off" ? (off ? (street ? 14 : 18) : 28) : off ? 13 : 9;
-      if (sl.mode === "crash") dec *= 0.55;
-      dec *= 1 - this.wet * 0.4;
-      c.v = Math.max(0, c.v - dec * dt);
+    const body: SlideBody = { v: c.v, psi: sl.psi, yaw: sl.yaw, w: sl.yawRate };
+    const N = 8, h = dt / N;
+    for (let i = 0; i < N && (body.v > 0.05 || Math.abs(body.w) > 0.05); i++) {
+      const off = Math.abs(c.lateral) > edge + 0.5;
+      // atrito (m/s²): freando reto segura muito; de lado no asfalto escorrega; fora da pista segura mais; batido
+      // (sem uma roda, arrastando) para logo
+      let acc = sl.wreck ? (off ? 18 : 14) : sl.mode === "off" ? (off ? (street ? 14 : 18) : 28) : off ? 13 : 9;
+      acc *= 1 - this.wet * 0.4;
+      slideStep(body, acc, h);
+      // anda; a pista curva por baixo e o carro segue o rumo dele (na pista, o rumo e o bico giram ao contrário)
       const k = t.curvature[Math.floor(t.wrap(c.s)) % t.L] ?? 0;
-      const ds = Math.max(0, c.v * Math.cos(sl.psi) * dt);
-      c.s += ds;
-      c.lateral += c.v * Math.sin(sl.psi) * dt;
-      // a pista curva por baixo e o carro segue reto
-      sl.psi = Math.max(-1.3, Math.min(1.3, sl.psi - k * ds));
-      sl.yawRate *= Math.exp(-(off ? 2.4 : 1.2) * dt);
-      sl.yaw += sl.yawRate * dt - k * ds;
-      // passando reto: o carro aponta pra onde vai (o piloto tenta virar, sem aderência)
-      if (sl.mode === "off") sl.yaw += (sl.psi * 0.8 - sl.yaw) * Math.min(1, dt * 3);
-      if (Math.abs(c.lateral) >= wall) {
-        // muro
-        c.lateral = Math.sign(c.lateral) * wall;
-        const hit = c.v * Math.max(0.35, Math.abs(Math.sin(sl.psi)));
-        this.stats.touches++;
-        if (sl.mode === "crash" || hit > 14) {
-          c.v = 0;
-          this.crashOut(c, street ? "Bateu no muro" : "Acidente");
-          return;
-        }
-        // raspou: perde a asa e segue de lado no muro
+      const ds = body.v * Math.cos(body.psi) * h;
+      // (pra trás só um pouco, depois de quicar; nunca pra antes da linha de chegada)
+      c.s = Math.max(0, c.s + ds);
+      c.lateral += body.v * Math.sin(body.psi) * h;
+      body.psi -= k * ds;
+      body.yaw -= k * ds;
+      // barreira: a tabela guarda onde o centro de um carro reto encosta (a barreira menos 1 m)
+      const side = c.lateral >= 0 ? 1 : -1, wk = Math.floor(t.wrap(c.s)) % t.L;
+      const barrier = ((side > 0 ? this.wallR?.[wk] : this.wallL?.[wk]) ?? edge + (street ? STREET_RUNOFF : RUNOFF)) + 1;
+      const { reach, rx } = outerCorner(body.yaw, VIS_L / 2, VIS_W / 2, side);
+      if (Math.abs(c.lateral) + reach < barrier) continue;
+      c.lateral = side * (barrier - reach);
+      // velocidade contra a barreira e a medida de antes pra decidir se destrói (de raspão também conta um pouco)
+      const hit = body.v * Math.max(0.35, Math.abs(Math.sin(body.psi)));
+      const first = !sl.wreck && !sl.scraped;
+      const crash = !sl.wreck && (sl.mode === "crash" || hit > 14);
+      const pvn = wallImpulse(body, side, rx, reach, crash || sl.wreck ? 0.3 : 0.15, 0.45);
+      if (pvn <= 0.05) continue;
+      if (first) this.stats.touches++;
+      if (crash) {
+        sl.wreck = street ? "Bateu no muro" : "Acidente";
+        c.impact = { n: (c.impact?.n ?? 0) + 1, v: hit, crash: true, side };
+      } else if (!sl.wreck && !sl.scraped) {
+        // raspou: perde a asa e segue de lado na barreira
+        sl.scraped = true;
         const dmg = this.rng.range(0.4, 1.4);
         c.dmg = { ...c.dmg, fw: c.dmg.fw + dmg };
-        this.hitSide(c, "fw", c.lateral > 0 ? "l" : "r");
+        this.hitSide(c, "fw", side > 0 ? "l" : "r");
         c.damage += dmg;
-        c.v *= 0.55;
-        sl.psi = 0;
+        body.v *= 0.7;
+        c.impact = { n: (c.impact?.n ?? 0) + 1, v: hit, crash: false, side };
         this.log(`${c.driver.name} raspou no muro e quebrou a asa dianteira! (~${this.partLossSec("fw", dmg).toFixed(1)}s por volta)`, c.isHuman, team, "damage", c.id);
-      }
-      return;
+      } else if (pvn > 2) c.impact = { n: (c.impact?.n ?? 0) + 1, v: pvn, crash: false, side };
     }
+    c.v = body.v;
+    sl.psi = body.psi;
+    sl.yaw = body.yaw;
+    sl.yawRate = body.w;
+    if (body.v > 0.3 || Math.abs(body.w) > 0.3) return;
     // parou
     c.v = 0;
-    if (sl.mode === "crash") {
-      this.crashOut(c, "Acidente");
+    sl.yawRate = 0;
+    const off = Math.abs(c.lateral) > edge + 0.5;
+    if (sl.wreck || sl.mode === "crash") {
+      this.crashOut(c, sl.wreck ?? "Acidente");
       return;
     }
     if (sl.stop === 0 && off && !street && Math.abs(c.lateral) > edge + 3 && this.rng.chance(sl.mode === "off" ? 0.35 : 0.25)) {

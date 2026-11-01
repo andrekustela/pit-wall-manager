@@ -287,7 +287,8 @@ function paintPattern(g: CanvasRenderingContext2D, lv: Livery) {
   bodyPath(g);
   g.clip();
   patternShapes(g, lv);
-  drawStickers(g, lv);
+  // (o desenho aqui está encolhido no comprimento: o adesivo desfaz isso pra não sair achatado)
+  drawStickers(g, lv, SQUASH);
   g.restore();
 }
 
@@ -488,13 +489,15 @@ function stickerShape(g: CanvasRenderingContext2D, st: Sticker, lv: Livery) {
   }
 }
 
-/** os adesivos (Premium) por cima da pintura, no desenho de cima do carro (m; frente pra +x) */
-export function drawStickers(g: CanvasRenderingContext2D, lv: Livery | undefined) {
+/** os adesivos (Premium) por cima da pintura, no desenho de cima do carro (m; frente pra +x). squashX: quanto o
+ *  desenho em volta está encolhido no comprimento (o adesivo fica no lugar certo, mas com o formato de verdade) */
+export function drawStickers(g: CanvasRenderingContext2D, lv: Livery | undefined, squashX = 1) {
   if (!lv?.stickers?.length) return;
   for (const st of lv.stickers)
     for (const my of st.m ? [1, -1] : [1]) {
       g.save();
       g.translate(st.x, st.y * my);
+      if (squashX !== 1) g.scale(1 / squashX, 1);
       g.rotate(st.r * my);
       g.scale(st.s, st.s * my);
       g.fillStyle = st.c;

@@ -6,7 +6,8 @@ import { drawProp, prop } from "./props";
 import { fmtLap, type Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
 import { car3dPref, drawCar3d, lookOf, partPiece, type CarLook } from "./car3d";
-import { CarFx } from "./carFx";
+import { CarFx, type FxEvent } from "./carFx";
+import { outerCorner } from "../sim/slidePhysics";
 import { groundMap } from "./ground";
 import { OnboardCam } from "./onboard";
 import { WorldTiles } from "./worldTiles";
@@ -20,6 +21,10 @@ import { TRACK_WIDTH, angDiff } from "../sim/track";
 /** pronto do modelo 3D (vem junto do módulo dos carros 3D, carregado sob demanda) */
 let realCarsReadyFn: (() => boolean) | null = null;
 /** teste: `?camera=tv` (atrás do carro) ou `?camera=iso` (de lado) começa a corrida nessa câmera */
+/** pedaço solto de um carro (asa, roda, bico...) ou pneu da barreira: posição, altura, giro, capotada */
+type Debris = { img: CarImage | null; node: string; carId: string; c?: string; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number; z: number; vz: number; tx: number; tz: number; wx: number; wz: number; roll: number; s: number; r: number };
+/** um estado conhecido de um carro (Renderer.hist) */
+type Snap = { t: number; d: number; lat: number; yaw: number; imp: number };
 const TILT_CAM = typeof location !== "undefined" && new URLSearchParams(location.search).get("camera");
 /** câmera inclinada agora: a do link (?camera=) manda; senão a das configurações (só no modo 3D) */
 function tiltMode(): "tv" | "iso" | "piloto" | null {
@@ -173,8 +178,13 @@ export class Renderer {
   };
 
   /** um estado conhecido do carro (vindo da simulação) */
-  private hist = new Map<string, { t: number; d: number; lat: number }[]>();
-  private scHist: { t: number; d: number; lat: number }[] = [];
+  /**
+   * estados conhecidos de cada carro: distância, lateral e, no carro solto/batido, pra onde o bico aponta (yaw) e
+   * quantas batidas na barreira (imp). O yaw também é interpolado: vindo do estado mais novo ele girava aos saltos
+   * (até 14° de uma vez) e adiantado da posição — o carro parecia escorregar de lado, pra lá e pra cá
+   */
+  private hist = new Map<string, Snap[]>();
+  private scHist: Snap[] = [];
   private snapT = 0;
   private snapReal = 0;
   private interval = 0.05; // s reais entre estados (média)
@@ -205,7 +215,7 @@ export class Renderer {
     for (const c of race.cars) {
       let h = this.hist.get(c.id);
       if (!h) this.hist.set(c.id, (h = []));
-      h.push({ t, d: race.dist(c), lat: c.lateral });
+      h.push({ t, d: race.dist(c), lat: c.lateral, yaw: c.slide ? c.slide.yaw : (c.restYaw ?? 0), imp: c.impact?.n ?? 0 });
       if (h.length > 6) h.shift();
     }
     if (race.sc.active && race.sc.onTrack) {
@@ -218,7 +228,7 @@ export class Renderer {
         if (delta > L / 2) delta -= L;
         d = last.d + delta;
       }
-      this.scHist.push({ t, d, lat: 0 });
+      this.scHist.push({ t, d, lat: 0, yaw: 0, imp: 0 });
       if (this.scHist.length > 6) this.scHist.shift();
     } else this.scHist = [];
   }
@@ -267,14 +277,16 @@ export class Renderer {
     return this.clock;
   }
 
-  private sample(h: { t: number; d: number; lat: number }[] | undefined, rt: number) {
+  private sample(h: Snap[] | undefined, rt: number): Snap | null {
     if (!h || h.length === 0) return null;
     if (rt <= h[0].t) return h[0];
     for (let i = 0; i < h.length - 1; i++) {
       const a = h[i], b = h[i + 1];
       if (rt <= b.t) {
         const k = b.t > a.t ? (rt - a.t) / (b.t - a.t) : 1;
-        return { t: rt, d: a.d + (b.d - a.d) * k, lat: a.lat + (b.lat - a.lat) * k };
+        // (o yaw pelo caminho mais curto: na volta pra pista ele é trazido de volta pra -180..180°; a batida conta
+        // quando o desenho chega no estado dela)
+        return { t: rt, d: a.d + (b.d - a.d) * k, lat: a.lat + (b.lat - a.lat) * k, yaw: a.yaw + angDiff(a.yaw, b.yaw) * k, imp: a.imp };
       }
     }
     return h[h.length - 1];
@@ -317,11 +329,17 @@ export class Renderer {
    * pedaços de asa e roda voando / caídos na pista (metros do mundo): a figura (2D e vista de cima) e qual peça do
    * carro é (câmeras 3D: RealCars.debris3d põe a peça 3D de verdade)
    */
-  private debris: { img: CarImage | null; node: string; carId: string; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number }[] = [];
+  private debris: Debris[] = [];
+  /** quantas batidas de cada carro o desenho já mostrou (Snap.imp) */
+  private impSeen = new Map<string, number>();
+  /** a roda que o carro destruído perdeu (a do canto que bateu) */
+  private lostWheel = new Map<string, number>();
+  /** som das batidas e da brita (main.ts liga no sound) */
+  onSound: ((e: FxEvent) => void) | null = null;
   /** o chão que os efeitos de acidente estão usando (pista e se veio do autódromo 3D) */
   private groundKey = "";
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
-  readonly interp = new Map<string, { s: number; lat: number }>();
+  readonly interp = new Map<string, { s: number; lat: number; yaw: number; imp: number }>();
   /** online: etiqueta dos carros dos jogadores mostra o engenheiro */
   showEngineers = false;
   /** altura de baixo coberta pelo painel (px); a câmera centraliza acima dela */
@@ -387,7 +405,9 @@ export class Renderer {
       // Pulo grande (box, batida, volta pra pista) ou carro rodando: vai direto
       const latSim = smp ? smp.lat : c.lateral;
       const ls = this.latSm.get(c.id);
-      const free = c.spin <= 0 && !c.recover;
+      // (carro solto — rodando, passando reto ou voltando pra pista —: quem manda no bico é o yaw dele; a inclinação
+      // do caminho somava por cima e o bico balançava)
+      const free = !c.slide && c.spin <= 0 && !c.recover;
       let lat = latSim;
       if (ls && free && Math.abs(latSim - ls.lat) < 4) lat = ls.lat + (latSim - ls.lat) * (1 - Math.exp(-drt / 0.16));
       const q = this.px(s, lat);
@@ -409,7 +429,7 @@ export class Renderer {
       this.yawOff.set(c.id, sm);
       q.h += sm;
       pos.set(c.id, q);
-      this.interp.set(c.id, { s, lat });
+      this.interp.set(c.id, { s, lat, yaw: smp ? smp.yaw : (c.slide?.yaw ?? c.restYaw ?? 0), imp: smp ? smp.imp : (c.impact?.n ?? 0) });
     }
     let scPos: { x: number; y: number; h: number } | null = null;
     if (race.sc.active && race.sc.onTrack) {
@@ -492,16 +512,8 @@ export class Renderer {
     // pedaços de asa: voam um pouco, escorregam e ficam na pista até sumir
     // pausado: fumaça, faíscas e pedaços param junto com a corrida
     const dt = speed === 0 ? 0 : Math.min(0.1, realDt) * Math.min(4, Math.max(1, speed));
-    this.debris = this.debris.filter((d) => (d.t += dt) < 30);
-    for (const d of this.debris) {
-      const f = Math.exp(-2.2 * dt);
-      d.vx *= f;
-      d.vy *= f;
-      d.spin *= Math.exp(-1.6 * dt);
-      d.x += d.vx * dt;
-      d.y += d.vy * dt;
-      d.h += d.spin * dt;
-    }
+    this.debris = this.debris.filter((d) => (d.t += dt) < 40);
+    for (const d of this.debris) this.stepDebris(d, dt);
     // câmera inclinada: a cena 3D cobre a tela toda, então marcas, faíscas, fumaça, spray e pedaços vão
     // depois dela, com cada ponto do mundo levado pra tela pela câmera 3D (em vez do toCss de cima)
     const tiltOn = !!(TILT && drew3d && real3);
@@ -516,9 +528,9 @@ export class Renderer {
       if (tiltOn) return;
       for (const d of this.debris) {
         if (!d.img) continue;
-        const air = d.t < 0.6 ? 1 + 0.35 * Math.sin((d.t / 0.6) * Math.PI) : 1; // no ar parece maior
+        const air = 1 + Math.min(0.5, d.z * 0.3); // no ar parece maior
         const { x, y } = cv(d);
-        this.drawCar(o, x, y, hOn(cv, d, d.h), d.img, mm * air, d.t > 27 ? (30 - d.t) / 3 : 1);
+        this.drawCar(o, x, y, hOn(cv, d, d.h), d.img, mm * air, d.t > 37 ? (40 - d.t) / 3 : 1);
       }
     };
     // o chão dos efeitos de acidente: o do autódromo 3D, se montado; senão a regra da beira da pista
@@ -566,9 +578,16 @@ export class Renderer {
         else this.spray(o, x, y, p.h, wet, m, p, v, dt);
       }
       const curv = race.track.curvature[Math.floor(race.track.wrap(c.s)) % L] ?? 0;
+      // bateu na barreira: quando o carro DESENHADO chega no estado da batida (faísca, pedaço, som na hora certa)
+      const it = this.interp.get(c.id);
+      if (it) {
+        const seen = this.impSeen.get(c.id);
+        if (seen !== undefined && it.imp > seen && c.impact) this.onImpact(c, p, it, real3 ?? null);
+        this.impSeen.set(c.id, it.imp);
+      }
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s), this.interp.get(c.id));
       // (o estrago aparece quando o carro desenhado chega no muro, não quando a corrida avisa)
-      const crashed = this.fx.crashed(c) && this.fx.landed(c.id);
+      const crashed = this.fx.landed(c.id);
       // saída de curva lenta acelerando forte: às vezes a traseira escapa um pouco e o piloto corrige (2-4°,
       // some em ~0,6 s). Mais comum com piloto agressivo e na chuva. Só no desenho: a corrida não muda
       let wig = this.wiggle.get(c.id);
@@ -596,7 +615,7 @@ export class Renderer {
       let look = lookOf(c.dmg, c.dmgSide, c.flatWheel, c.fault === "puncture", this.steerOf(c, p.h));
       // bateu: sem asa dianteira e com uma roda arrancada (os pedaços voam pelo dropParts)
       if (crashed) {
-        const lost = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 4;
+        const lost = this.lostWheel.get(c.id) ?? [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 4;
         look = { ...look, fw: { state: "none", side: "l" }, wheels: look.wheels.map((w, i) => (i === lost ? "off" : w)) as CarLook["wheels"] };
       }
       this.dropParts(c, look, p);
@@ -662,6 +681,8 @@ export class Renderer {
       real.liveScreen(race);
       real.skidMarks(tiltOn ? this.fx.skidList : null, tiltOn ? this.fx.spotList : null);
       real.debris3d(tiltOn ? this.debris : null);
+      // (fumaça, poeira e pedaços que voam na cena 3D: ficam atrás dos carros e das barreiras quando devem)
+      real.airFx(tiltOn ? this.fx.partList : null);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
     }
     // câmera inclinada: os efeitos por cima da cena 3D, e as posições na tela (etiquetas, clique) pela câmera 3D
@@ -686,7 +707,10 @@ export class Renderer {
       }
     }
 
-    this.fx.drawAir(o, cvAir, mAir, false);
+    this.fx.drawAir(o, cvAir, mAir, false, 1, tiltOn);
+    // som das batidas e da brita deste quadro
+    for (const e of this.fx.events) this.onSound?.(e);
+    this.fx.events.length = 0;
 
     // túnel: o teto cobre os carros (as etiquetas continuam aparecendo)
     if (race.track.tunnel) {
@@ -854,9 +878,119 @@ export class Renderer {
       // sai de onde a peça estava no carro e gira em volta de si mesma
       const x = p.x + fx * dx - fy * dy, y = p.y + fy * dx + fx * dy;
       const fwd = v0 * (0.3 + Math.random() * 0.3);
-      this.debris.push({ img: piece?.img ?? null, node, carId: c.id, x, y, h: p.h, vx: fx * fwd - fy * side, vy: fy * fwd + fx * side, spin: (Math.random() - 0.5) * 9, t: 0 });
+      this.addDebris({ img: piece?.img ?? null, node, carId: c.id, x, y, h: p.h, vx: fx * fwd - fy * side, vy: fy * fwd + fx * side, s: c.s, r: node.startsWith("roda") ? 0.33 : 0.6, z: 0.4, vz: 2.5 + Math.random() * 3 });
     }
-    while (this.debris.length > 24) this.debris.shift();
+    while (this.debris.length > 40) this.debris.shift();
+  }
+
+  /** pedaço solto (com altura, girando e capotando) */
+  private addDebris(d: Partial<Debris> & { node: string; x: number; y: number; vx: number; vy: number; s: number; r: number }) {
+    const sg = () => (Math.random() < 0.5 ? -1 : 1);
+    this.debris.push({ img: null, carId: "", h: Math.random() * 6.3, spin: (Math.random() - 0.5) * 12, t: 0, z: 0.4, vz: 3, tx: 0, tz: 0, wx: sg() * (4 + Math.random() * 8), wz: sg() * (3 + Math.random() * 7), roll: 0, ...d });
+  }
+
+  /**
+   * um passo de um pedaço solto: no ar cai e capota; no chão quica (cada vez menos), escorrega e para — a roda rola
+   * em pé enquanto tem velocidade e depois tomba; bate na barreira da pista e volta
+   */
+  private stepDebris(d: Debris, dt: number) {
+    if (dt <= 0) return;
+    const track = this.race.track, wheel = d.node.startsWith("roda") || d.node === "pneu";
+    if (d.z > 0 || d.vz > 0) {
+      d.vz -= 9.8 * dt;
+      d.z += d.vz * dt;
+      d.tx += d.wx * dt;
+      d.tz += d.wz * dt;
+      d.h += d.spin * dt;
+      if (d.z <= 0) {
+        d.z = 0;
+        if (d.vz < -1.8) {
+          // quicou: perde força, gira menos
+          d.vz = -d.vz * 0.35;
+          d.vx *= 0.72;
+          d.vy *= 0.72;
+          d.wx *= 0.5;
+          d.wz *= 0.5;
+          d.spin *= 0.6;
+        } else d.vz = 0;
+      }
+    } else {
+      const sp = Math.hypot(d.vx, d.vy);
+      // (a roda em pé rola longe; o resto arrasta e para logo)
+      const rolling = wheel && sp > 2.2;
+      const f = Math.exp(-(rolling ? 0.35 : 3.2) * dt);
+      d.vx *= f;
+      d.vy *= f;
+      d.spin *= Math.exp(-4 * dt);
+      d.h += d.spin * dt;
+      const ease = 1 - Math.exp(-8 * dt), up = Math.round(d.tx / Math.PI) * Math.PI;
+      d.tx += (up - d.tx) * ease;
+      if (rolling) {
+        // em pé, na direção em que anda
+        d.tz += (Math.round(d.tz / Math.PI) * Math.PI - d.tz) * ease;
+        d.h += Math.atan2(Math.sin(Math.atan2(d.vy, d.vx) - d.h), Math.cos(Math.atan2(d.vy, d.vx) - d.h)) * ease;
+        d.roll += (sp * dt) / 0.33;
+      } else {
+        // deitado: a roda tomba pro lado; a asa e as placas ficam de barriga pra baixo
+        const lie = wheel ? (d.tz >= 0 ? Math.PI / 2 : -Math.PI / 2) : Math.round(d.tz / Math.PI) * Math.PI;
+        d.tz += (lie - d.tz) * ease;
+      }
+    }
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    // onde fica na pista (pra bater na barreira): anda o s junto
+    const q0 = track.pose(d.s, 0);
+    d.s = track.wrap(d.s + (d.vx * Math.cos(q0.h) + d.vy * Math.sin(q0.h)) * dt);
+    const q = track.pose(d.s, 0);
+    const lat = -Math.sin(q.h) * (d.x - q.x) + Math.cos(q.h) * (d.y - q.y), side = lat >= 0 ? 1 : -1;
+    const bar = this.race.barrierAt(d.s, side) - d.r;
+    if (Math.abs(lat) > bar) {
+      const nx = -Math.sin(q.h) * side, ny = Math.cos(q.h) * side, over = Math.abs(lat) - bar;
+      d.x -= nx * over;
+      d.y -= ny * over;
+      const vn = d.vx * nx + d.vy * ny;
+      if (vn > 0) {
+        d.vx -= 1.35 * vn * nx;
+        d.vy -= 1.35 * vn * ny;
+        d.spin = -d.spin * 0.5;
+      }
+    }
+  }
+
+  /**
+   * o carro desenhado chegou na batida (Snap.imp subiu): efeitos no canto que encostou, marca na barreira e, se
+   * destruiu, os pedaços grandes (bico, espelhos, placas de fibra; asa e roda saem pelo dropParts) e os pneus da
+   * barreira espalhados
+   */
+  private onImpact(c: Race["cars"][number], p: { x: number; y: number; h: number }, it: { s: number; lat: number; yaw: number }, real: RealCars | null) {
+    const imp = c.impact!, track = this.race.track, follow = c.id === this.followId;
+    const { reach, rx, lx, ly } = outerCorner(it.yaw, 2.4, 0.95, imp.side);
+    const cp = track.pose(it.s + rx, it.lat + imp.side * reach);
+    const barreira = real?.barrierKindAt(cp.x, cp.y) ?? (track.def.street ? "muro" : "");
+    const crash = imp.crash && !this.fx.landed(c.id);
+    // (a roda que sai é a do canto que bateu: frente/trás e o lado do carro)
+    if (crash) this.lostWheel.set(c.id, (lx > 0 ? 0 : 2) + (ly > 0 ? 1 : 0));
+    this.fx.impact(c, p, it.yaw, imp.v, crash, imp.side, follow, barreira, it, cp);
+    const th = track.pose(it.s, 0).h, team = c.team.livery?.base ?? c.team.color;
+    if (real && (barreira === "guardrail" || barreira === "muro")) real.scuff(cp.x, cp.y, th, imp.side, 1.5 + Math.min(4, imp.v * 0.15), team);
+    if (!crash) return;
+    const v0 = Math.min(55, Math.max(c.v, this.fx.recentSpeed(c.id))), toTrack = -imp.side;
+    const fx = Math.cos(th), fy = Math.sin(th);
+    const go = (along: number, lat: number): [number, number] => [fx * along - fy * lat, fy * along + fx * lat];
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const bits: [string, number, string][] = [["bico", 0.5, team], ["placa", 0.3, "#1e2026"], ["placa", 0.3, "#24262c"], ["espelho", 0.12, "#16171a"]];
+    if (Math.random() < 0.6) bits.push(["espelho", 0.12, team]);
+    for (const [node, r, col] of bits) {
+      if (node === "bico" && lx < 0) continue;
+      const [vx, vy] = go(v0 * rnd(0.15, 0.5) + rnd(-2, 2), toTrack * rnd(1, 7) + rnd(-1.5, 1.5));
+      this.addDebris({ node, carId: c.id, c: col, x: cp.x, y: cp.y, s: it.s, r, vx, vy, z: rnd(0.3, 0.7), vz: rnd(2, 6) });
+    }
+    // pneus da barreira: os que o carro acertou saem rolando e quicando
+    if (barreira === "pneu")
+      for (let i = 0, n = 2 + Math.floor(Math.random() * 3); i < n; i++) {
+        const [vx, vy] = go(v0 * rnd(0.15, 0.45) + rnd(-2, 2), toTrack * rnd(0.5, 5) + rnd(-1.5, 1.5));
+        this.addDebris({ node: "pneu", c: i % 2 ? "#f2f2f2" : "#1c1c1c", x: cp.x + rnd(-0.6, 0.6), y: cp.y + rnd(-0.6, 0.6), s: it.s, r: 0.32, vx, vy, z: rnd(0.2, 0.9), vz: rnd(1.5, 4.5) });
+      }
   }
 
 

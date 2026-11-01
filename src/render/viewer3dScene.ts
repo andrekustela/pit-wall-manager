@@ -10,7 +10,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Team } from "../sim/types";
 import { defaultLivery } from "../sim/livery";
-import { GLOVE_T0, HELMET_UPRIGHT, gloveByWheel, paintAxis, paintMaterial, paintUV, shoeMaterial, uniformMaterial, upBox } from "./cars3dReal";
+import { GLOVE_T0, HELMET_UPRIGHT, gloveByWheel, paintAxis, paintMaterial, paintUV, seatBody, shoeMaterial, smoothDirs, uniformMaterial, upBox } from "./cars3dReal";
 
 const loader = new GLTFLoader();
 loader.setMeshoptDecoder(MeshoptDecoder);
@@ -20,6 +20,7 @@ const loadCar = () =>
   (carP ??= loader.loadAsync("/car3d/carro_hd.glb").then((g) => {
     paintUV(g.scene, new THREE.Box3().setFromObject(g.scene));
     gloveByWheel(g.scene.getObjectByName("piloto"));
+    seatBody(g.scene.getObjectByName("piloto"));
     return g.scene;
   }));
 
@@ -221,48 +222,6 @@ function bodySpace(pilot: THREE.Object3D, meshes: THREE.Mesh[]): THREE.Box3 {
     box.union(geo.userData.bodyBox);
   }
   return box;
-}
-
-/**
- * suaviza as direções da superfície (média com os vizinhos, `it` vezes): as dobras modeladas no macacão (joelho,
- * cintura) deixavam a "faixa lateral" manchada. Pontos repetidos (costuras) contam como um só, pela posição
- */
-function smoothDirs(geo: THREE.BufferGeometry, body: Float32Array, dirs: Float32Array, it: number) {
-  const cnt = dirs.length / 3, ids = new Int32Array(cnt), key = new Map<string, number>();
-  let m = 0;
-  for (let i = 0; i < cnt; i++) {
-    const k = `${Math.round(body[i * 3] * 5000)},${Math.round(body[i * 3 + 1] * 5000)},${Math.round(body[i * 3 + 2] * 5000)}`;
-    let id = key.get(k);
-    if (id === undefined) key.set(k, (id = m++));
-    ids[i] = id;
-  }
-  const adj: number[][] = Array.from({ length: m }, () => []);
-  const idx = geo.index, tri = idx ? idx.count : cnt;
-  for (let t = 0; t + 2 < tri; t += 3) {
-    const a = ids[idx ? idx.getX(t) : t], b = ids[idx ? idx.getX(t + 1) : t + 1], c = ids[idx ? idx.getX(t + 2) : t + 2];
-    adj[a].push(b, c);
-    adj[b].push(a, c);
-    adj[c].push(a, b);
-  }
-  let cur = new Float32Array(m * 3);
-  for (let i = 0; i < cnt; i++) for (let k = 0; k < 3; k++) cur[ids[i] * 3 + k] = dirs[i * 3 + k];
-  for (let r = 0; r < it; r++) {
-    const nx = new Float32Array(m * 3);
-    for (let a = 0; a < m; a++) {
-      let x = cur[a * 3], y = cur[a * 3 + 1], z = cur[a * 3 + 2];
-      for (const b of adj[a]) {
-        x += cur[b * 3];
-        y += cur[b * 3 + 1];
-        z += cur[b * 3 + 2];
-      }
-      const l = Math.hypot(x, y, z) || 1;
-      nx[a * 3] = x / l;
-      nx[a * 3 + 1] = y / l;
-      nx[a * 3 + 2] = z / l;
-    }
-    cur = nx;
-  }
-  for (let i = 0; i < cnt; i++) for (let k = 0; k < 3; k++) dirs[i * 3 + k] = cur[ids[i] * 3 + k];
 }
 
 /**

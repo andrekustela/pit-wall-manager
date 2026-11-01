@@ -252,7 +252,13 @@ export interface CarState {
    * psi = direção do movimento e yaw = do carro, as duas em relação à pista (rad); stop = tempo parado (s).
    * "rejoin": o piloto voltando pra pista (dá um 180 cantando pneu se estiver de costas; `smoke` = fumaça)
    */
-  slide?: { mode: "spin" | "off" | "crash" | "rejoin"; psi: number; yaw: number; yawRate: number; stop: number; smoke?: boolean } | null;
+  /**
+   * solto (src/sim/slidePhysics.ts): rumo da velocidade (psi) e do bico (yaw) em relação à pista, giro (rad/s);
+   * `wreck` = já bateu forte e só desliza até parar (o motivo do abandono); `scraped` = já raspou na barreira
+   */
+  slide?: { mode: "spin" | "off" | "crash" | "rejoin"; psi: number; yaw: number; yawRate: number; stop: number; smoke?: boolean; wreck?: string; scraped?: boolean } | null;
+  /** batidas na barreira (pra tela soltar faísca, pedaço e som na hora certa): quantas, a velocidade contra ela (m/s), se destruiu o carro, de que lado */
+  impact?: { n: number; v: number; crash: boolean; side: number } | null;
   /** fora da corrida e parado: como ficou virado (rad, em relação à pista) */
   restYaw?: number | null;
   /** a equipe mandou abandonar: na próxima entrada do box vai pra garagem */

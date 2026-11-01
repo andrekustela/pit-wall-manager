@@ -21,7 +21,7 @@ function displayHtml() {
     `<label class="sndrow"><span>${label}</span><input type="range" min="${min}" max="${max}" data-tela="${k}" value="${d[k]}"><b data-telav="${k}">${d[k]}${unit}</b></label><p class="hint gfxhint" style="margin:0 0 8px">${hint}</p>`;
   return `<div class="sndpanel">
     <div class="fld"><span>Idioma · Language · Idioma</span><div class="seg" data-lang>${LANGS.map(([k, l]) => `<button data-lang="${k}" class="${lang() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
-    <p class="hint gfxhint" style="margin:0 0 10px">Menus, botões e telas. Algumas mensagens da corrida e do rádio ainda ficam em português.</p>
+    <p class="hint gfxhint" style="margin:0 0 10px">Menus, botões, telas e as mensagens da corrida e do rádio.</p>
     ${row("brilho", "Brilho", 50, 150, "%", "Mais claro ou mais escuro (bom pra tela escura ou ambiente claro).")}
     ${row("contraste", "Contraste", 50, 150, "%", "Diferença entre o claro e o escuro.")}
     ${row("saturacao", "Saturação", 0, 200, "%", "Cores mais vivas ou mais apagadas (0 = preto e branco).")}

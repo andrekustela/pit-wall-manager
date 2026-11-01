@@ -500,6 +500,54 @@ class Sound {
     this.noise(0.25, 0.15, 2500);
   }
 
+  /** ruído filtrado que começa daqui a `delay` s (camadas da batida) */
+  private hit(delay: number, dur: number, vol: number, freq: number, type: BiquadFilterType, q = 1) {
+    if (!this.ctx || !this.noiseBuf || vol <= 0.001) return;
+    const src = this.noiseSource(), f = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    src.connect(f).connect(g).connect(this.bus.efeitos);
+    const t = this.ctx.currentTime + delay;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.start(t);
+    src.stop(t + dur + 0.05);
+  }
+
+  /**
+   * batida contra a barreira, na hora em que o carro DESENHADO encosta (o renderer avisa): estrondo grave do carro,
+   * a pancada na barreira (pneu abafa; guard-rail estala e vibra; concreto bate seco), o estilhaço da fibra e o
+   * arrasto — na medida da velocidade contra ela. `near` = o carro seguido (os outros mais baixo)
+   */
+  impact(v: number, crash: boolean, barreira: string, near: boolean) {
+    const k = Math.min(1, v / 28) * (near ? 1 : 0.5);
+    if (k < 0.04) return;
+    this.hit(0, crash ? 0.9 : 0.45, 0.6 * k, 120, "lowpass");
+    if (barreira === "pneu") this.hit(0, 0.35, 0.45 * k, 320, "bandpass", 0.8);
+    else if (barreira === "guardrail") {
+      this.hit(0, 0.5, 0.35 * k, 1400, "bandpass", 3);
+      // (o guard-rail vibrando)
+      this.beep(310, 0.6, 0.05 * k, "triangle");
+      this.beep(470, 0.45, 0.03 * k, "triangle");
+    } else this.hit(0, 0.25, 0.42 * k, 900, "bandpass", 1.2);
+    if (crash) {
+      for (let i = 0; i < 7; i++) this.hit(0.015 + Math.random() * 0.3, 0.05 + Math.random() * 0.06, 0.13 * k, 3800 + Math.random() * 3500, "highpass");
+      this.crowdBoost = Math.min(0.12, this.crowdBoost + 0.06);
+    }
+    // arrasto contra a barreira / no chão
+    this.hit(0.06, crash ? 1.1 : 0.55, 0.09 * k, 1700, "bandpass", 0.7);
+  }
+
+  /** entrou na brita/grama em velocidade: chiado grosso e pedrinhas batendo */
+  gravel(v: number, near: boolean) {
+    const k = Math.min(1, v / 40) * (near ? 1 : 0.4);
+    if (k < 0.05) return;
+    this.hit(0, 0.9, 0.16 * k, 700, "lowpass");
+    for (let i = 0; i < 10; i++) this.hit(Math.random() * 0.7, 0.03, 0.07 * k, 2500 + Math.random() * 2500, "bandpass", 2);
+  }
+
   alarm() {
     for (let i = 0; i < 3; i++) {
       this.beep(660, 0.18, 0.08, "triangle", i * 0.4);
@@ -544,7 +592,8 @@ class Sound {
           break;
         }
         case "pitout": if (mine) this.pitWrench(); break;
-        case "crash": this.crash(); this.crowdBoost += 0.05; break;
+        // (o som da batida toca quando o carro DESENHADO encosta na barreira: impact, pelo renderer)
+        case "crash": this.crowdBoost += 0.05; break;
         case "overtake": this.crowdBoost = Math.min(0.08, this.crowdBoost + 0.025); break;
         case "spin": if (mine) this.noise(0.4, 0.15, 900); break;
         case "sc": this.alarm(); break;

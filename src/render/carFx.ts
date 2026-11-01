@@ -3,14 +3,18 @@
 // - asfalto/concreto: borracha preta (das 4 rodas rodando de lado) e fumaça de pneu;
 // - brita: sulcos das 4 rodas, poeira clara e pedrinhas voando; voltando pra pista, pedrisco espalhado nela;
 // - grama: trilha de lama, pedaços de grama e de terra; voltando, torrões de terra na pista;
-// - batida: estilhaços de fibra e da carenagem (cor da equipe) voando e espalhados no chão, mancha de óleo e
-//   raspão. As manchas e os pedaços ficam um tempo (Configurações > Gráficos > marcas de pneu).
+// - batida (`impact`, na hora em que o carro DESENHADO encosta na barreira): faíscas raspando ao longo dela,
+//   lascas de fibra e da carenagem (cor da equipe) voando com altura, quicando e ficando no chão, nuvem, borracha no
+//   pé da barreira; parado, poça de óleo, o risco do assoalho até ali e fumaça saindo do carro batido.
+// As manchas e os pedaços ficam um tempo (Configurações > Gráficos > marcas de pneu). Nas câmeras 3D a fumaça, a
+// poeira e os pedaços que voam são desenhados na cena (RealCars.airFx/flyFx), não por cima da tela.
 import { LV_AMOUNT, gfx } from "./gfx";
 import { looseGround, type Ground } from "./ground";
+import { outerCorner } from "../sim/slidePhysics";
 import type { CarState } from "../sim/types";
 
 type PartKind = "fumaca" | "poeira" | "faisca" | "pedra" | "grama" | "lama" | "fibra";
-interface Part {
+export interface Part {
   x: number;
   y: number;
   vx: number;
@@ -23,7 +27,12 @@ interface Part {
   c?: string;
   rot?: number;
   vr?: number;
+  /** pedaço que voa: altura (m) e velocidade pra cima (cai, quica e escorrega no chão) */
+  z?: number;
+  vz?: number;
 }
+/** o que aconteceu neste quadro pro som (o renderer repassa) */
+export type FxEvent = { k: "batida"; v: number; crash: boolean; barreira: string; follow: boolean } | { k: "cascalho"; v: number; follow: boolean };
 /** marca no chão: borracha, sulco na brita, trilha de lama/areia, raspão */
 export type MarkKind = "pneu" | "brita" | "lama" | "areia" | "risco";
 export interface Skid {
@@ -64,10 +73,16 @@ export const SPOT_COLOR: Record<Exclude<SpotKind, "detrito">, [number, number, n
 };
 interface St {
   /**
-   * a batida já aconteceu no desenho: a corrida avisa que bateu antes de o carro desenhado (um instante atrás,
-   * interpolado) chegar no muro — o estrago, os pedaços e o óleo esperam ele parar ali
+   * a batida que destrói o carro já aconteceu no desenho (o carro desenhado fica um instante atrás da corrida: o
+   * estrago e os pedaços saem quando ELE encosta na barreira — ou para, se rodou até parar sem bater)
    */
   landed: boolean;
+  /** já fez o que fica depois de parar (óleo, risco do assoalho, fumaça) */
+  restDone: boolean;
+  /** por onde o carro batido passou desde a batida (o assoalho riscando) */
+  trailImp: [number, number][];
+  /** quanto tempo ainda sai fumaça do carro batido (s) */
+  smokeT: number;
   /** quanto tempo está esperando o carro desenhado parar (se demorar demais, solta assim mesmo) */
   crashWait: number;
   /** onde o carro estava desenhado no quadro anterior e a velocidade desenhada (m/s) */
@@ -118,6 +133,8 @@ export class CarFx {
   private spots: Spot[] = [];
   private shake = 0;
   private shakeT = 0;
+  /** pro som (o renderer esvazia a cada quadro) */
+  events: FxEvent[] = [];
   /** que chão tem em (s, lateral): o renderer passa o da pista (ground.groundMap) */
   ground: (s: number, lat: number) => Ground = (_s, lat) => (Math.abs(lat) > 9 ? "grama" : "asfalto");
   /** ponto do mundo em (s, lateral) da pista (Track.pose): os pedaços da batida se espalham seguindo a pista */
@@ -140,14 +157,12 @@ export class CarFx {
    * chamado uma vez por carro por quadro: devolve o giro extra do desenho (rad). `drawn`: onde o carro está
    * desenhado na volta (s, lateral; o renderer interpola um instante atrás da corrida) — o chão é lido ali
    */
-  update(c: CarState, p: { x: number; y: number; h: number }, dt: number, curv: number, street: boolean, follow: boolean, bump = 0, drawn?: { s: number; lat: number }): number {
+  update(c: CarState, p: { x: number; y: number; h: number }, dt: number, curv: number, street: boolean, follow: boolean, bump = 0, drawn?: { s: number; lat: number; yaw: number }): number {
     let s = this.st.get(c.id);
-    if (!s) this.st.set(c.id, (s = { landed: false, crashWait: 0, prevP: null, vDraw: 0, last: null, dirt: null, dirtT: 0, wasLoose: false, vRecent: 0, trail: [], trailT: 0 }));
+    if (!s) this.st.set(c.id, (s = this.newSt()));
     const ds = drawn?.s ?? c.s, dl = drawn?.lat ?? c.lateral;
     const fx = Math.cos(p.h), fy = Math.sin(p.h);
     const at = (dx: number, dy: number) => [p.x + fx * dx - fy * dy, p.y + fy * dx + fx * dy] as [number, number];
-    /** direção no mundo de (ao longo da pista, de lado) */
-    const dir = (dx: number, dy: number) => [fx * dx - fy * dy, fy * dx + fx * dy] as [number, number];
     // velocidade do carro desenhado (a da corrida está adiantada e na batida já é zero)
     if (dt > 0) {
       // (até 95 m/s: quando o relógio da tela corrige, o carro desenhado pula uns metros num quadro)
@@ -160,18 +175,21 @@ export class CarFx {
       s.trailT = 0;
       s.trail.push([p.x, p.y]);
       if (s.trail.length > 15) s.trail.shift();
+      if (s.landed && !s.restDone && s.trailImp.length < 300) s.trailImp.push([p.x, p.y]);
     }
     let yaw = 0, smoke = false, marks = false;
 
     // ---- solto (rodou, passou reto, bateu): o giro vem da física; fumaça e marca de pneu enquanto arrasta ----
     if (c.slide) {
-      yaw = c.slide.yaw;
+      yaw = drawn?.yaw ?? c.slide.yaw;
       // voltando: só canta pneu (fumaça e marca) no 180; o resto é o carro andando normal
       const back = c.slide.mode === "rejoin";
       // (velocidade do carro desenhado: a da corrida está adiantada — na brita ela zerava e o sulco parava cedo)
       marks = back ? !!c.slide.smoke : s.vDraw > 3;
       smoke = back ? !!c.slide.smoke : c.slide.mode !== "off" && s.vDraw > 6;
-    } else if (c.retired && c.restYaw != null) yaw = c.restYaw;
+    } else if (c.retired && c.restYaw != null) yaw = drawn?.yaw ?? c.restYaw;
+    // (o carro desenhado ainda escorrendo enquanto a corrida já parou ele: segue o yaw interpolado)
+    else if (drawn && Math.abs(drawn.yaw) > 1e-4) yaw = drawn.yaw;
 
     // o chão embaixo do carro (só quando interessa: fora da pista, rodando ou batendo)
     const g: Ground = c.slide || c.offTrack > 0 || (c.retired && !s.landed) ? this.ground(ds, dl) : "asfalto";
@@ -181,59 +199,36 @@ export class CarFx {
     // na terra solta não sai fumaça de pneu: sai poeira (abaixo)
     if (loose) smoke = false;
 
-    // ---- batida: estoura no impacto, voa pedaço, fica mancha de óleo e os pedaços no chão ----
+    // ---- batida sem barreira (perdeu o controle e parou destruído no meio do escape): estoura quando o carro
+    // desenhado para ali ----
     if (this.crashed(c) && !s.landed) s.crashWait += dt;
-    if (this.crashed(c) && !s.landed && (s.vDraw < 2.5 || s.crashWait > 3)) {
-      s.landed = true;
-      const team = c.team.livery?.base ?? c.team.color, v0 = Math.max(s.vRecent, 10);
-      // o muro fica do lado de fora (o sinal da lateral): o que voa vai pra frente e volta pro lado da pista
-      const toTrack = -Math.sign(dl || 1), v0c = Math.min(v0, 55);
-      // (no chão, pela pista: numa curva, "pra frente" em linha reta saía pra fora do muro)
-      const onTrack = (along: number, lat: number): [number, number] => {
-        if (!this.pose) return at(along, lat - dl);
-        const q = this.pose(ds + along, lat);
-        return [q.x, q.y];
-      };
-      for (let i = 0; i < 36; i++) {
-        const a = Math.random() * Math.PI * 2, v = 6 + Math.random() * 22;
-        this.parts.push({ x: p.x, y: p.y, vx: Math.cos(a) * v + fx * v0 * 0.3, vy: Math.sin(a) * v + fy * v0 * 0.3, t: 0, life: 0.25 + Math.random() * 0.35, size: 0.6, kind: "faisca" });
-      }
-      // estilhaços de fibra e da carenagem voando
-      for (let i = 0; i < 26; i++) {
-        const [vx, vy] = dir(v0c * rnd(0.15, 0.55) + rnd(-3, 3), toTrack * rnd(1, 9) + rnd(-2, 2));
-        this.parts.push({ x: p.x, y: p.y, vx, vy, t: 0, life: rnd(0.5, 1.1), size: rnd(0.12, 0.3), kind: "fibra", c: i % 3 === 0 ? team : CARBON[i % 3], rot: rnd(0, 6.3), vr: rnd(-14, 14) });
-      }
-      // nuvem: poeira do chão (brita clara, terra) ou fumaça cinza (asfalto, muro de rua)
-      for (let i = 0; i < 14; i++) {
-        const [vx, vy] = dir(rnd(-2, 5), toTrack * rnd(0, 4) + rnd(-2, 2));
-        this.parts.push({ x: p.x, y: p.y, vx, vy, t: 0, life: rnd(1.4, 2.6), size: rnd(0.6, 1.1), kind: looseGround(g) ? "poeira" : "fumaca", c: dustOf(g) });
-      }
-      // no chão: pedaços espalhados pra frente e pro lado da pista (no muro eles batem e voltam)
-      for (let i = 0; i < 22; i++) {
-        const [x, y] = i < 6 ? onTrack(rnd(-2.5, 2.5), dl + toTrack * rnd(0, 1.8)) : onTrack(rnd(-1, 2 + v0c * 0.22), dl + toTrack * rnd(0.8, 2.5 + v0c * 0.1));
-        this.spots.push({ x, y, r: rnd(0.1, 0.38), rot: rnd(0, 6.3), k: "detrito", c: i % 4 === 0 ? team : CARBON[i % 3], t: 0 });
-      }
-      // óleo e água: a poça embaixo do carro (passa da carroceria pro lado da pista) e pingos de onde ele veio
+    if (this.crashed(c) && !s.landed && (s.vDraw < 2.5 || s.crashWait > 3)) this.impact(c, p, yaw, Math.max(8, s.vRecent * 0.4), true, Math.sign(dl || 1), follow, "", drawn, p);
+    // ---- parou depois de bater: poça de óleo, o assoalho riscado até ali, e o carro solta fumaça ----
+    if (s.landed && !s.restDone && c.retired && s.vDraw < 1.5) {
+      s.restDone = true;
+      const toTrack = -Math.sign(dl || 1);
       const [ox, oy] = at(-0.8, toTrack * 0.9), [px, py] = at(1.2, toTrack * 1.5);
       this.spots.push({ x: ox, y: oy, r: rnd(1.6, 2.2), rot: rnd(0, 6.3), k: "oleo", c: "", t: 0 });
       this.spots.push({ x: px, y: py, r: rnd(0.7, 1.1), rot: rnd(0, 6.3), k: "oleo", c: "", t: 0 });
-      // o assoalho riscando o chão nos últimos ~12 m antes de parar (duas linhas: as bordas da prancha)
-      const tr = [...s.trail, [p.x, p.y] as [number, number]];
-      let run = 0;
-      for (let i = tr.length - 1; i > 0 && run < 12; i--) {
-        const [a, b] = [tr[i - 1], tr[i]], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      // (duas linhas: as bordas da prancha do assoalho; e uns pingos de óleo pelo caminho)
+      const tr = [...s.trailImp, [p.x, p.y] as [number, number]];
+      for (let i = 1; i < tr.length; i++) {
+        const [a0, b0] = [tr[i - 1], tr[i]], l = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]);
         if (l < 0.05 || l > 15) continue;
-        run += l;
-        const nx = (-(b[1] - a[1]) / l) * 0.35, ny = ((b[0] - a[0]) / l) * 0.35;
-        for (const k of [1, -1]) this.skids.push({ x1: a[0] + nx * k, y1: a[1] + ny * k, x2: b[0] + nx * k, y2: b[1] + ny * k, t: 0, k: "risco", w: 0.1 });
-        if (Math.random() < 0.5) this.spots.push({ x: b[0] + rnd(-0.4, 0.4), y: b[1] + rnd(-0.4, 0.4), r: rnd(0.2, 0.4), rot: rnd(0, 6.3), k: "oleo", c: "", t: 0 });
+        const nx = (-(b0[1] - a0[1]) / l) * 0.35, ny = ((b0[0] - a0[0]) / l) * 0.35;
+        for (const k of [1, -1]) this.skids.push({ x1: a0[0] + nx * k, y1: a0[1] + ny * k, x2: b0[0] + nx * k, y2: b0[1] + ny * k, t: 0, k: "risco", w: 0.1 });
+        if (Math.random() < 0.35) this.spots.push({ x: b0[0] + rnd(-0.4, 0.4), y: b0[1] + rnd(-0.4, 0.4), r: rnd(0.2, 0.4), rot: rnd(0, 6.3), k: "oleo", c: "", t: 0 });
       }
-      // borracha no pé do muro: os pneus arrastando de lado na batida
-      for (let i = 0; i < 3; i++) {
-        const [a, b] = [at(rnd(-3.5, -0.5), -toTrack * rnd(0.6, 1.1)), at(rnd(0.5, 3), -toTrack * rnd(0.6, 1.1))];
-        this.skids.push({ x1: a[0], y1: a[1], x2: b[0], y2: b[1], t: 0, k: "pneu", w: 0.36 });
+      s.smokeT = rnd(18, 32);
+    }
+    if (s.smokeT > 0 && dt > 0) {
+      s.smokeT -= dt;
+      // (fumaça escura de óleo queimando, mais forte no começo; sobe e o vento leva)
+      if (Math.random() < dt * (2 + Math.min(6, s.smokeT * 0.3))) {
+        const [x, y] = at(rnd(-1.6, -0.9), rnd(-0.35, 0.35));
+        const gray = Math.round(rnd(58, 92));
+        this.parts.push({ x, y, vx: rnd(-0.4, 0.4) + 0.6, vy: rnd(-0.4, 0.4) + 0.3, t: 0, life: rnd(3, 4.5), size: rnd(0.35, 0.6), kind: "fumaca", c: `rgb(${gray},${gray - 2},${gray - 4})` });
       }
-      if (follow) this.kick(0.9);
     }
 
     // ---- saída de pista: o que o chão joga pra cima; na rua, faísca no muro ----
@@ -244,17 +239,18 @@ export class CarFx {
         this.parts.push({ x, y, vx: -fx * back + rnd(-3, 3), vy: -fy * back + rnd(-3, 3), t: 0, life: rnd(1.4, 2.2), size: rnd(1, 1.6), kind: "poeira", c: dustOf(g) });
         for (let i = 0; i < 4; i++) {
           const a = p.h + Math.PI + rnd(-0.8, 0.8), v = rnd(5, 12) + s.vDraw * 0.12;
-          this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: rnd(0.35, 0.7), size: rnd(0.06, 0.12), kind: "pedra", c: g === "brita" ? pick(["#b9773f", "#8f6a4b", "#d8a066", "#6f5a4a"]) : "#c9a874" });
+          this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: rnd(0.8, 1.3), size: rnd(0.06, 0.12), kind: "pedra", c: g === "brita" ? pick(["#b9773f", "#8f6a4b", "#d8a066", "#6f5a4a"]) : "#c9a874", z: 0.1, vz: rnd(1.5, 4.5) });
         }
       } else if (g === "grama") {
         this.parts.push({ x, y, vx: -fx * back + rnd(-2, 2), vy: -fy * back + rnd(-2, 2), t: 0, life: rnd(0.9, 1.4), size: rnd(0.7, 1.1), kind: "poeira", c: dustOf(g) });
         for (let i = 0; i < 4; i++) {
           const a = p.h + Math.PI + rnd(-0.9, 0.9), v = rnd(3, 9) + s.vDraw * 0.1;
-          this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: rnd(0.4, 0.8), size: rnd(0.07, 0.15), kind: i % 2 ? "grama" : "lama", c: i % 2 ? pick(["#3f8f34", "#4fa63c", "#2f7a2a"]) : pick(["#5a3f25", "#6b4a2c", "#4a3320"]), rot: rnd(0, 6.3), vr: rnd(-10, 10) });
+          this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0, life: rnd(0.8, 1.3), size: rnd(0.07, 0.15), kind: i % 2 ? "grama" : "lama", c: i % 2 ? pick(["#3f8f34", "#4fa63c", "#2f7a2a"]) : pick(["#5a3f25", "#6b4a2c", "#4a3320"]), rot: rnd(0, 6.3), vr: rnd(-10, 10), z: 0.1, vz: rnd(1.2, 3.5) });
         }
       } else if (!street) this.parts.push({ x, y, vx: -fx * back + rnd(-2, 2), vy: -fy * back + rnd(-2, 2), t: 0, life: 1, size: 0.8, kind: "poeira", c: dustOf("concreto") });
     }
     // ---- voltou pra pista vindo da brita/grama: espalha pedrisco ou terra no asfalto por um tempo ----
+    if (loose && !s.wasLoose && s.vDraw > 8) this.events.push({ k: "cascalho", v: s.vDraw, follow });
     if (loose) {
       s.dirt = g;
       s.wasLoose = true;
@@ -314,6 +310,66 @@ export class CarFx {
     return yaw;
   }
 
+  private newSt(): St {
+    return { landed: false, restDone: false, trailImp: [], smokeT: 0, crashWait: 0, prevP: null, vDraw: 0, last: null, dirt: null, dirtT: 0, wasLoose: false, vRecent: 0, trail: [], trailT: 0 };
+  }
+
+  /**
+   * batida contra a barreira, na hora em que o carro DESENHADO encosta (o renderer chama, pelo estado da corrida em
+   * que ela aconteceu), ou o carro destruído parando no meio do escape (sem barreira). `v` = velocidade contra a
+   * barreira (m/s), `side` = de que lado da pista ela fica, `barreira` = o que tem ali (pneu, guardrail, muro,
+   * alambrado; pro som). `contact` = onde encostou. Batida forte (`crash`) destrói o carro: daí pra frente ele
+   * aparece sem asa e sem uma roda (landed), e o renderer solta os pedaços grandes
+   */
+  impact(c: CarState, p: { x: number; y: number; h: number }, yaw: number, v: number, crash: boolean, side: number, follow: boolean, barreira: string, drawn?: { s: number; lat: number }, contact?: { x: number; y: number }) {
+    let s = this.st.get(c.id);
+    if (!s) this.st.set(c.id, (s = this.newSt()));
+    if (crash && s.landed) crash = false;
+    const fx = Math.cos(p.h), fy = Math.sin(p.h);
+    const dir = (dx: number, dy: number) => [fx * dx - fy * dy, fy * dx + fx * dy] as [number, number];
+    // o canto do carro do lado da barreira (se não veio o ponto de contato)
+    let cx = contact?.x, cy = contact?.y;
+    if (cx == null || cy == null) {
+      const { reach, rx } = outerCorner(yaw, 2.4, 0.95, side);
+      [cx, cy] = [p.x + fx * rx - fy * side * reach, p.y + fy * rx + fx * side * reach];
+    }
+    const team = c.team.livery?.base ?? c.team.color, vAlong = Math.min(60, Math.max(s.vRecent, v)), toTrack = -side;
+    const k = Math.min(1, v / 25);
+    // faíscas raspando ao longo da barreira (o carro ia pra frente); contra pneu, só as do assoalho no chão
+    const nSp = barreira === "pneu" ? Math.round((crash ? 10 : 3) * (0.5 + k)) : crash ? 46 : Math.round(8 + 26 * k);
+    for (let i = 0; i < nSp; i++) {
+      const [vx, vy] = dir(vAlong * rnd(0.25, 0.85) + rnd(-4, 4), toTrack * rnd(0, 7) + rnd(-2, 2));
+      this.parts.push({ x: cx + rnd(-0.4, 0.4), y: cy + rnd(-0.4, 0.4), vx, vy, t: 0, life: rnd(0.2, 0.65), size: 0.6, kind: "faisca" });
+    }
+    // lascas de fibra e da carenagem voando (caem, quicam e ficam no chão)
+    const nCh = crash ? 34 : Math.round(4 + 8 * k);
+    for (let i = 0; i < nCh; i++) {
+      const [vx, vy] = dir(vAlong * rnd(0.1, 0.5) + rnd(-3, 3), toTrack * rnd(1, 8) + rnd(-2, 2));
+      this.parts.push({ x: cx, y: cy, vx, vy, t: 0, life: rnd(2.4, 3.4), size: rnd(0.1, crash ? 0.32 : 0.2), kind: "fibra", c: i % 3 === 0 ? team : CARBON[i % 3], rot: rnd(0, 6.3), vr: rnd(-14, 14), z: rnd(0.3, 0.8), vz: rnd(1.5, crash ? 7 : 4) });
+    }
+    // nuvem: da barreira e do chão (brita clara, terra, borracha do pneu, concreto)
+    const g = drawn ? this.ground(drawn.s, drawn.lat) : "asfalto";
+    const dustC = barreira === "pneu" ? "rgb(70,68,66)" : looseGround(g) ? dustOf(g) : "rgb(178,174,168)";
+    const nDu = crash ? 14 : Math.round(3 + 5 * k);
+    for (let i = 0; i < nDu; i++) {
+      const [vx, vy] = dir(rnd(-2, 5) + vAlong * 0.08, toTrack * rnd(0, 4) + rnd(-2, 2));
+      this.parts.push({ x: cx + rnd(-0.6, 0.6), y: cy + rnd(-0.6, 0.6), vx, vy, t: 0, life: rnd(1.4, 2.6), size: rnd(0.6, 1.1), kind: looseGround(g) || barreira === "pneu" ? "poeira" : "fumaca", c: dustC });
+    }
+    // borracha no pé da barreira: os pneus arrastando de lado contra ela
+    for (let i = 0; i < (crash ? 3 : 1); i++) {
+      const l0 = rnd(-2.5, 0), l1 = rnd(1, 3.5), [ax, ay] = dir(l0, toTrack * rnd(0.2, 0.6)), [bx, by] = dir(l1, toTrack * rnd(0.2, 0.6));
+      this.skids.push({ x1: cx + ax, y1: cy + ay, x2: cx + bx, y2: cy + by, t: 0, k: "pneu", w: 0.36 });
+    }
+    if (crash) {
+      s.landed = true;
+      s.trailImp = [[p.x, p.y]];
+      // uns pedaços já no chão, em volta de onde encostou
+      for (let i = 0; i < 6; i++) this.spots.push({ x: cx + rnd(-1.5, 1.5), y: cy + rnd(-1.5, 1.5), r: rnd(0.1, 0.3), rot: rnd(0, 6.3), k: "detrito", c: i % 3 === 0 ? team : CARBON[i % 3], t: 0 });
+    }
+    this.events.push({ k: "batida", v, crash, barreira, follow });
+    if (follow) this.kick(crash ? 0.9 : 0.25 + 0.35 * k);
+  }
+
   /** tremor da câmera (batida do carro seguido) */
   kick(power: number) {
     this.shake = Math.max(this.shake, power);
@@ -345,8 +401,38 @@ export class CarFx {
       this.skids.length = 0;
       this.spots.length = 0;
     }
+    const keepSpots = g.skids !== "off";
     for (const p of this.parts) {
       p.t += dt;
+      if (p.z != null && p.vz != null) {
+        // pedaço com altura: cai, quica (perde força) e escorrega no chão até parar
+        p.vz -= 9.8 * dt;
+        p.z += p.vz * dt;
+        let f = Math.exp(-0.5 * dt);
+        if (p.z <= 0) {
+          p.z = 0;
+          if (p.vz < -1.2) {
+            p.vz = -p.vz * 0.3;
+            p.vx *= 0.6;
+            p.vy *= 0.6;
+            if (p.vr) p.vr *= 0.5;
+          } else {
+            p.vz = 0;
+            f = Math.exp(-7 * dt);
+          }
+        }
+        p.vx *= f;
+        p.vy *= f;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if (p.vr) p.rot = (p.rot ?? 0) + p.vr * dt * (p.z > 0 ? 1 : f);
+        // (lasca do carro que parou no chão vira pedaço caído: fica)
+        if (p.kind === "fibra" && p.z === 0 && p.vz === 0 && Math.hypot(p.vx, p.vy) < 0.6) {
+          if (keepSpots) this.spots.push({ x: p.x, y: p.y, r: p.size, rot: p.rot ?? 0, k: "detrito", c: p.c ?? "#22242a", t: 0 });
+          p.t = p.life;
+        }
+        continue;
+      }
       const f = Math.exp(-(p.kind === "faisca" ? 3 : p.kind === "pedra" || p.kind === "fibra" || p.kind === "grama" || p.kind === "lama" ? 2.4 : 1.6) * dt);
       p.vx *= f;
       p.vy *= f;
@@ -369,6 +455,10 @@ export class CarFx {
   /** as marcas no chão (as câmeras 3D desenham elas na cena: RealCars.skidMarks) */
   get skidList(): readonly Skid[] {
     return this.skids;
+  }
+  /** as partículas no ar (as câmeras 3D desenham fumaça, poeira e pedaços na cena: RealCars.airFx/flyFx) */
+  get partList(): readonly Part[] {
+    return this.parts;
   }
   /** as manchas e os pedaços no chão (RealCars.skidMarks) */
   get spotList(): readonly Spot[] {
@@ -425,11 +515,13 @@ export class CarFx {
   /** por cima dos carros: fumaça, poeira, faíscas e o que voa (pedra, grama, terra, pedaço do carro) */
   /** `sparks`: só as faíscas (desenhadas antes dos carros: saem de baixo deles) ou só o resto */
   /** `soft` < 1: câmeras 3D de perto (o carro fica grande na tela e o brilho virava uma bola de fogo) */
-  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, sparks: boolean, soft = 1) {
+  drawAir(o: CanvasRenderingContext2D, toCss: (p: { x: number; y: number }) => { x: number; y: number }, m: number, sparks: boolean, soft = 1, in3d = false) {
     if (!this.parts.length) return;
     o.save();
     for (const p of this.parts) {
       if ((p.kind === "faisca") !== sparks) continue;
+      // (`in3d`: a cena 3D já desenha a fumaça, a poeira e os pedaços que voam — RealCars.airFx/flyFx)
+      if (in3d && (p.kind === "fumaca" || p.kind === "poeira" || p.z != null)) continue;
       const q = p.t / p.life, { x, y } = toCss(p);
       if (p.kind === "faisca") {
         // titânio raspando: nasce branca de quente, passa pro amarelo e laranja e apaga vermelha;

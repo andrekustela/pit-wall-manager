@@ -6,7 +6,7 @@
 import { gearOf } from "./gear";
 import { buildSafetyCar } from "./safetyCar";
 import { takeTrack3d } from "./track3d";
-import { wallPoints } from "../sim/walls";
+import { WALL_PATHS, WALL_PIECES, wallPoints } from "../sim/walls";
 import { GLOVE_RULES, HELMET_RULES, SHOE_RULES, SUIT_RULES } from "./uniformStyles";
 import type { PieceLayer } from "./pieces";
 
@@ -26,7 +26,8 @@ import type { CarLook } from "./car3d";
 import { SCENE_LOD_DIST, gfx } from "./gfx";
 import { drawStickers, patternShapes } from "./carArt";
 import { liveryKey } from "../sim/livery";
-import { SPOT_COLOR, type Skid, type Spot } from "./carFx";
+import { SPOT_COLOR, type Part as FxPart, type Skid, type Spot } from "./carFx";
+import { Billboards, rgbOf, type Billboard } from "./fx3d";
 import type { GroundSrc } from "./ground";
 import { orderOf, samplePath } from "./paths3d";
 
@@ -376,7 +377,7 @@ export function upBox(geo: THREE.BufferGeometry, ang: number): THREE.Box3 {
  * - capacete: pelos pontos da peça endireitados (HELMET_UPRIGHT), dentro da caixa dela;
  * - macacão do piloto em pé: pelos atributos aBody/aBodyN/aPart (o corpo de braços abaixados, calculado pelo
  *   esqueleto em viewer3dScene) e pela caixa do corpo inteiro (`box`);
- * - macacão do piloto sentado no carro: pelos pontos da peça e pela caixa dela (parte do corpo não se sabe: -1);
+ * - macacão do piloto sentado no carro: pelo mesmo corpo "em pé", calculado pela pose (seatBody);
  * - luvas: onde a peça do macacão tem aGlove (luva sim/não, do pulso à ponta, dedo, costas/palma), com a cor e o
  *   desenho delas (GLOVE_RULES)
  */
@@ -387,7 +388,7 @@ export function uniformMaterial(base: THREE.Material, kind: "h" | "s", lv: NonNu
   const glove = kind === "s" && !!geo.attributes.aGlove;
   const gStyle = lv.gloveStyle ?? 0, gCol = lv.glove ?? lv.suit, gDet = lv.gloveDetail ?? lv.suitDetail;
   const ang = kind === "h" ? HELMET_UPRIGHT : 0;
-  const b = box ?? upBox(geo, ang);
+  const b = box ?? (geo.userData.bodyBox as THREE.Box3 | undefined) ?? upBox(geo, ang);
   const key = `${kind}|${col}|${det}|${style}|${body ? "b" : ""}|${glove ? `${gCol}|${gDet}|${gStyle}` : ""}|${b.min.toArray().map((v) => v.toFixed(3))}|${b.max.toArray().map((v) => v.toFixed(3))}`;
   let m = styledCache.get(key);
   if (m) return m;
@@ -530,6 +531,183 @@ export function gloveByWheel(pilot: THREE.Object3D | undefined) {
     }
     mesh.geometry.setAttribute("aGlove", new THREE.BufferAttribute(out, 4));
   });
+}
+
+/**
+ * suaviza as direções da superfície (média com os vizinhos, `it` vezes): as dobras modeladas no macacão (joelho,
+ * cintura) deixavam a "faixa lateral" manchada. Pontos repetidos (costuras) contam como um só, pela posição
+ */
+export function smoothDirs(geo: THREE.BufferGeometry, body: Float32Array, dirs: Float32Array, it: number) {
+  const cnt = dirs.length / 3, ids = new Int32Array(cnt), key = new Map<string, number>();
+  let m = 0;
+  for (let i = 0; i < cnt; i++) {
+    const k = `${Math.round(body[i * 3] * 5000)},${Math.round(body[i * 3 + 1] * 5000)},${Math.round(body[i * 3 + 2] * 5000)}`;
+    let id = key.get(k);
+    if (id === undefined) key.set(k, (id = m++));
+    ids[i] = id;
+  }
+  const adj: number[][] = Array.from({ length: m }, () => []);
+  const idx = geo.index, tri = idx ? idx.count : cnt;
+  for (let t = 0; t + 2 < tri; t += 3) {
+    const a = ids[idx ? idx.getX(t) : t], b = ids[idx ? idx.getX(t + 1) : t + 1], c = ids[idx ? idx.getX(t + 2) : t + 2];
+    adj[a].push(b, c);
+    adj[b].push(a, c);
+    adj[c].push(a, b);
+  }
+  let cur = new Float32Array(m * 3);
+  for (let i = 0; i < cnt; i++) for (let k = 0; k < 3; k++) cur[ids[i] * 3 + k] = dirs[i * 3 + k];
+  for (let r = 0; r < it; r++) {
+    const nx = new Float32Array(m * 3);
+    for (let a = 0; a < m; a++) {
+      let x = cur[a * 3], y = cur[a * 3 + 1], z = cur[a * 3 + 2];
+      for (const b of adj[a]) {
+        x += cur[b * 3];
+        y += cur[b * 3 + 1];
+        z += cur[b * 3 + 2];
+      }
+      const l = Math.hypot(x, y, z) || 1;
+      nx[a * 3] = x / l;
+      nx[a * 3 + 1] = y / l;
+      nx[a * 3 + 2] = z / l;
+    }
+    cur = nx;
+  }
+  for (let i = 0; i < cnt; i++) for (let k = 0; k < 3; k++) dirs[i * 3 + k] = cur[ids[i] * 3 + k];
+}
+
+/**
+ * piloto SENTADO no carro (sem esqueleto): onde cada ponto do macacão ficaria no piloto EM PÉ, pra os desenhos
+ * (SUIT_RULES) caírem no mesmo lugar do corpo. Sem isso as regras iam pela altura da peça e, com as pernas
+ * deitadas, a "cintura" pintava as pernas inteiras. aBody já sai na escala das regras (q, -1..1) com as medidas do
+ * piloto em pé (viewer3dScene.bodySpace): quadril 0, ombro 0,58, alto do pescoço 0,85, joelho -0,40, tornozelo
+ * -0,85, sola -1; cotovelo 0,24 e pulso 0,01 no braço. A pose é "desdobrada": tronco pelo eixo do quadril ao
+ * pescoço, coxa e canela pela distância pra frente, pé (em pé no pedal: a sola olha pra frente) até a sola,
+ * braços (os pontos que andam com o volante) do ombro até a mão. Os pontos de referência foram medidos na malha
+ * (coordenadas da peça "piloto"; iguais no carro_lo, carro e carro_hd)
+ */
+const SEAT = {
+  midX: 0.023, halfW: 0.22,
+  hipY: 0.05, hipZ: -0.85, topY: 0.43, topZ: -0.95, shY: 0.28,
+  kneeZ: -0.53, ankleZ: -0.16, soleZ: -0.065,
+  // braço: perto do ombro, abaixo de armY é a lateral do tronco (que também anda um pouco com o volante)
+  armY: 0.205, shZ: -0.97, elbowZ: -0.8, wristZ: -0.58, tipZ: -0.46,
+};
+export function seatBody(pilot: THREE.Object3D | undefined) {
+  pilot?.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const dict = mesh.morphTargetDictionary, morphs = mesh.geometry?.morphAttributes.position;
+    if (!mesh.isMesh || !dict || !morphs || mesh.geometry.attributes.aBody || (mesh.material as THREE.Material).name !== "macacao") return;
+    const mp = morphs[dict.giro_p3], mm = morphs[dict.giro_m3];
+    if (!mp || !mm) return;
+    const geo = mesh.geometry, pos = geo.attributes.position, nor = geo.attributes.normal, cnt = pos.count;
+    const S = SEAT, v = new THREE.Vector3(), d = new THREE.Vector3();
+    const disp = new Float32Array(cnt);
+    let top = 0;
+    for (let i = 0; i < cnt; i++) {
+      disp[i] = Math.max(d.fromBufferAttribute(mp, i).length(), d.fromBufferAttribute(mm, i).length());
+      top = Math.max(top, disp[i]);
+    }
+    // eixo do tronco (no plano de lado: z pra frente, y pra cima) e a divisa tronco/coxa (o meio do ângulo)
+    const tl = Math.hypot(S.topZ - S.hipZ, S.topY - S.hipY), tz = (S.topZ - S.hipZ) / tl, ty = (S.topY - S.hipY) / tl;
+    const uSh = (S.shY - S.hipY) / ty;
+    const nl = Math.hypot(tz - 1, ty), nz = (tz - 1) / nl, ny = ty / nl;
+    // (de um ponto de referência ao outro, em linha reta)
+    const lerp = (x: number, x0: number, x1: number, a: number, b: number) => a + (b - a) * Math.min(1, Math.max(0, (x - x0) / (x1 - x0)));
+    const body = new Float32Array(cnt * 3), bn = new Float32Array(cnt * 3), part = new Float32Array(cnt), neck = new Float32Array(cnt), at = new Float32Array(cnt * 3);
+    for (let i = 0; i < cnt; i++) {
+      v.fromBufferAttribute(pos, i);
+      at.set([v.x, v.y, v.z], i * 3);
+      bn.set([nor.getX(i), nor.getY(i), nor.getZ(i)], i * 3);
+      const qx = (v.x - S.midX) / S.halfW;
+      let qy: number, qz: number;
+      if (disp[i] > top * 0.03 && v.y > S.armY) {
+        // braço: do ombro (com a ponta do ombro um pouco acima) à ponta dos dedos
+        part[i] = 1;
+        qy = v.z < S.shZ ? Math.min(0.75, 0.58 + (S.shZ - v.z) * 3.3) : v.z < S.elbowZ ? lerp(v.z, S.shZ, S.elbowZ, 0.58, 0.24) : v.z < S.wristZ ? lerp(v.z, S.elbowZ, S.wristZ, 0.24, 0.01) : lerp(v.z, S.wristZ, S.tipZ, 0.01, -0.12);
+        qz = (v.y - 0.275) / 0.2;
+      } else if ((v.z - S.hipZ) * nz + (v.y - S.hipY) * ny > 0) {
+        // tronco e pescoço
+        const u = (v.z - S.hipZ) * tz + (v.y - S.hipY) * ty;
+        qy = u < uSh ? (0.58 * u) / uSh : lerp(u, uSh, tl, 0.58, 0.85);
+        qz = ((v.z - S.hipZ) * ty - (v.y - S.hipY) * tz) / 0.2;
+        if (qy > 0.7 && Math.abs(v.x - S.midX) < 0.075) neck[i] = 1;
+      } else {
+        // pernas: coxa, canela e o pé até a sola
+        qy = v.z < S.kneeZ ? Math.min(0.02, lerp(v.z, S.hipZ, S.kneeZ, 0, -0.4) + (v.z < S.hipZ ? (S.hipZ - v.z) * 0.5 : 0)) : v.z < S.ankleZ ? lerp(v.z, S.kneeZ, S.ankleZ, -0.4, -0.85) : lerp(v.z, S.ankleZ, S.soleZ, -0.85, -1);
+        qz = (v.y - S.hipY - 0.06) / 0.2;
+      }
+      body.set([qx, qy, Math.max(-1, Math.min(1, qz))], i * 3);
+    }
+    // (as direções ficam as da pose sentada: as regras só usam o lado, que não muda ao "desdobrar")
+    smoothDirs(geo, at, bn, 8);
+    geo.setAttribute("aBody", new THREE.BufferAttribute(body, 3));
+    geo.setAttribute("aBodyN", new THREE.BufferAttribute(bn, 3));
+    geo.setAttribute("aPart", new THREE.BufferAttribute(part, 1));
+    geo.setAttribute("aNeck", new THREE.BufferAttribute(neck, 1));
+    geo.userData.bodyBox = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+  });
+}
+
+/** materiais das peças soltas genéricas, por cor */
+const debrisMats = new Map<string, THREE.MeshStandardMaterial>();
+const debrisMat = (c: string) => {
+  let m = debrisMats.get(c);
+  if (!m) debrisMats.set(c, (m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, metalness: 0.1 })));
+  return m;
+};
+/** peça solta simples (m): bico, espelho, placa de fibra ou pneu da barreira */
+function debrisPiece(node: string, color: string): THREE.Object3D | null {
+  if (node === "bico") {
+    const g = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.26, 1.25, 10).rotateX(Math.PI / 2), debrisMat(color));
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.32).translate(0, -0.1, 0.45), debrisMat("#1b1c20"));
+    g.add(cone, tip);
+    return g;
+  }
+  if (node === "espelho") return new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.09, 0.13), debrisMat(color));
+  if (node === "placa") return new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.025, 0.42), debrisMat(color));
+  if (node === "pneu") return new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.12, 8, 18).rotateY(Math.PI / 2), debrisMat(color));
+  return null;
+}
+/** borracha e tinta na barreira (cor da equipe), por cor */
+const scuffTexs = new Map<string, THREE.CanvasTexture>();
+function scuffTex(color: string) {
+  let t = scuffTexs.get(color);
+  if (t) return t;
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext("2d")!;
+  const rr = (a: number, b: number) => a + Math.random() * (b - a);
+  // riscos escuros de borracha (mais fortes no meio, somem nas pontas)
+  for (let i = 0; i < 26; i++) {
+    const y = rr(14, 50), x0 = rr(0, 90), x1 = rr(160, 256);
+    const gr = g.createLinearGradient(x0, 0, x1, 0);
+    gr.addColorStop(0, "rgba(10,10,12,0)");
+    gr.addColorStop(0.5, `rgba(10,10,12,${rr(0.25, 0.6).toFixed(2)})`);
+    gr.addColorStop(1, "rgba(10,10,12,0)");
+    g.strokeStyle = gr;
+    g.lineWidth = rr(1, 4);
+    g.beginPath();
+    g.moveTo(x0, y);
+    g.lineTo(x1, y + rr(-6, 6));
+    g.stroke();
+  }
+  // tinta do carro que ficou na barreira
+  for (let i = 0; i < 6; i++) {
+    g.strokeStyle = color;
+    g.globalAlpha = rr(0.35, 0.8);
+    g.lineWidth = rr(1.5, 3.5);
+    g.beginPath();
+    const y = rr(24, 42);
+    g.moveTo(rr(40, 100), y);
+    g.lineTo(rr(150, 220), y + rr(-3, 3));
+    g.stroke();
+  }
+  t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  scuffTexs.set(color, t);
+  return t;
 }
 
 /** linha de cada marca no atlas (markAtlas) */
@@ -979,6 +1157,7 @@ export class RealCars {
       const vol = inner.getObjectByName("volante");
       const volC = vol ? new THREE.Box3().setFromObject(vol).getCenter(new THREE.Vector3()) : undefined;
       gloveByWheel(inner.getObjectByName("piloto"));
+      seatBody(inner.getObjectByName("piloto"));
       const steer = pivotOf(vol), arms = pivotOf(inner.getObjectByName("bracos"), volC), head = pivotOf(inner.getObjectByName("capacete"));
       // a tela do volante é peça própria: vai junto com o volante
       const tel = inner.getObjectByName("telinha");
@@ -1385,58 +1564,145 @@ export class RealCars {
     }
   }
 
-  /** pedaços grandes que soltaram do carro (asa, roda) — as peças 3D do próprio carro, e não figuras chapadas */
-  private flying = new Map<object, { wrap: THREE.Group; tumble: THREE.Group; half: number; spin: [number, number]; rest: [number, number] }>();
+  /** pedaços grandes que soltaram (asa, roda — as peças 3D do próprio carro —, bico, espelho, placa, pneu da barreira) */
+  private flying = new Map<object, { wrap: THREE.Group; tumble: THREE.Group; roll: THREE.Group; hx: number; hy: number; hz: number }>();
   /**
-   * câmeras 3D: as asas e rodas que soltaram (renderer.debris). Cada uma é uma cópia da peça do carro (com a
-   * pintura dele), no lugar e na direção do pedaço; no ar (até 0,6 s) sobe num arco e capota, depois fica
-   * deitada no chão (a roda de lado). null = tira todas
+   * câmeras 3D: os pedaços soltos (renderer.debris, com a física de lá: altura, capotada, a roda rolando em pé).
+   * Asa e roda são cópias da peça do carro (com a pintura dele); bico, espelhos, placas de fibra e pneus da barreira
+   * são peças simples. null = tira todos
    */
-  debris3d(list: readonly { x: number; y: number; h: number; t: number; node?: string; carId?: string }[] | null) {
+  debris3d(list: readonly { x: number; y: number; h: number; z: number; tx: number; tz: number; roll: number; node: string; carId: string; c?: string }[] | null) {
     const alive = new Set<object>();
     for (const d of list ?? []) {
-      if (!d.node || !d.carId) continue;
       let f = this.flying.get(d);
       if (!f) {
-        const car = this.cars.get(d.carId) ?? this.cars.get(`${d.carId}#lo`) ?? this.cars.get(`${d.carId}#hd`);
-        const src = car?.parts[d.node as Part];
-        if (!src?.parent) continue;
-        const piece = src.clone(true);
-        piece.visible = true;
-        piece.position.set(0, 0, 0);
-        piece.rotation.set(0, 0, 0);
-        const tumble = new THREE.Group(), wrap = new THREE.Group();
-        tumble.add(piece);
+        let piece: THREE.Object3D | null = null;
+        const scale = new THREE.Vector3(1, 1, 1);
+        if (d.node.startsWith("asa") || d.node.startsWith("roda")) {
+          const car = this.cars.get(d.carId) ?? this.cars.get(`${d.carId}#lo`) ?? this.cars.get(`${d.carId}#hd`);
+          const src = car?.parts[d.node as Part];
+          if (!src?.parent) continue;
+          piece = src.clone(true);
+          piece.visible = true;
+          piece.position.set(0, 0, 0);
+          piece.rotation.set(0, 0, 0);
+          scale.copy(src.parent.getWorldScale(new THREE.Vector3()));
+        } else piece = debrisPiece(d.node, d.c ?? "#22242a");
+        if (!piece) continue;
+        const roll = new THREE.Group(), tumble = new THREE.Group(), wrap = new THREE.Group();
+        roll.add(piece);
+        tumble.add(roll);
         wrap.add(tumble);
-        wrap.scale.copy(src.parent.getWorldScale(new THREE.Vector3()));
+        wrap.scale.copy(scale);
         wrap.updateMatrixWorld(true);
-        // (o centro da peça no meio do pedaço; metade da altura pra deitar no chão sem afundar)
-        const b = new THREE.Box3().setFromObject(piece), ctr = b.getCenter(new THREE.Vector3()).applyMatrix4(wrap.matrixWorld.clone().invert());
+        // (o centro da peça no meio do pedaço; o tamanho dela pra pousar no chão sem afundar)
+        const bx = new THREE.Box3().setFromObject(piece), ctr = bx.getCenter(new THREE.Vector3()).applyMatrix4(wrap.matrixWorld.clone().invert());
         piece.position.sub(ctr);
-        const wheel = d.node.startsWith("roda");
-        const half = wheel ? (b.max.x - b.min.x) / 2 : (b.max.y - b.min.y) / 2;
+        const sz = bx.getSize(new THREE.Vector3());
         piece.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = this.realShadow) : null));
         this.scene.add(wrap);
-        const sg = () => (Math.random() < 0.5 ? -1 : 1);
-        f = { wrap, tumble, half, spin: [sg() * (6 + Math.random() * 6), sg() * (4 + Math.random() * 5)], rest: wheel ? [0, Math.PI / 2] : [(Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.25] };
-        this.flying.set(d, f);
+        this.flying.set(d, (f = { wrap, tumble, roll, hx: sz.x / 2, hy: sz.y / 2, hz: sz.z / 2 }));
       }
       alive.add(d);
-      const air = Math.min(1, d.t / 0.6), lift = d.t < 0.6 ? 0.9 * Math.sin(air * Math.PI) : 0;
-      f.wrap.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + f.half + lift, d.y);
+      // (quanto o pedaço ocupa pra baixo, virado como está: pousa encostando no chão)
+      const half = Math.abs(Math.cos(d.tx)) * (f.hy * Math.abs(Math.cos(d.tz)) + f.hx * Math.abs(Math.sin(d.tz))) + Math.abs(Math.sin(d.tx)) * f.hz;
+      f.wrap.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + half + d.z, d.y);
       f.wrap.rotation.y = Math.PI / 2 - d.h;
-      // no ar capota; pousando vai pra posição de deitado
-      if (d.t < 0.6) f.tumble.rotation.set(f.spin[0] * d.t, 0, f.spin[1] * d.t);
-      else {
-        const k = Math.min(1, (d.t - 0.6) * 4);
-        f.tumble.rotation.set(f.spin[0] * 0.6 * (1 - k) + f.rest[0] * k, 0, f.spin[1] * 0.6 * (1 - k) + f.rest[1] * k);
-      }
+      f.tumble.rotation.set(d.tx, 0, d.tz);
+      f.roll.rotation.x = d.roll;
     }
     for (const [d, f] of this.flying)
       if (!alive.has(d)) {
         this.scene.remove(f.wrap);
         this.flying.delete(d);
       }
+  }
+
+  /** nuvens (fumaça, poeira) e lascas voando, na cena das câmeras 3D */
+  private puffs: Billboards | null = null;
+  private flyMesh: THREE.InstancedMesh | null = null;
+  /**
+   * câmeras 3D: fumaça e poeira do carFx como nuvens na cena (sobem, crescem, somem; ficam atrás de carro e barreira
+   * quando devem) e as lascas/pedrinhas que voam como pedacinhos com altura. null = esconde
+   */
+  airFx(list: readonly FxPart[] | null) {
+    const bb: Billboard[] = [], fly: FxPart[] = [];
+    for (const q of list ?? []) {
+      if (q.z != null) {
+        fly.push(q);
+        continue;
+      }
+      if (q.kind !== "fumaca" && q.kind !== "poeira") continue;
+      const k = q.t / q.life, smoke = q.kind === "fumaca";
+      const [r, g, bl] = rgbOf(q.c, smoke ? [0.84, 0.84, 0.86] : [0.63, 0.52, 0.36]);
+      // (fumaça sobe e abre; poeira fica baixa e espalha)
+      const size = (q.size + k * (smoke ? 1.5 : 2.3)) * 2.2;
+      bb.push({ x: q.x, y: this.groundY + this.hAt(q.x, q.y) + (smoke ? 0.5 + k * 2.6 : 0.25 + k * 0.9) + size * 0.25, z: q.y, size, r, g, b: bl, a: (smoke ? 0.38 : 0.55) * Math.pow(1 - k, 1.3), rot: (q.x * 13.7 + q.y * 7.1) % 6.28 });
+    }
+    if (bb.length || this.puffs) {
+      if (!this.puffs) {
+        this.puffs = new Billboards(700);
+        this.scene.add(this.puffs.mesh);
+      }
+      this.puffs.update(bb, this.persp.position);
+    }
+    if (fly.length || this.flyMesh) {
+      if (!this.flyMesh) {
+        this.flyMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.15 }), 500);
+        this.flyMesh.frustumCulled = false;
+        this.flyMesh.castShadow = this.realShadow;
+        this.scene.add(this.flyMesh);
+      }
+      const m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), col = new THREE.Color(), n = Math.min(fly.length, 500);
+      for (let i = 0; i < n; i++) {
+        const q = fly[i], r = q.rot ?? 0;
+        // (fibra: lasca fina; pedra: pedrinha; grama/lama: torrão achatado)
+        const sc = q.kind === "fibra" ? new THREE.Vector3(q.size * 2, 0.03, q.size) : q.kind === "pedra" ? new THREE.Vector3(q.size, q.size, q.size) : new THREE.Vector3(q.size * 1.4, q.size * 0.5, q.size);
+        e.set(r * 0.7, -r, r * 0.45);
+        m4.compose(new THREE.Vector3(q.x, this.groundY + this.hAt(q.x, q.y) + (q.z ?? 0) + sc.y / 2, q.y), qt.setFromEuler(e), sc);
+        this.flyMesh.setMatrixAt(i, m4);
+        this.flyMesh.setColorAt(i, col.set(q.c ?? "#555"));
+      }
+      this.flyMesh.count = n;
+      this.flyMesh.instanceMatrix.needsUpdate = true;
+      if (this.flyMesh.instanceColor) this.flyMesh.instanceColor.needsUpdate = true;
+      this.flyMesh.visible = n > 0;
+    }
+  }
+
+  /** que barreira tem perto de cada ponto (pneu, guardrail, muro, alambrado), numa grade de 4 m */
+  private wallKinds = new Map<number, [number, number, string][]>();
+  /** a barreira mais perto de (x, y) até 4 m: "pneu", "guardrail", "muro" (concreto), "alambrado" ou "" */
+  barrierKindAt(x: number, y: number): string {
+    const ci = Math.floor(x / 4), cj = Math.floor(y / 4);
+    let best = 16, kind = "";
+    for (let i = ci - 1; i <= ci + 1; i++)
+      for (let j = cj - 1; j <= cj + 1; j++)
+        for (const [px, py, k] of this.wallKinds.get(i * 100003 + j) ?? []) {
+          const d = (px - x) ** 2 + (py - y) ** 2;
+          if (d < best) {
+            best = d;
+            kind = k;
+          }
+        }
+    return kind === "pneu" || kind === "pneus" || kind === "blocopneus" ? "pneu" : kind === "guardrail" ? "guardrail" : kind === "alambrado" ? "alambrado" : kind ? "muro" : "";
+  }
+
+  /** marcas da batida na barreira (borracha e tinta do carro), as mais novas */
+  private scuffs: THREE.Mesh[] = [];
+  /** marca de borracha e de tinta (cor da equipe) na barreira, onde o carro raspou; de frente pra pista */
+  scuff(x: number, y: number, h: number, side: number, len: number, color: string) {
+    const nx = -Math.sin(h) * side, nz = Math.cos(h) * side;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.42), new THREE.MeshLambertMaterial({ map: scuffTex(color), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    m.position.set(x - nx * 0.05, this.groundY + this.hAt(x, y) + 0.32, y - nz * 0.05);
+    m.rotation.y = Math.atan2(-nx, -nz);
+    this.scene.add(m);
+    this.scuffs.push(m);
+    while (this.scuffs.length > 24) {
+      const o = this.scuffs.shift()!;
+      this.scene.remove(o);
+      o.geometry.dispose();
+    }
   }
 
   /** o chão do autódromo 3D desta pista (pro carFx saber se é brita, grama, asfalto...) */
@@ -1478,6 +1744,16 @@ export class RealCars {
           this.trackFor = track.name;
           // barreiras: as linhas (amostradas a cada 1 m) e as peças (o meio e as pontas, ~4 m)
           this.wallPts = wallPoints(res.paths.items, res.layer.pieces);
+          // (que barreira tem em cada lugar: pro som da batida, a marca nela e os pneus voando)
+          this.wallKinds = new Map();
+          const addK = (x: number, y: number, k: string) => {
+            const key = Math.floor(x / 4) * 100003 + Math.floor(y / 4);
+            let l = this.wallKinds.get(key);
+            if (!l) this.wallKinds.set(key, (l = []));
+            l.push([x, y, k]);
+          };
+          for (const it of res.paths.items) if (WALL_PATHS.has(it.t)) for (const [x, y] of samplePath(it, 1)) addK(x, y, it.t);
+          for (const pc of res.layer.pieces) if (WALL_PIECES.has(pc.k)) addK(pc.x, pc.z, pc.k);
           // (o chão do autódromo: pros efeitos de acidente saberem se é brita, grama, asfalto)
           this.groundSrc = { items: res.paths.items, orderOf, samplePath };
           this.trackLayer = res.layer;
@@ -1636,6 +1912,10 @@ export class RealCars {
       c.root.rotation.x = up > 0 || onboardMe ? 0 : Math.max(-0.012, Math.min(0.018, -(c.accSm ?? 0) * 0.0006));
       c.root.scale.setScalar(up > 0 ? 1 : d.scale);
       const L = d.look;
+      // destruído: apoiado onde falta a roda (aquele canto desce; a roda 0 é a da frente do lado esquerdo, +X)
+      const lostI = up > 0 ? -1 : L.wheels.indexOf("off");
+      c.root.rotation.z = lostI >= 0 ? (lostI % 2 === 0 ? -0.07 : 0.07) : 0;
+      if (lostI >= 0 && !onboardMe) c.root.rotation.x += lostI < 2 ? 0.05 : -0.04;
       c.parts.asa_d.visible = L.fw.state !== "none";
       c.parts.asa_t.visible = L.rw.state !== "none";
       const wheels: Part[] = ["roda_fe", "roda_fd", "roda_te", "roda_td"];

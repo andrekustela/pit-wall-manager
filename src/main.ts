@@ -556,6 +556,8 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
     // (solo: as barreiras do autódromo 3D vão pra corrida da sala, a que roda de verdade)
     if (conn instanceof LocalConnection) view.renderer.onWalls = (name, pts) => conn.setWalls(name, pts);
+    // som das batidas (na hora em que o carro desenhado encosta) e da brita
+    view.renderer.onSound = (e) => (e.k === "batida" ? sound.impact(e.v, e.crash, e.barreira, e.follow) : sound.gravel(e.v, e.follow));
     // canto de baixo: FPS e o MENU (pausa no solo; online não pausa)
     const corner = document.createElement("div");
     corner.className = "racecorner";

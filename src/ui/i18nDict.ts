@@ -115,7 +115,7 @@ export const DICT: [string, string, string][] = [
   ["ATIVAR", "ACTIVATE", "ACTIVAR"],
   ["O Pit Wall Manager é de graça e vai continuar sendo. Se você curte, dá pra ajudar com qualquer valor: cada apoio vira mais pistas, mais carros e mais jogo.", "Pit Wall Manager is free and will stay free. If you enjoy it, you can help with any amount: every bit of support becomes more tracks, more cars and more game.", "Pit Wall Manager es gratis y lo seguirá siendo. Si te gusta, puedes ayudar con cualquier valor: cada apoyo se convierte en más circuitos, más coches y más juego."],
   ["Idioma · Language · Idioma", "Idioma · Language · Idioma", "Idioma · Language · Idioma"],
-  ["Menus, botões e telas. Algumas mensagens da corrida e do rádio ainda ficam em português.", "Menus, buttons and screens. Some race and radio messages are still in Portuguese.", "Menús, botones y pantallas. Algunos mensajes de la carrera y de la radio aún están en portugués."],
+  ["Menus, botões, telas e as mensagens da corrida e do rádio.", "Menus, buttons, screens and the race and radio messages.", "Menús, botones, pantallas y los mensajes de la carrera y de la radio."],
   ["Brilho", "Brightness", "Brillo"],
   ["Contraste", "Contrast", "Contraste"],
   ["Saturação", "Saturation", "Saturación"],

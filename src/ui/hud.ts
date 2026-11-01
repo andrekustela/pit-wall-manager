@@ -617,7 +617,7 @@ export class Hud {
     {
       const cls = `calert ${al.lvl}`;
       if (box.className !== cls) box.className = cls;
-      const tip = al.sub ? `${al.t}: ${al.sub}` : al.t;
+      const tip = al.sub ? `${al.t} · ${al.sub}` : al.t;
       if (box.title !== tip) box.title = tip;
       set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
     }

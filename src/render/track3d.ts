@@ -285,7 +285,8 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   tryScreen(140, -1);
   for (const c of corners) tryScreen(c.s, c.k > 0 ? -1 : 1);
 
-  // ---- alambrado com mureta, dos dois lados (some onde outra parte da pista passa perto e no box) ----
+  // ---- alambrado com mureta, dos dois lados (no box, colado na pista de passagem). Onde outra parte da pista
+  // passa perto, ele vem pra mais perto, no meio entre as duas (antes sumia: a corrida batia num muro invisível) ----
   const runs: [number, number][][] = [];
   const posts: [number, number][] = [];
   for (const side of [1, -1]) {
@@ -300,8 +301,12 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
         flush();
         continue;
       }
-      const lat = z === 2 ? W2 + 3 : FENCE;
-      const p = track.pose(track.wrap(s), lat * side);
+      // (o mais longe possível até FENCE, mas mais perto desta parte da pista do que de qualquer outra)
+      let lat = z === 2 ? W2 + 3 : FENCE, p = track.pose(track.wrap(s), lat * side);
+      while (z !== 2 && lat > W2 + 2.5 && trk.near(p.x, p.y, lat) < lat - 1.5) {
+        lat -= 1;
+        p = track.pose(track.wrap(s), lat * side);
+      }
       if (trk.near(p.x, p.y, lat) < lat - 1.5) {
         flush();
         continue;
