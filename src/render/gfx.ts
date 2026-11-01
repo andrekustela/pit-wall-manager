@@ -5,7 +5,7 @@ import { storeGet, storeSet } from "../ui/common";
 /** carros na pista: "2d" (vetor, o mais leve), "sprite" (2D estilizado: imagens do Blender) ou "real" (3D) */
 export type CarStyle = "2d" | "sprite" | "real";
 /** câmera do modo 3D: de cima (como o 2D), de lado (inclinada, gira com o botão direito) ou atrás do carro */
-export type Cam3d = "cima" | "lado" | "tras" | "piloto";
+export type Cam3d = "cima" | "lado" | "tras" | "piloto" | "multicam";
 export type SceneQ = "baixa" | "media" | "top";
 /** a partir de quantos metros da câmera o cenário 3D usa a versão simples (PieceLayer.lod) */
 export const SCENE_LOD_DIST: Record<SceneQ, number> = { baixa: 60, media: 150, top: Infinity };

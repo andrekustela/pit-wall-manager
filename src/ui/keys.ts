@@ -5,7 +5,7 @@ import { storeGet, storeSet } from "./common";
 
 export type Action =
   | "pausa" | "vel1" | "vel2" | "vel3" | "vel4" | "vel5"
-  | "cam1" | "cam2" | "cam3" | "cam4"
+  | "cam1" | "cam2" | "cam3" | "cam4" | "cam5"
   | "painel" | "tabela" | "tv" | "trocarCarro"
   | "box" | "ritmoAtacar" | "ritmoNormal" | "ritmoPoupar" | "motorRica" | "motorNormal" | "motorPobre"
   | "musica" | "microfone" | "telaCheia";
@@ -21,6 +21,7 @@ export const ACTIONS: { id: Action; label: string; group: string; def: string }[
   { id: "cam2", label: "Câmera de lado", group: "Câmeras (carros 3D)", def: "Digit2" },
   { id: "cam3", label: "Câmera atrás do carro", group: "Câmeras (carros 3D)", def: "Digit3" },
   { id: "cam4", label: "Câmera piloto", group: "Câmeras (carros 3D)", def: "Digit4" },
+  { id: "cam5", label: "Câmera TV (MultiCam)", group: "Câmeras (carros 3D)", def: "Digit5" },
   { id: "painel", label: "Painel dos pilotos (completo / compacto / só nomes)", group: "Tela", def: "KeyM" },
   { id: "tabela", label: "Tabela de posições menor", group: "Tela", def: "KeyP" },
   { id: "tv", label: "Modo TV", group: "Tela", def: "KeyT" },

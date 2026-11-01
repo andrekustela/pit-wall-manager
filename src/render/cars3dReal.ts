@@ -5,17 +5,17 @@
 // "3D" estiver ligado.
 import { gearOf } from "./gear";
 import { buildSafetyCar } from "./safetyCar";
-import { takeTrack3d } from "./track3d";
+import { WET, takeTrack3d } from "./track3d";
 import { WALL_PATHS, WALL_PIECES, wallPoints } from "../sim/walls";
 import { GLOVE_RULES, HELMET_RULES, SHOE_RULES, SUIT_RULES } from "./uniformStyles";
-import type { PieceLayer } from "./pieces";
+import { SEE, type PieceLayer } from "./pieces";
 
 /** linhas e peças que são barreira de verdade (a corrida bate nelas) */
 import type { Track } from "../sim/track";
 import { COMPOUNDS, type Compound } from "../sim/types";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { updateLiveScreen } from "./liveScreen";
+import { setScreenSource, updateLiveScreen } from "./liveScreen";
 import type { Terrain } from "./terrain";
 import type { Race } from "../sim/race";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -36,6 +36,23 @@ const SHOW_LEN = 4.8;
 const PARTS = ["corpo", "asa_d", "asa_t", "roda_fe", "roda_fd", "roda_te", "roda_td"] as const;
 type Part = (typeof PARTS)[number];
 
+/**
+ * câmera da TV (MultiCam): fixa = parada no mundo (x, y; h m de altura) olhando o carro; presa = anda com o carro
+ * (back m atrás, side m pro lado, h m acima; olha look m à frente dele). fov = lente (menor = mais zoom)
+ */
+export interface CamSpec {
+  fixa: boolean;
+  x: number;
+  y: number;
+  h: number;
+  back: number;
+  side: number;
+  fov: number;
+  look: number;
+  /** presa girando em volta do carro: rad/s (a distância é back) */
+  orbit?: number;
+}
+
 export interface CarDraw {
   id: string;
   team: Team;
@@ -52,6 +69,12 @@ export interface CarDraw {
   lift?: number;
   /** composto do pneu: a capa da roda leva a cor dele (como a faixa colorida do pneu de verdade) */
   compound: Compound;
+  /** macaco do box: quanto o carro está levantado (m; negativo = o quique na saída) */
+  jack?: number;
+  /** DRS: 0 fechada, 1 aberta (a aba de cima da asa traseira gira: drsFlap) */
+  drs?: number;
+  /** parado no box: 0..1 da parada (mecânicos em volta); -1 fora */
+  pit?: number;
 }
 
 interface CarObj {
@@ -84,6 +107,133 @@ interface CarObj {
   driver?: THREE.Mesh[];
   /** telinha do volante: marcha e velocidade (só no carro detalhado da câmera piloto) */
   screen?: { g: CanvasRenderingContext2D; tex: THREE.CanvasTexture; t: number };
+  /** DRS: a aba de cima da asa traseira, no pivô da dobradiça (drsFlap) */
+  flap?: THREE.Object3D;
+  /** freio: o calor (0..1, sobe nas freadas fortes) e os recortes da tampa da roda, que brilham vermelhos */
+  heat?: number;
+  glow?: THREE.Mesh[];
+}
+
+/**
+ * MECÂNICOS DO BOX (só no 3D): 9 bonecos simples com o macacão da cor da equipe em volta do carro parado — os quatro
+ * das pistolas ajoelhados nas rodas, o do macaco da frente e o de trás, dois segurando o carro e o do pirulito na
+ * frente (placa vermelha; verde quando solta). Ficam onde o carro parou e somem 1,5 s depois de ele sair
+ */
+const crewGeo = {
+  torso: new THREE.BoxGeometry(0.44, 0.62, 0.26),
+  head: new THREE.SphereGeometry(0.14, 10, 8),
+  leg: new THREE.BoxGeometry(0.16, 0.78, 0.18),
+  arm: new THREE.BoxGeometry(0.11, 0.6, 0.12),
+  gun: new THREE.BoxGeometry(0.1, 0.1, 0.32),
+  pole: new THREE.CylinderGeometry(0.02, 0.02, 1.6, 5),
+  sign: new THREE.CylinderGeometry(0.28, 0.28, 0.03, 16),
+};
+const crewMats = new Map<string, THREE.MeshLambertMaterial>();
+const crewMat = (c: string) => {
+  let m = crewMats.get(c);
+  if (!m) crewMats.set(c, (m = new THREE.MeshLambertMaterial({ color: c })));
+  return m;
+};
+/** um mecânico (frente pra +Z): tronco, cabeça (capacete), pernas e braços; "arms" pra animar */
+function mechanic(suit: string, helmet: string) {
+  const g = new THREE.Group(), sm = crewMat(suit), dk = crewMat(new THREE.Color(suit).multiplyScalar(0.55).getStyle());
+  const torso = new THREE.Mesh(crewGeo.torso, sm);
+  torso.position.y = 1.1;
+  torso.castShadow = true;
+  const head = new THREE.Mesh(crewGeo.head, crewMat(helmet));
+  head.position.y = 1.56;
+  const legs = [-0.11, 0.11].map((x) => {
+    const l = new THREE.Mesh(crewGeo.leg, dk);
+    l.position.set(x, 0.4, 0);
+    return l;
+  });
+  const arms = [-0.29, 0.29].map((x) => {
+    const pv = new THREE.Object3D();
+    pv.position.set(x, 1.38, 0);
+    const a = new THREE.Mesh(crewGeo.arm, sm);
+    a.position.y = -0.28;
+    pv.add(a);
+    return pv;
+  });
+  g.add(torso, head, ...legs, ...arms);
+  g.userData.arms = arms;
+  return g;
+}
+
+/**
+ * DRS: separa a aba de cima da asa traseira (os triângulos da malha "asa" atrás do plano principal, acima de y 0,30
+ * e entre as placas laterais; medido no perfil da malha) e põe num pivô na dobradiça, na borda de trás:
+ * girando, a frente da aba sobe e abre a fenda, como na F1. A divisão é feita uma vez por malha (fica no userData)
+ */
+export function drsFlap(wing: THREE.Object3D | undefined): THREE.Object3D | undefined {
+  let pivot: THREE.Object3D | undefined;
+  wing?.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (pivot || !mesh.isMesh || (mesh.material as THREE.Material).name !== "asa") return;
+    const geo = mesh.geometry;
+    let sp = geo.userData.drs as { rest: THREE.BufferGeometry; flap: THREE.BufferGeometry; hinge: THREE.Vector3 } | undefined;
+    if (!sp) {
+      const src = geo.index ? geo.toNonIndexed() : geo, pos = src.attributes.position, n = pos.count;
+      // (a aba é soldada na malha principal da asa; as aletas finas em pé por cima dela são pedaços soltos e ficam
+      // paradas: pedaços pelos pontos em comum, só entra o maior)
+      const ids = new Map<string, number>(), par: number[] = [], tv: number[] = [];
+      const find = (x: number) => {
+        while (par[x] !== x) x = par[x] = par[par[x]];
+        return x;
+      };
+      for (let i = 0; i < n; i++) {
+        const k = `${Math.round(pos.getX(i) * 1000)},${Math.round(pos.getY(i) * 1000)},${Math.round(pos.getZ(i) * 1000)}`;
+        let v = ids.get(k);
+        if (v === undefined) ids.set(k, (v = par.push(par.length) - 1));
+        tv.push(v);
+      }
+      for (let t = 0; t + 2 < n; t += 3) {
+        par[find(tv[t + 1])] = find(tv[t]);
+        par[find(tv[t + 2])] = find(tv[t]);
+      }
+      const size = new Map<number, number>();
+      for (let t = 0; t < n; t += 3) size.set(find(tv[t]), (size.get(find(tv[t])) ?? 0) + 1);
+      const main = [...size].sort((x, y) => y[1] - x[1])[0]?.[0];
+      // aba: atrás do plano principal (z < -0,04), no alto (y > 0,30) e entre as placas laterais (|x| < 0,88)
+      const inFlap = (i: number) => pos.getY(i) > 0.3 && Math.abs(pos.getX(i)) < 0.88 && pos.getZ(i) < -0.04;
+      const keepA: number[] = [], flapA: number[] = [];
+      for (let t = 0; t + 2 < n; t += 3) (find(tv[t]) === main && inFlap(t) && inFlap(t + 1) && inFlap(t + 2) ? flapA : keepA).push(t, t + 1, t + 2);
+      if (flapA.length < 30) return;
+      const pick = (ids: number[]) => {
+        const g = new THREE.BufferGeometry();
+        for (const [k, a] of Object.entries(src.attributes)) {
+          const at = a as THREE.BufferAttribute, arr = new (at.array.constructor as Float32ArrayConstructor)(ids.length * at.itemSize);
+          ids.forEach((i, j) => {
+            for (let c = 0; c < at.itemSize; c++) arr[j * at.itemSize + c] = at.array[i * at.itemSize + c];
+          });
+          g.setAttribute(k, new THREE.BufferAttribute(arr, at.itemSize, at.normalized));
+        }
+        return g;
+      };
+      // dobradiça: na borda de trás da aba (o menor z), na altura média dela
+      let zMin = Infinity;
+      for (const i of flapA) zMin = Math.min(zMin, pos.getZ(i));
+      let yS = 0, yN = 0;
+      for (const i of flapA)
+        if (pos.getZ(i) < zMin + 0.03) {
+          yS += pos.getY(i);
+          yN++;
+        }
+      sp = { rest: pick(keepA), flap: pick(flapA), hinge: new THREE.Vector3(0, yS / Math.max(1, yN), zMin) };
+      geo.userData.drs = sp;
+    }
+    mesh.geometry = sp.rest;
+    pivot = new THREE.Object3D();
+    pivot.name = "drs";
+    pivot.position.copy(sp.hinge);
+    const fm = new THREE.Mesh(sp.flap, mesh.material);
+    fm.name = mesh.name + "_drs";
+    fm.position.copy(sp.hinge).negate();
+    fm.castShadow = mesh.castShadow;
+    pivot.add(fm);
+    mesh.add(pivot);
+  });
+  return pivot;
 }
 
 let model: THREE.Group | null = null;
@@ -1095,7 +1245,7 @@ export class RealCars {
       // rodas: giram e esterçam em volta do centro delas (a compressão do modelo tirou o ponto de giro
       // do eixo, e a roda "andava" pra frente e pra trás girando)
       inner.updateMatrixWorld(true);
-      const rings: THREE.Mesh[] = [], strobe: THREE.Mesh[] = [], blurs: THREE.Mesh[] = [];
+      const rings: THREE.Mesh[] = [], strobe: THREE.Mesh[] = [], blurs: THREE.Mesh[] = [], glow: THREE.Mesh[] = [];
       for (const w of ["roda_fe", "roda_fd", "roda_te", "roda_td"] as const) {
         const part = parts[w];
         if (!part.parent) continue;
@@ -1133,6 +1283,7 @@ export class RealCars {
         slots.position.set(out * Math.min(size.x / 2 - 0.004, 0.215), 0, 0);
         pivot.add(slots);
         strobe.push(marks, slots);
+        glow.push(slots);
         // borrão dos tracinhos girando rápido: anel claro translúcido no mesmo raio (aparece quando eles somem)
         const blur = new THREE.Mesh(new THREE.TorusGeometry(ringR * 0.86, 0.02, 4, 32), new THREE.MeshLambertMaterial({ color: "#cfcfcf", transparent: true, opacity: 0, depthWrite: false }));
         blur.rotation.y = Math.PI / 2;
@@ -1225,7 +1376,8 @@ export class RealCars {
           const mesh = o as THREE.Mesh;
           if (mesh.isMesh && (mesh.material as THREE.Material).name.includes("wheel_cover")) covers.push(mesh);
         });
-      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings, steer, arms, head, screen, driver, brakes, strobe, blurs };
+      const flap = drsFlap(parts.asa_t);
+      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings, steer, arms, head, screen, driver, brakes, strobe, blurs, flap, glow };
       this.scene.add(root);
       this.cars.set(cid, c);
     }
@@ -1356,6 +1508,116 @@ export class RealCars {
   private tvH: number | null = null;
   private lastNow = 0;
   private curPose: { pos: THREE.Vector3; look: THREE.Vector3; fov: number } | null = null;
+  /** pista molhada (track3d.WET): o quanto está molhada e se está secando (sem chuva) */
+  setWet(wet: number, rain: number) {
+    WET.uWet.value = wet;
+    WET.uDry.value += ((rain > 0.02 ? 0 : 1) - WET.uDry.value) * 0.02;
+  }
+  private crews = new Map<string, { g: THREE.Group; figs: THREE.Group[]; sign: THREE.Mesh; at: { x: number; y: number; h: number }; out: number }>();
+  /** mecânicos em volta do carro parado no box (d.pit 0..1); ficam 1,5 s depois de ele sair */
+  private crew(d: CarDraw, now: number) {
+    let cr = this.crews.get(d.id);
+    const stopped = (d.pit ?? -1) >= 0;
+    if (!stopped && !cr) return;
+    if (!cr) {
+      const suit = d.team.livery?.base ?? d.team.color, helm = d.team.livery?.helmet ?? "#f2f2f2";
+      const g = new THREE.Group(), figs: THREE.Group[] = [];
+      // [à frente (m), pro lado (m), virado pra (rad, 0 = pro bico), ajoelhado]
+      const spots: [number, number, number, boolean][] = [
+        [1.55, 1.3, -Math.PI / 2, true], [1.55, -1.3, Math.PI / 2, true], [-1.6, 1.3, -Math.PI / 2, true], [-1.6, -1.3, Math.PI / 2, true],
+        [3.5, 0, Math.PI, false], [-3.2, 0, 0, false], [0.2, 1.45, -Math.PI / 2, false], [0.2, -1.45, Math.PI / 2, false], [4.7, 1.2, Math.PI, false],
+      ];
+      for (const [fwd, side, face, kneel] of spots) {
+        const f = mechanic(suit, helm);
+        f.position.set(side, kneel ? -0.42 : 0, fwd);
+        f.rotation.set(kneel ? 0.35 : 0, face, 0, "YXZ");
+        if (kneel) {
+          const gun = new THREE.Mesh(crewGeo.gun, crewMat("#1b1d22"));
+          gun.position.set(0, 0.9, 0.36);
+          f.add(gun);
+        }
+        f.userData.kneel = kneel;
+        g.add(f);
+        figs.push(f);
+      }
+      // pirulito: placa redonda num cabo, na mão do último
+      const pole = new THREE.Mesh(crewGeo.pole, crewMat("#cfcfcf"));
+      pole.position.set(0.3, 1.9, 0.25);
+      const sign = new THREE.Mesh(crewGeo.sign, crewMat("#e01e1e"));
+      sign.rotation.x = Math.PI / 2;
+      sign.position.set(0.3, 2.7, 0.25);
+      figs[8].add(pole, sign);
+      this.scene.add(g);
+      cr = { g, figs, sign, at: { x: d.x, y: d.y, h: d.h }, out: 0 };
+      this.crews.set(d.id, cr);
+    }
+    if (stopped) {
+      cr.out = 0;
+      cr.at = { x: d.x, y: d.y, h: d.h };
+    } else if (!cr.out) cr.out = now;
+    if (cr.out && now - cr.out > 1500) {
+      this.scene.remove(cr.g);
+      this.crews.delete(d.id);
+      return;
+    }
+    const { x, y, h } = cr.at;
+    cr.g.position.set(x, this.groundY + this.hAt(x, y), y);
+    cr.g.rotation.y = Math.PI / 2 - h;
+    // pistolas (as rodas): o braço tremendo enquanto apertam; no fim, mãos pra cima; pirulito verde e erguido ao soltar
+    const p = d.pit ?? 1, done = !stopped || p > 0.92;
+    cr.figs.forEach((f, i) => {
+      const [l, r] = f.userData.arms as THREE.Object3D[];
+      const shake = f.userData.kneel && !done ? Math.sin(now / 22 + i) * 0.12 : 0;
+      const up = done && i < 4 ? -2.6 : f.userData.kneel ? -1.2 : -0.25;
+      l.rotation.x = up + shake;
+      r.rotation.x = up - shake;
+    });
+    (cr.sign.material as THREE.Material) = crewMat(done ? "#1fb84a" : "#e01e1e");
+    cr.figs[8].rotation.x = done ? -0.25 : 0;
+  }
+
+  /** céu fechando antes da chuva (0 = limpo, 1 = carregado): luz mais fraca, céu e neblina cinza */
+  cloud = 0;
+  /** telões: câmera ao vivo do carro seguido (alterna com a classificação; no replay fica nela) */
+  private screenRT: THREE.WebGLRenderTarget | null = null;
+  private screenCam = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 900);
+  private screenN = 0;
+  screenLive = false;
+
+  /** câmera parada na beira da pista (x, y do mundo), olhando o carro: replay, largada, bandeirada e Modo TV */
+  replayCam: { x: number; y: number } | null = null;
+  /** a próxima troca de câmera é corte seco (Modo TV), sem a transição de 0,9 s */
+  cutNow = false;
+  /** tomada da TV (MultiCam) valendo agora (null = a câmera escolhida) */
+  camSpec: CamSpec | null = null;
+  private specRef: CamSpec | null = null;
+  private specH: number | null = null;
+  private specT = 0;
+  private specT0 = 0;
+  /** onde fica a câmera de uma tomada da TV: fixa olhando o carro; presa, pela direção dele suavizada (curva longa não
+   *  balança a câmera) — a posição é a exata do carro, sem atraso */
+  private specPose(tf: { x: number; y: number; h: number }, sp: CamSpec) {
+    const now = performance.now(), dt = Math.min(0.1, (now - (this.specT || now)) / 1000), snap = sp !== this.specRef;
+    this.specT = now;
+    if (snap) this.specT0 = now;
+    this.specRef = sp;
+    if (sp.fixa) return { pos: new THREE.Vector3(sp.x, this.hAt(sp.x, sp.y) + sp.h, sp.y), look: new THREE.Vector3(tf.x, this.hAt(tf.x, tf.y) + 0.8, tf.y), fov: sp.fov };
+    if (snap || this.specH == null) this.specH = tf.h;
+    else {
+      const dh = Math.atan2(Math.sin(tf.h - this.specH), Math.cos(tf.h - this.specH));
+      this.specH += dh * (1 - Math.exp(-dt * 4));
+    }
+    const fx = Math.cos(this.specH), fz = Math.sin(this.specH);
+    // (girando: a câmera dá a volta no carro na distância back, começando de onde side manda)
+    let back = sp.back, side = sp.side;
+    if (sp.orbit) {
+      const a = Math.atan2(sp.side, sp.back) + sp.orbit * ((now - this.specT0) / 1000), rr = Math.hypot(sp.back, sp.side);
+      [back, side] = [rr * Math.cos(a), rr * Math.sin(a)];
+    }
+    const px = tf.x - fx * back - fz * side, pz = tf.y - fz * back + fx * side, lx = tf.x + fx * sp.look, lz = tf.y + fz * sp.look;
+    return { pos: new THREE.Vector3(px, this.hAt(px, pz) + sp.h, pz), look: new THREE.Vector3(lx, this.hAt(lx, lz) + 0.8, lz), fov: sp.fov };
+  }
+  private hadReplay = false;
   private trans: { from: { pos: THREE.Vector3; look: THREE.Vector3; fov: number }; t0: number } | null = null;
   /** ainda deslizando de uma câmera pra outra? (o renderer segura a cena 3D até acabar) */
   transitioning() {
@@ -1869,8 +2131,8 @@ export class RealCars {
       const tx = tf ? ((2 * ext) / this.sun.shadow.mapSize.x) * 2 : 0;
       const sx = tf ? Math.round(cx / tx) * tx : cx, sz = tf ? Math.round(cz / tx) * tx : cz;
       // (inclinada: menos luz ambiente e mais sol, pra sombra marcar e as cores não lavarem)
-      this.hemi.intensity = tf ? 1.05 : 1.3;
-      this.sun.intensity = tf ? 2.3 : 2.2;
+      this.hemi.intensity = (tf ? 1.05 : 1.3) * (1 - 0.28 * this.cloud);
+      this.sun.intensity = (tf ? 2.3 : 2.2) * (1 - 0.6 * this.cloud);
       this.renderer.toneMappingExposure = tf ? 0.85 : 1;
       if (tf) this.sun.position.set(sx - 60, 150, sz - 80);
       else this.sun.position.set(cx - 14, 12, cz - 18);
@@ -1888,7 +2150,7 @@ export class RealCars {
       c.root.visible = true;
       // pendurado no guindaste: sobe de verdade (1,6 m, no gancho da lança estendida; mais alto a sombra caía longe); no 3D não aumenta de tamanho
       const up = d.lift ?? 0;
-      c.root.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + (up > 0 ? up * 1.6 : (d.scale - 1) * 3), d.y);
+      c.root.position.set(d.x, this.groundY + this.hAt(d.x, d.y) + (up > 0 ? up * 1.6 : (d.scale - 1) * 3) + (d.jack ?? 0), d.y);
       const blob = c.root.getObjectByName("blob");
       if (blob) {
         blob.visible = !!tf && up <= 0 && this.realShadow;
@@ -1907,6 +2169,12 @@ export class RealCars {
         c.accSm = (c.accSm ?? 0) + (Math.max(-60, Math.min(60, a)) - (c.accSm ?? 0)) * (1 - Math.exp(-dt * 5));
       }
       c.lastV = d.v;
+      // freio: esquenta nas freadas fortes e esfria devagar; quente, os recortes da tampa da roda brilham vermelhos
+      // (o disco em brasa aparecendo por eles)
+      if (dt > 0) c.heat = Math.max(0, Math.min(1, (c.heat ?? 0) + Math.max(0, -(c.accSm ?? 0) - 18) * dt * 0.08 - dt * 0.3));
+      const hot = Math.pow(c.heat ?? 0, 1.4);
+      for (const g of c.glow ?? []) (g.material as THREE.MeshLambertMaterial).emissive.setRGB(1.6 * hot, 0.32 * hot, 0.04 * hot);
+      this.crew(d, performance.now());
       c.root.rotation.order = "YXZ";
       // (câmera piloto no próprio carro: sem, a câmera não acompanha o mergulho e o cockpit balançava)
       c.root.rotation.x = up > 0 || onboardMe ? 0 : Math.max(-0.012, Math.min(0.018, -(c.accSm ?? 0) * 0.0006));
@@ -1955,6 +2223,8 @@ export class RealCars {
       const stv = (window as unknown as { __volante?: number }).__volante ?? L.steer;
       // (com as poses, o volante gira pelas poses; sem elas — modelo antigo — gira o pivô)
       if (c.steer && !c.driver?.length) c.steer.rotation.z = stv * 2.5;
+      // DRS: a frente da aba sobe (gira na dobradiça de trás)
+      if (c.flap) c.flap.rotation.x = -(d.drs ?? 0) * 0.5;
       if (c.arms && !c.driver?.length) c.arms.rotation.z = stv * 2.5;
       // (o capacete do arquivo vem inclinado pra trás, olhando pro céu: 22° pra frente deixa a viseira reta)
       if (c.head) {
@@ -2061,7 +2331,14 @@ export class RealCars {
         this.trans = { from: this.curPose ?? pose("cima"), t0: now };
         this.lastKind = kind;
       }
+      // (câmera da beira da pista e cortes do Modo TV: corte seco, sem a transição de câmera)
+      const rc = this.replayCam;
+      if (rc || this.hadReplay || this.cutNow || this.camSpec) this.trans = null;
+      this.cutNow = false;
+      this.hadReplay = !!rc;
       let cp = pose(kind);
+      if (rc) cp = { pos: new THREE.Vector3(rc.x, this.hAt(rc.x, rc.y) + 7, rc.y), look: new THREE.Vector3(tf.x, this.hAt(tf.x, tf.y) + 0.8, tf.y), fov: 30 };
+      else if (this.camSpec) cp = this.specPose(tf, this.camSpec);
       if (this.trans) {
         const k = Math.min(1, (now - this.trans.t0) / 900);
         const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
@@ -2097,6 +2374,34 @@ export class RealCars {
         fog.far = Math.max(1100, dist * 5);
       }
       this.trackLayer?.lod(p.position, SCENE_LOD_DIST[gfx().sceneQ]);
+      // céu e neblina fechando com a chuva chegando
+      const skyC = new THREE.Color("#74c6f2").lerp(new THREE.Color("#79838f"), this.cloud);
+      if (this.scene.background instanceof THREE.Color) this.scene.background.copy(skyC);
+      if (fog) fog.color.copy(skyC);
+      // telões: a cada 3 quadros, a câmera de TV atrás do carro seguido numa imagem pequena (sem sombra nova; os
+      // telões mostram a classificação enquanto isso, senão a imagem entrava nela mesma)
+      const fc = this.cars.get(this.followId)?.root;
+      if (this.screenLive && fc && gfx().shadows !== "baixo") {
+        if (++this.screenN % 3 === 0) {
+          this.screenRT ??= new THREE.WebGLRenderTarget(384, 216, { colorSpace: THREE.SRGBColorSpace });
+          const yaw = fc.rotation.y, bx = Math.sin(yaw), bz = Math.cos(yaw);
+          this.screenCam.position.set(fc.position.x - bx * 13, fc.position.y + 4.2, fc.position.z - bz * 13);
+          this.screenCam.lookAt(fc.position.x + bx * 8, fc.position.y + 0.8, fc.position.z + bz * 8);
+          setScreenSource(null);
+          const au = r.shadowMap.autoUpdate;
+          r.shadowMap.autoUpdate = false;
+          r.setRenderTarget(this.screenRT);
+          r.render(this.scene, this.screenCam);
+          r.setRenderTarget(null);
+          r.shadowMap.autoUpdate = au;
+        }
+        if (this.screenRT) setScreenSource(this.screenRT.texture);
+      } else setScreenSource(null);
+      // telhado entre a câmera e o carro seguido ganha um furo (pieces.SEE); na câmera piloto não
+      SEE.uOn.value = pil ? 0 : 1;
+      SEE.uCam.value.copy(cp.pos);
+      SEE.uCar.value.set(tf.x, this.hAt(tf.x, tf.y) + 1, tf.y);
+      SEE.uR.value = Math.min(22, Math.max(7, cp.pos.distanceTo(SEE.uCar.value) * 0.11));
       r.render(this.scene, p);
       // (pra medir: triângulos desenhados neste quadro, sem a sombra)
       (window as unknown as { __tris: number }).__tris = r.info.render.triangles;    } else {

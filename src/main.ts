@@ -556,8 +556,22 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
     view.renderer = new Renderer(app.querySelector<HTMLCanvasElement>("#view")!, race, view.follow, setFollow);
     // (solo: as barreiras do autódromo 3D vão pra corrida da sala, a que roda de verdade)
     if (conn instanceof LocalConnection) view.renderer.onWalls = (name, pts) => conn.setWalls(name, pts);
+    // replay da batida: no solo a corrida espera parada enquanto ele passa (online não dá pra parar os outros)
+    let replaySpeed = 0;
+    view.renderer.onReplay = (on) => {
+      if (!this.lobby?.solo || !isHost) return;
+      if (on) {
+        replaySpeed = view.speed;
+        if (view.speed !== 0) setSpeed(0);
+      } else if (replaySpeed && view.speed === 0) setSpeed(replaySpeed);
+    };
     // som das batidas (na hora em que o carro desenhado encosta) e da brita
-    view.renderer.onSound = (e) => (e.k === "batida" ? sound.impact(e.v, e.crash, e.barreira, e.follow) : sound.gravel(e.v, e.follow));
+    view.renderer.onSound = (e) => {
+      if (e.k === "batida") sound.impact(e.v, e.crash, e.barreira, e.follow);
+      else if (e.k === "cascalho") sound.gravel(e.v, e.follow);
+      else if (e.k === "box") sound.pitStop(e.dur, e.follow);
+      else sound.pitRelease(e.follow);
+    };
     // canto de baixo: FPS e o MENU (pausa no solo; online não pausa)
     const corner = document.createElement("div");
     corner.className = "racecorner";
@@ -623,6 +637,12 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       // (teclas de Configurações > ATALHOS; Ctrl/Alt fica pro navegador)
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       const act = actionOf(e);
+      // replay da batida passando: Esc ou a pausa pulam (e a corrida volta)
+      if (view.renderer.replaying() && (act === "pausa" || e.key === "Escape")) {
+        e.preventDefault();
+        view.renderer.endReplay();
+        return;
+      }
       if (act === "pausa") {
         e.preventDefault();
         setSpeed(view.speed === 0 ? prevSpeed : 0);
@@ -636,14 +656,14 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       if (act === "painel") view.hud.toggleCompact();
       if (act === "tabela") view.hud.toggleBoard();
       // câmera do 3D (de cima, de lado, atrás do carro, piloto)
-      const camKey = ({ cam1: "cima", cam2: "lado", cam3: "tras", cam4: "piloto" } as const)[act as "cam1"];
+      const camKey = ({ cam1: "cima", cam2: "lado", cam3: "tras", cam4: "piloto", cam5: "multicam" } as const)[act as "cam1"];
       if (camKey) {
         e.preventDefault();
         // (carros 2D ou 2D estilizado: só a câmera de cima)
         if (car3dPref.style !== "real") toast("Câmeras: só com os carros em 3D (Configurações > Gráficos)");
         else if (camKey !== currentCam3d()) {
           setCam3d(camKey);
-          toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro", piloto: "piloto (botão direito gira)" }[camKey]}`);
+          toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro", piloto: "piloto (botão direito gira)", multicam: "TV (MultiCam): troca sozinha" }[camKey]}`);
         }
       }
       if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
@@ -704,7 +724,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       if (view.follow === "SC" && !(race.sc.active && race.sc.onTrack)) setFollow(race.leader().id);
       view.renderer.draw(realDt, view.speed);
       reportFrame(now);
-      sound.update(race, view.follow, view.speed);
+      sound.update(race, view.follow, view.speed, view.renderer.ear);
       if (race.events.length > this.soundEvents) {
         // voltando de aba minimizada (frame muito atrasado): não despeja os sons acumulados
         if (realDt < 0.5) sound.events(race.events.slice(this.soundEvents), my);

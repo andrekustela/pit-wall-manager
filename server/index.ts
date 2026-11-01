@@ -12,14 +12,14 @@ import { slugOf, wallPointsFromJson } from "../src/sim/walls";
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = resolve(process.cwd(), "dist");
 
-// barreiras do autódromo de cada pista (as mesmas que o jogo usa no 3D), lidas uma vez
+// barreiras do autódromo de cada pista (as mesmas que o jogo usa no 3D), lidas uma vez: o .pecas.json (autódromo
+// feito no editor) ou o .muros.json (só as barreiras do autódromo automático, geradas por scripts/export-muros.ts)
 const wallCache = new Map<string, [number, number][] | null>();
 Room.wallsFor = (name) => {
   const slug = slugOf(name);
   if (!wallCache.has(slug)) {
     let pts: [number, number][] | null = null;
-    for (const dir of [resolve(process.cwd(), "public"), DIST]) {
-      const f = join(dir, "autodromos", `${slug}.pecas.json`);
+    for (const f of [resolve(process.cwd(), "public"), DIST].flatMap((dir) => ["pecas", "muros"].map((k) => join(dir, "autodromos", `${slug}.${k}.json`)))) {
       if (!existsSync(f)) continue;
       try {
         pts = wallPointsFromJson(readFileSync(f, "utf8"));

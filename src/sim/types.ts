@@ -266,6 +266,10 @@ export interface CarState {
   /** guindaste retirando o carro: tempo (s), duração e se ele está em cima da pista (segura o safety car) */
   recover?: { t: number; dur: number; onTrack: boolean } | null;
   position: number;
+  /** posição no grid de largada (pros destaques do fim da corrida) */
+  grid?: number;
+  /** parada mais rápida dele (s parado) */
+  bestStop?: number;
   penalty: number;
 
   /** tempo de volta estimado no momento (s) */

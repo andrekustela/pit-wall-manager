@@ -109,6 +109,11 @@ button { font-family: var(--font); color: inherit; cursor: pointer; }
 .go { margin-top: 28px; font-family: var(--pix); font-size: 18px; padding: 12px 28px; background: var(--accent); border: 2px solid #ff6a70; box-shadow: 0 0 0 2px #000, 4px 4px 0 2px #000; }
 .go:active { transform: translate(2px, 2px); box-shadow: 0 0 0 2px #000, 2px 2px 0 2px #000; }
 
+/* destaques da corrida (tela do pódio, em cima da tabela) */
+.highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.highlights .hl { display: flex; gap: 10px; align-items: center; padding: 8px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; font-size: 14px; line-height: 1.3; }
+.highlights .hi { font-size: 22px; }
+.highlights small { display: block; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; }
 .results { width: 100%; border-collapse: collapse; font-size: 14px; }
 .results td, .results th { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
 .results th { color: var(--muted); font-weight: 400; font-size: 12px; }

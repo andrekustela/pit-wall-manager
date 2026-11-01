@@ -207,15 +207,15 @@ export function vwall(pts: [number, number][], y0: number, y1: number, uvm = 2.5
   return g;
 }
 
-/** módulo de arquibancada (14 m de frente, 12 de fundo): degraus, cadeiras em L em blocos verdes e amarelos, escada no meio, cobertura curva */
-export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = true, lift = 0) {
+/** módulo de arquibancada (14 m de frente, 12 de fundo): degraus, cadeiras em L em blocos verdes e amarelos, escada no meio, cobertura curva.
+ *  withRoof false: sem as telhas da cobertura (ficam pilares e arcos; as telhas vêm de standRoof, com material próprio) */
+export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = true, lift = 0, withRoof = true) {
   const b = new GB();
   // (sobre pilares: tudo sobe `lift` m e cada degrau vira uma laje fina, com o vão livre por baixo)
   const L = lift;
   const bx = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: THREE.Color) => b.box(x0, y0 + L, z0, x1, y1 + L, z1, c);
   const qd = (p0: number[], p1: number[], p2: number[], p3: number[], c: THREE.Color) => b.quad(...([p0, p1, p2, p3].map((v) => [v[0], v[1] + L, v[2]]) as [number[], number[], number[], number[]]), c);
   const concrete = C("#c4c8cc"), nose = C("#a9aeb3"), back = C("#8c9298"), steel = C("#9aa3ab"), g = C(green), y = C(yellow);
-  const roof = C("#5bdc9f"), under = C("#3c9f73");
   const n = 8, D = 1.4, R = 0.9;
   for (let i = 0; i < n; i++) {
     const z0 = i * D, top = 1.2 + i * R;
@@ -255,11 +255,7 @@ export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = tru
   }
   if (!covered) return b.geo();
   // pilares atrás e arcos da cobertura
-  const arc: [number, number][] = [];
-  for (let i = 0; i <= 8; i++) {
-    const t = i / 8;
-    arc.push([12.2 - 13.4 * t, 11.0 + 1.8 * (1 - t) + 1.1 * Math.sin(Math.PI * t)]);
-  }
+  const arc = standArc();
   for (const x of [-6.8, 0, 6.8]) {
     b.box(x - 0.2, 0, n * D + 0.3, x + 0.2, 12.6 + L, n * D + 0.7, steel);
     for (let i = 0; i < 8; i++) {
@@ -268,11 +264,31 @@ export function standModule(green = "#18b04f", yellow = "#f6d21a", covered = tru
       qd([x - 0.1, yi - 0.2, zi], [x - 0.1, yi - 0.55, zi], [x - 0.1, yj - 0.55, zj], [x - 0.1, yj - 0.2, zj], steel);
     }
   }
+  if (withRoof) standTiles(b, lift);
+  return b.geo();
+}
+
+/** curva da cobertura da arquibancada: (z, y) de trás pra frente */
+function standArc() {
+  const arc: [number, number][] = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    arc.push([12.2 - 13.4 * t, 11.0 + 1.8 * (1 - t) + 1.1 * Math.sin(Math.PI * t)]);
+  }
+  return arc;
+}
+function standTiles(b: GB, lift: number) {
+  const roof = C("#5bdc9f"), under = C("#3c9f73"), arc = standArc();
   for (let i = 0; i < 8; i++) {
     const [zi, yi] = arc[i], [zj, yj] = arc[i + 1];
-    qd([-7.05, yi, zi], [7.05, yi, zi], [7.05, yj, zj], [-7.05, yj, zj], roof);
-    qd([-7.05, yi - 0.2, zi], [-7.05, yj - 0.2, zj], [7.05, yj - 0.2, zj], [7.05, yi - 0.2, zi], under);
+    b.quad([-7.05, yi + lift, zi], [7.05, yi + lift, zi], [7.05, yj + lift, zj], [-7.05, yj + lift, zj], roof);
+    b.quad([-7.05, yi - 0.2 + lift, zi], [-7.05, yj - 0.2 + lift, zj], [7.05, yj - 0.2 + lift, zj], [7.05, yi - 0.2 + lift, zi], under);
   }
+}
+/** só as telhas da cobertura da arquibancada (pra ganhar o furo de ver o carro: pieces.seeThrough) */
+export function standRoof(lift = 0) {
+  const b = new GB();
+  standTiles(b, lift);
   return b.geo();
 }
 

@@ -1,7 +1,7 @@
 import { LV_AMOUNT, gfx, setGfx, type Cam3d } from "./gfx";
 import { gearOf } from "./gear";
 import { BakedWorld, mapSlug } from "./bakedWorld";
-import type { CarDraw, PropDraw, RealCars } from "./cars3dReal";
+import type { CamSpec, CarDraw, PropDraw, RealCars } from "./cars3dReal";
 import { drawProp, prop } from "./props";
 import { fmtLap, type Race } from "../sim/race";
 import { CAR_LEN_M, carImage, type CarImage } from "./carArt";
@@ -12,6 +12,7 @@ import { groundMap } from "./ground";
 import { OnboardCam } from "./onboard";
 import { WorldTiles } from "./worldTiles";
 import { TRACK_WIDTH, angDiff } from "../sim/track";
+import { tr } from "../ui/i18n";
 
 /**
  * Desenha a corrida num canvas de alta resolução: a pista em vetor (em tiles,
@@ -22,9 +23,71 @@ import { TRACK_WIDTH, angDiff } from "../sim/track";
 let realCarsReadyFn: (() => boolean) | null = null;
 /** teste: `?camera=tv` (atrás do carro) ou `?camera=iso` (de lado) começa a corrida nessa câmera */
 /** pedaço solto de um carro (asa, roda, bico...) ou pneu da barreira: posição, altura, giro, capotada */
-type Debris = { img: CarImage | null; node: string; carId: string; c?: string; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number; z: number; vz: number; tx: number; tz: number; wx: number; wz: number; roll: number; s: number; r: number };
+type Debris = { img: CarImage | null; node: string; carId: string; c?: string; x: number; y: number; h: number; vx: number; vy: number; spin: number; t: number; z: number; vz: number; tx: number; tz: number; wx: number; wz: number; roll: number; s: number; r: number; born?: number; ghost?: boolean };
 /** um estado conhecido de um carro (Renderer.hist) */
 type Snap = { t: number; d: number; lat: number; yaw: number; imp: number };
+/** estado gravado pro replay: o do Snap + o que muda o desenho (fora da corrida, escorregando, rodando, box, velocidade) */
+type RSnap = Snap & { v: number; ret: boolean; sl: string; spin: boolean; pit: string };
+/** replay da batida: quanto mais devagar que a corrida ele passa */
+const REPLAY_SPEED = 0.45;
+
+/**
+ * BANDEIRAS. Amarela: carro escorregando/rodando ou parado fora da corrida esperando o guindaste (dupla quando ele
+ * ficou em cima da pista). Azul: retardatário com quem vai colocar volta a menos de 60 m atrás
+ */
+export function yellowZones(race: Race) {
+  const out: { s: number; lat: number; double: boolean }[] = [];
+  for (const c of race.cars) {
+    const sliding = !!c.slide && c.slide.mode !== "rejoin";
+    const stopped = c.retired && c.pit === "none" && c.v < 1;
+    if (sliding || stopped) out.push({ s: c.s, lat: c.lateral, double: stopped && Math.abs(c.lateral) < TRACK_WIDTH / 2 + 2 });
+  }
+  return out;
+}
+function blueFlagged(race: Race) {
+  const out = new Set<string>(), L = race.track.L;
+  const run = race.cars.filter((c) => !c.retired && !c.finished && c.pit === "none");
+  for (const c of run)
+    for (const o of run) {
+      if (o === c) continue;
+      const ahead = (((o.s - c.s) % L) + L) % L;
+      if (ahead < 60 && race.dist(c) > race.dist(o) + L / 2) out.add(o.id);
+    }
+  return out;
+}
+/** padrão xadrez da bandeira quadriculada (casas de 5 px) */
+let checker: CanvasPattern | null = null;
+function checkerPattern(o: CanvasRenderingContext2D) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 10;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#fff";
+  g.fillRect(0, 0, 10, 10);
+  g.fillStyle = "#111";
+  g.fillRect(0, 0, 5, 5);
+  g.fillRect(5, 5, 5, 5);
+  return o.createPattern(c, "repeat");
+}
+/** bandeira tremulando, na tela: mastro de (x, y) até (tx, ty) e o pano (w × h px) saindo do topo */
+function drawFlag(o: CanvasRenderingContext2D, x: number, y: number, tx: number, ty: number, w: number, h: number, color: string, t: number) {
+  o.strokeStyle = "#2b2d33";
+  o.lineWidth = Math.max(1, w * 0.07);
+  o.beginPath();
+  o.moveTo(x, y);
+  o.lineTo(tx, ty);
+  o.stroke();
+  // pano: as bordas de cima e de baixo ondulam, mais na ponta solta
+  const n = 8, amp = h * 0.16, wave = (u: number) => Math.sin(t * 9 - u * 5) * amp * u;
+  o.beginPath();
+  for (let i = 0; i <= n; i++) o.lineTo(tx + (w * i) / n, ty + wave(i / n));
+  for (let i = n; i >= 0; i--) o.lineTo(tx + (w * i) / n, ty + h + wave(i / n));
+  o.closePath();
+  o.fillStyle = color === "xadrez" ? (checker ??= checkerPattern(o)) ?? "#fff" : color;
+  o.fill();
+  o.strokeStyle = "rgba(0,0,0,0.45)";
+  o.lineWidth = 1;
+  o.stroke();
+}
 const TILT_CAM = typeof location !== "undefined" && new URLSearchParams(location.search).get("camera");
 /** câmera inclinada agora: a do link (?camera=) manda; senão a das configurações (só no modo 3D) */
 function tiltMode(): "tv" | "iso" | "piloto" | null {
@@ -33,15 +96,22 @@ function tiltMode(): "tv" | "iso" | "piloto" | null {
   if (car3dPref.style !== "real") return null;
   if (urlCam && gfx().cam3d === camAtStart) return urlCam;
   const c = gfx().cam3d;
-  return c === "lado" ? "iso" : c === "tras" ? "tv" : c === "piloto" ? "piloto" : null;
+  // (TV MultiCam: a base é a de lado; quem escolhe o ângulo a cada momento é o Renderer.shotOf)
+  return c === "lado" || c === "multicam" ? "iso" : c === "tras" ? "tv" : c === "piloto" ? "piloto" : null;
+}
+/** TV (MultiCam) ligada: a câmera troca sozinha (largada, chegada, briga, box) */
+function multiCam() {
+  return car3dPref.style === "real" && (urlCam ? URL_MULTI && gfx().cam3d === camAtStart : gfx().cam3d === "multicam");
 }
 /** "tv" (atrás do carro) ou "iso" (de lado e de cima) */
-const TILT_URL = TILT_CAM === "tv" || TILT_CAM === "iso" || TILT_CAM === "piloto" ? TILT_CAM : null;
+const TILT_URL = TILT_CAM === "tv" || TILT_CAM === "iso" || TILT_CAM === "piloto" ? TILT_CAM : TILT_CAM === "multicam" ? "iso" : null;
+const URL_MULTI = TILT_CAM === "multicam";
 const camAtStart = gfx().cam3d;
 let urlCam: "tv" | "iso" | "piloto" | null = TILT_URL;
 /** a câmera do 3D que está valendo agora */
 export function currentCam3d(): Cam3d {
   const t = tiltMode();
+  if (multiCam()) return "multicam";
   return t === "iso" ? "lado" : t === "tv" ? "tras" : t === "piloto" ? "piloto" : "cima";
 }
 /** troca a câmera do 3D (teclas F1-F4): passa a valer a escolhida, mesmo vindo do link */
@@ -121,6 +191,7 @@ export class Renderer {
     // na hora que aperta (o carro anda entre apertar e soltar); área de toque generosa
     canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
+      if (this.replay) return this.endReplay();
       const r = canvas.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
       let best: string | null = null;
@@ -165,7 +236,7 @@ export class Renderer {
 
   /** metros -> pixels CSS na tela (~200 m visíveis na largura sem zoom) */
   private m2css() {
-    return (window.innerWidth / 200) * Math.pow(1.25, this.zoom);
+    return (window.innerWidth / 200) * Math.pow(1.25, this.zoom) * (this.replay ? 1.6 : 1);
   }
 
   private resize = () => {
@@ -205,6 +276,8 @@ export class Renderer {
       // o relógio da corrida zerou (largada): recomeça o histórico
       this.hist.clear();
       this.scHist = [];
+      this.rbuf.clear();
+      this.scRbuf = [];
       this.clock = t;
     }
     const gap = (now - this.snapReal) / 1000;
@@ -215,8 +288,13 @@ export class Renderer {
     for (const c of race.cars) {
       let h = this.hist.get(c.id);
       if (!h) this.hist.set(c.id, (h = []));
-      h.push({ t, d: race.dist(c), lat: c.lateral, yaw: c.slide ? c.slide.yaw : (c.restYaw ?? 0), imp: c.impact?.n ?? 0 });
+      const snap = { t, d: race.dist(c), lat: c.lateral, yaw: c.slide ? c.slide.yaw : (c.restYaw ?? 0), imp: c.impact?.n ?? 0 };
+      h.push(snap);
       if (h.length > 6) h.shift();
+      let rb = this.rbuf.get(c.id);
+      if (!rb) this.rbuf.set(c.id, (rb = []));
+      rb.push({ ...snap, v: c.v, ret: c.retired, sl: c.slide?.mode ?? "", spin: c.spin > 0, pit: c.pit });
+      while (rb.length && rb[0].t < t - 30) rb.shift();
     }
     if (race.sc.active && race.sc.onTrack) {
       const L = race.track.L;
@@ -230,6 +308,8 @@ export class Renderer {
       }
       this.scHist.push({ t, d, lat: 0, yaw: 0, imp: 0 });
       if (this.scHist.length > 6) this.scHist.shift();
+      this.scRbuf.push({ t, d, lat: 0, yaw: 0, imp: 0 });
+      while (this.scRbuf.length && this.scRbuf[0].t < t - 30) this.scRbuf.shift();
     } else this.scHist = [];
   }
 
@@ -323,6 +403,8 @@ export class Renderer {
   private wiggle = new Map<string, { v: number; t: number; amp: number; cool: number }>();
   /** box: fase e tempo de cada carro no quadro anterior (pro cronômetro em cima dele) */
   private pitSeen = new Map<string, string>();
+  /** macaco do box: altura (m) e velocidade de cada carro (mola: sobe rápido, cai e quica no pneu) */
+  private jacks = new Map<string, { h: number; v: number }>();
   /** câmera piloto: quanto ela está virada (botão direito; volta pra frente ao trocar de câmera) */
   private pilotYaw = 0;
   /**
@@ -339,7 +421,239 @@ export class Renderer {
   /** o chão que os efeitos de acidente estão usando (pista e se veio do autódromo 3D) */
   private groundKey = "";
   /** posição suavizada na pista (s, lateral) de cada carro, do último quadro: a câmera onboard usa */
-  readonly interp = new Map<string, { s: number; lat: number; yaw: number; imp: number }>();
+  readonly interp = new Map<string, { s: number; lat: number; yaw: number; imp: number; rs?: RSnap | null }>();
+  /**
+   * REPLAY DA BATIDA (seu carro ou o seguido): a tela guarda os últimos 30 s de cada carro (rbuf) e, ~1,7 s depois
+   * da batida, volta REPLAY_BEFORE s e passa de novo em câmera lenta (no 3D, de uma câmera na beira da pista). No
+   * solo a corrida espera parada (onReplay); clique ou Esc pula. Os carros aparecem como estavam (replayCar), a
+   * batida solta faísca/lasca/som de novo (efeitos "ghost") e os pedaços dela ficam escondidos até ela acontecer
+   */
+  private rbuf = new Map<string, RSnap[]>();
+  private scRbuf: Snap[] = [];
+  private replay: { id: string; tImp: number; from: number; to: number; t: number; cam: { x: number; y: number } | null } | null = null;
+  private replayWant: { id: string; tImp: number; at: number } | null = null;
+  private replayLast = -1e9;
+  /** quando cada carro bateu (tempo da corrida) e a batida: no replay, antes disso ele aparece inteiro */
+  private crashAt = new Map<string, { t: number; imp: NonNullable<Race["cars"][number]["impact"]> }>();
+  private rImpSeen = new Map<string, number>();
+  private flashAt = 0;
+  /** câmera parada na beira da pista neste quadro (o som vem dela: sound.update); null = o som vai com o carro */
+  ear: { x: number; y: number } | null = null;
+  /** céu fechando (0..1): a chuva, a previsão chegando (a 1,5 volta do começo dela) e a pista ainda molhada */
+  private cloudSm = 0;
+  /** Modo TV (main): corta sozinho entre câmera da beira da pista, de trás, de lado e de cima (só no 3D) */
+  tvDirector = false;
+  /** tomada da MultiCam: tipo, câmera (kind pro RealCars + spec fixa/presa), até quando, momento (ctx), giro do "de lado" */
+  private shot: { type: string; kind: "tv" | "iso" | "cima" | "piloto"; id: string; until: number; spec: CamSpec | null; s: number; ctx: string; yaw?: number; n: number } | null = null;
+  private shotN = 0;
+  /** largada e bandeirada: câmera na beira da pista (de frente pro grid; na linha de chegada) */
+  private special: { k: "start" | "finish"; id: string; cam: { x: number; y: number }; until: number } | null = null;
+  private finishShown = false;
+  private camSig = "";
+  /** bandeirada: quando foi (fogos e bandeira quadriculada na linha) e os fogos no ar */
+  private finishAt = 0;
+  private fireworks: { x: number; y: number; vx: number; vy: number; t: number; life: number; c: string }[] = [];
+  private fwNext = 0;
+  /** DRS de cada carro (0 fechada, 1 aberta), suavizado */
+  private drsSm = new Map<string, number>();
+  /** pista molhada no 2D: secando (sem chuva) e os caminhos da pista/traçado ideal/poças, por pista */
+  private drySm = 0;
+  private wet2d: { name: string; road: Path2D; line: Path2D; puddles: [number, number, number, number, number][] } | null = null;
+  private shotOf(race: Race, nowMs: number) {
+    const c = race.cars.find((x) => x.id === this.followId), L = race.track.L, sh = this.shot;
+    const ahead = sh && c ? (((c.s - sh.s) % L) + L) % L : 0;
+    // o momento: no box, brigando (a menos de 0,6 s de alguém) ou correndo sozinho
+    let ctx: "box" | "briga" | "livre" = "livre";
+    if (c && c.pit !== "none") ctx = "box";
+    else if (c) {
+      const order = race.ordered(), i = order.indexOf(c);
+      for (const o of [order[i - 1], order[i + 1]])
+        if (o && !o.retired && o.pit === "none" && Math.abs(race.dist(o) - race.dist(c)) / Math.max(20, c.v) < 0.6) ctx = "briga";
+    }
+    // câmera fixa: acaba quando o carro passou 25 m dela (a de frente, antes de chegar nela); mudou o momento, corta
+    const fixed = !!sh?.spec?.fixa, passed = fixed && (sh!.type === "frontal" ? L - ahead < 14 || (ahead > 0 && ahead < L / 2) : ahead > 25 && ahead < L / 2);
+    if (!sh || sh.id !== this.followId || nowMs > sh.until || passed || sh.ctx !== ctx) {
+      // tomadas sorteadas, nunca a mesma duas vezes seguidas
+      const pool =
+        ctx === "box"
+          ? c?.pit === "stopped" ? ["muro", "cima", "lado", "orbita"] : ["cima", "lado"]
+          : ctx === "briga"
+            ? ["baixa", "frontal", "persegue", "lateral", "heli", "onboard", "alta", "grua", "asa", "drone", "roda", "chao"]
+            : ["baixa", "alta", "grua", "frontal", "heli", "persegue", "lateral", "onboard", "lado", "cima", "drone", "roda", "torre", "chao", "orbita"];
+      const opts = pool.filter((t) => t !== sh?.type);
+      const type = c && (c.v > 5 || ctx === "box") ? opts[Math.floor(Math.random() * opts.length)] : "lado";
+      const r = (a: number, b: number) => a + Math.random() * (b - a), tr0 = race.track, W2 = TRACK_WIDTH / 2;
+      // câmera parada na beira, a "frente" m à frente do carro: do lado de fora da curva que vem (onde fica a de TV
+      // de verdade) ou de qualquer lado na reta
+      const fixa = (frente: number, fora: number, h: number, fov: number): [CamSpec, number] => {
+        const s = tr0.wrap((c?.s ?? 0) + frente), k = tr0.curvature[Math.floor(s)] ?? 0;
+        const side = Math.abs(k) > 1 / 900 ? (k > 0 ? -1 : 1) : Math.random() < 0.5 ? -1 : 1, q = tr0.pose(s, side * (W2 + fora));
+        return [{ fixa: true, x: q.x, y: q.y, h, back: 0, side: 0, fov, look: 0 }, s];
+      };
+      const presa = (back: number, side: number, h: number, fov: number, look: number): CamSpec => ({ fixa: false, x: 0, y: 0, h, back, side, fov, look });
+      const lado = () => (Math.random() < 0.5 ? -1 : 1);
+      let kind: "tv" | "iso" | "cima" | "piloto" = "tv", spec: CamSpec | null = null, s = 0, yaw: number | undefined, dur = r(4.5, 8);
+      if (type === "baixa") [spec, s] = fixa(r(45, 100), r(2.5, 6), r(1.2, 3), r(20, 30));
+      else if (type === "alta") [spec, s] = fixa(r(60, 130), r(12, 30), r(10, 20), r(30, 40));
+      else if (type === "grua") [spec, s] = fixa(r(25, 60), r(6, 12), r(6, 10), r(40, 52));
+      else if (type === "frontal") [spec, s] = fixa(r(110, 170), r(1.5, 3), r(2, 4), r(14, 20));
+      else if (type === "heli") spec = presa(r(40, 70), lado() * r(25, 55), r(40, 70), r(28, 38), 15);
+      else if (type === "persegue") spec = presa(r(8, 22), r(-2, 2), r(2.2, 7), r(42, 56), r(15, 30));
+      else if (type === "lateral") spec = presa(r(-3, 5), lado() * r(9, 16), r(1.5, 4), r(38, 50), 2);
+      // drone na frente, filmando o carro chegando (olha pro carro)
+      else if (type === "drone") spec = presa(-r(10, 22), r(-4, 4), r(3, 8), r(40, 52), 0);
+      // presa do lado de fora da roda de trás, rente ao chão, olhando pra frente
+      else if (type === "roda") spec = presa(1.4, lado() * 1.3, 0.4, r(58, 66), 30);
+      // na asa traseira olhando pra trás: quem vem atrás (boa na briga)
+      else if (type === "asa") spec = presa(2.5, 0, 1.15, r(48, 58), -40);
+      // girando em volta do carro
+      else if (type === "orbita") spec = { ...presa(r(12, 20), lado() * r(2, 8), r(3, 7), r(40, 50), 0), orbit: lado() * r(0.25, 0.45) };
+      // torre alta do lado de dentro da curva que vem, vendo a curva toda
+      else if (type === "torre") {
+        const s0 = tr0.wrap((c?.s ?? 0) + r(50, 110)), k = tr0.curvature[Math.floor(s0)] ?? 0, q = tr0.pose(s0, (k >= 0 ? 1 : -1) * (W2 + r(8, 15)));
+        spec = { fixa: true, x: q.x, y: q.y, h: r(22, 35), back: 0, side: 0, fov: r(26, 34), look: 0 };
+        s = s0;
+      }
+      // no chão, quase na zebra: o carro passa raspando a câmera
+      else if (type === "chao") [spec, s] = fixa(r(30, 70), r(0.6, 1.5), r(0.25, 0.6), r(55, 70));
+      else if (type === "muro" && c) {
+        // box: do muro do pit, do lado da pista, olhando o carro e os mecânicos
+        const q = tr0.pose(c.s, c.lateral - Math.sign(c.lateral || 1) * 9);
+        spec = { fixa: true, x: q.x, y: q.y, h: 2.6, back: 0, side: 0, fov: 38, look: 0 };
+        s = c.s;
+      } else if (type === "onboard") kind = "piloto";
+      else if (type === "lado") [kind, yaw] = ["iso", Math.random() * Math.PI * 2];
+      else kind = "cima";
+      if (spec?.fixa) dur = 10;
+      this.shot = { type, kind, id: this.followId, until: nowMs + dur * 1000, spec, s, ctx, yaw, n: ++this.shotN };
+    }
+    return this.shot!;
+  }
+  private specialOf(race: Race, nowMs: number) {
+    const tr0 = race.track, W2 = TRACK_WIDTH / 2;
+    // (do lado contrário ao dos boxes: do lado deles a câmera caía dentro do prédio)
+    const pl = tr0.pitLateralAt(22), side = pl > 0.5 ? -1 : pl < -0.5 ? 1 : 1;
+    if (this.special && nowMs > this.special.until) this.special = null;
+    // largada: de frente pro grid (30 m depois da linha), até 3,5 s depois de apagar as luzes
+    const starting = race.phase === "lights" || (race.phase === "racing" && race.time < 3.5 && race.leader().lap < 1);
+    if (starting && !this.special) {
+      const pole = race.cars.find((c) => c.grid === 1) ?? race.ordered()[0];
+      const q = tr0.pose(30, side * (W2 + 5));
+      this.special = { k: "start", id: pole.id, cam: { x: q.x, y: q.y }, until: Infinity };
+    }
+    if (this.special?.k === "start" && !starting) this.special = null;
+    // bandeirada: o líder na última volta a menos de 250 m da linha; fica 4,5 s depois dela
+    const ld = race.leader();
+    if (!this.finishShown && !race.checkered && ld.lap === race.laps - 1 && ld.s > tr0.L - 250) {
+      const q = tr0.pose(22, side * (W2 + 5));
+      this.special = { k: "finish", id: ld.id, cam: { x: q.x, y: q.y }, until: Infinity };
+      this.finishShown = true;
+    }
+    if (this.special?.k === "finish" && race.checkered && this.special.until === Infinity) this.special.until = nowMs + 4500;
+    return this.special;
+  }
+  /** pista molhada no 2D: escurece o asfalto, a trajetória seca primeiro e junta poça nas bordas */
+  private drawWet2d(o: CanvasRenderingContext2D, race: Race, viewX: number, viewY: number, m: number) {
+    const tr0 = race.track, W2 = TRACK_WIDTH / 2;
+    if (this.wet2d?.name !== tr0.name) {
+      const road = new Path2D(), line = new Path2D(), puddles: [number, number, number, number, number][] = [];
+      for (let s = 0; s <= tr0.L; s += 4) {
+        const a = tr0.pose(tr0.wrap(s), 0), b = tr0.pose(tr0.wrap(s), tr0.lineAt(tr0.wrap(s)));
+        if (s === 0) {
+          road.moveTo(a.x, a.y);
+          line.moveTo(b.x, b.y);
+        } else {
+          road.lineTo(a.x, a.y);
+          line.lineTo(b.x, b.y);
+        }
+      }
+      road.closePath();
+      // poças: sorteio fixo por pista (o mesmo lugar sempre), perto das bordas
+      let seed = 0;
+      for (const ch of tr0.name) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+      const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+      for (let s = 0; s < tr0.L; s += 23)
+        if (rnd() < 0.3) {
+          const side = rnd() < 0.5 ? -1 : 1, q = tr0.pose(s, side * (W2 - 1.2 - rnd() * 1.8));
+          puddles.push([q.x, q.y, 0.9 + rnd() * 2.2, 0.5 + rnd() * 0.9, q.h]);
+        }
+      this.wet2d = { name: tr0.name, road, line, puddles };
+    }
+    const wet = race.wet, w2d = this.wet2d;
+    o.save();
+    o.setTransform(m * this.dpr, 0, 0, m * this.dpr, -viewX * m * this.dpr, -viewY * m * this.dpr);
+    o.lineJoin = "round";
+    o.strokeStyle = `rgba(12,22,42,${(0.34 * wet).toFixed(3)})`;
+    o.lineWidth = TRACK_WIDTH;
+    o.stroke(w2d.road);
+    if (this.drySm > 0.05) {
+      o.strokeStyle = `rgba(150,152,158,${(0.2 * wet * this.drySm).toFixed(3)})`;
+      o.lineWidth = 1.8;
+      o.stroke(w2d.line);
+    }
+    if (wet > 0.3) {
+      const k = Math.min(1, (wet - 0.3) / 0.4);
+      for (const [x, y, rx, ry, h] of w2d.puddles) {
+        if ((x - viewX) * m < -60 || (y - viewY) * m < -60 || (x - viewX) * m > o.canvas.width / this.dpr + 60 || (y - viewY) * m > o.canvas.height / this.dpr + 60) continue;
+        o.beginPath();
+        o.ellipse(x, y, rx, ry, h, 0, Math.PI * 2);
+        o.fillStyle = `rgba(60,86,122,${(0.42 * k).toFixed(3)})`;
+        o.fill();
+        o.strokeStyle = `rgba(200,220,240,${(0.25 * k).toFixed(3)})`;
+        o.lineWidth = 0.08;
+        o.stroke();
+      }
+    }
+    o.restore();
+  }
+  /** o replay começou (true) ou acabou (false): o solo pausa a corrida enquanto ele passa */
+  onReplay: ((on: boolean) => void) | null = null;
+  replaying() {
+    return !!this.replay;
+  }
+  /** tEnd: quando o carro parou (a corrida avisou a batida) */
+  private startReplay(id: string, tEnd: number, rb: RSnap[]) {
+    // volta até 1,2 s antes de ele perder o controle (o último trecho escorregando antes de parar), no máx. 6 s
+    let i = rb.length - 1;
+    while (i > 0 && rb[i].t > tEnd) i--;
+    while (i > 0 && (rb[i].sl || rb[i - 1].sl)) i--;
+    const from = Math.max(rb[0].t, rb[i].t - 1.2, tEnd - 6), to = tEnd + 1;
+    // câmera da beira da pista (3D): 30 m à frente de onde ele parou, colada na beira do lado dele (o carro vem na
+    // direção dela; mais pra fora caía no meio das árvores)
+    const smp = this.sample(rb, tEnd), tr0 = this.race.track;
+    let cam: { x: number; y: number } | null = null;
+    if (smp) {
+      const side = this.crashAt.get(id)?.imp.side ?? (smp.lat >= 0 ? 1 : -1);
+      const q = tr0.pose(tr0.wrap(smp.d + 30), side * (TRACK_WIDTH / 2 + 3));
+      cam = { x: q.x, y: q.y };
+    }
+    this.replay = { id, tImp: tEnd, from, to, t: from, cam };
+    this.rImpSeen.clear();
+    for (const [cid, rb] of this.rbuf) {
+      const s0 = this.sample(rb, from);
+      if (s0) this.rImpSeen.set(cid, s0.imp);
+    }
+    this.cam.ready = false;
+    this.flashAt = performance.now();
+    this.onReplay?.(true);
+  }
+  /** acaba o replay (ou pula) e volta pra corrida ao vivo */
+  endReplay() {
+    if (!this.replay) return;
+    this.replayLast = this.replay.tImp;
+    this.replay = null;
+    this.debris = this.debris.filter((d) => !d.ghost);
+    this.cam.ready = false;
+    this.flashAt = performance.now();
+    this.onReplay?.(false);
+  }
+  /** o carro como estava no instante do replay (o resto do estado é o de agora) */
+  private replayCar(c: Race["cars"][number]): Race["cars"][number] {
+    const r = this.interp.get(c.id)?.rs;
+    if (!r) return c;
+    const over: Record<string, unknown> = { retired: r.ret, slide: r.sl ? { mode: r.sl, psi: 0, yaw: r.yaw, yawRate: 0, stop: 0 } : null, spin: r.spin ? 1 : 0, recover: null, v: r.v, pit: r.pit };
+    return new Proxy(c, { get: (t, k) => (typeof k === "string" && k in over ? over[k] : Reflect.get(t, k)) });
+  }
   /** online: etiqueta dos carros dos jogadores mostra o engenheiro */
   showEngineers = false;
   /** altura de baixo coberta pelo painel (px); a câmera centraliza acima dela */
@@ -353,8 +667,21 @@ export class Renderer {
     // voltando pra câmera de cima: a cena 3D continua até a câmera terminar de deslizar
     const want = tiltMode();
     if (want !== "piloto") this.pilotYaw = 0;
-    const TILT: "tv" | "iso" | "piloto" | "cima" | null = want ?? (car3dPref.style === "real" && (this.wasTilt || this.real3d?.transitioning()) ? "cima" : null);
+    let TILT: "tv" | "iso" | "piloto" | "cima" | null = want ?? (car3dPref.style === "real" && (this.wasTilt || this.real3d?.transitioning()) ? "cima" : null);
     this.wasTilt = !!want;
+    // câmera de TV (só no 3D, fora da câmera piloto e do replay): largada e bandeirada na beira da pista; no Modo TV
+    // corta sozinho entre os ângulos
+    let shotCam: { x: number; y: number } | null = null, shotId: string | null = null, shotSpec: CamSpec | null = null;
+    this.tvDirector = multiCam();
+    if (TILT && this.tvDirector && !this.replay) {
+      const sp = this.specialOf(this.race, performance.now());
+      if (sp) [shotCam, shotId] = [sp.cam, sp.id];
+      else {
+        const sh = this.shotOf(this.race, performance.now());
+        shotSpec = sh.spec;
+        TILT = sh.kind;
+      }
+    }
     const race = this.race;
     const L = race.track.L;
     const W = window.innerWidth, H = window.innerHeight;
@@ -376,19 +703,47 @@ export class Renderer {
         }
         if (mine) this.greyFrom = nowMs;
       }
+      // batida (no muro ou parado na brita) do seu carro ou do seguido: replay daqui a pouco (um por vez, no máx.
+      // um a cada 25 s de corrida)
+      if ((e.kind === "crash" || e.kind === "out") && c && (mine || c.id === this.followId) && /Acidente|muro|brita/.test(c.retireReason ?? "") && !this.replay && !this.replayWant && e.time - this.replayLast > 25)
+        this.replayWant = { id: c.id, tImp: e.time, at: nowMs + 1700 };
     }
     // box: cronômetro em cima dos seus carros e do seguido; na saída fica o tempo final, verde (limpa) ou
     // vermelho (os mecânicos erraram)
     for (const c of race.cars) {
-      const was = this.pitSeen.get(c.id) ?? "none";
-      if (was === "stopped" && c.pit !== "stopped" && (c.team.id === this.myTeam || c.id === this.followId) && c.pitTotal) {
-        const slow = c.pitTotal > (c.pitClean ?? c.pitTotal) + 0.5;
-        this.floaters.push({ id: c.id, text: `${slow ? "▼" : "✔"} ${c.pitTotal.toFixed(1).replace(".", ",")} s`, bg: slow ? "#e0303a" : "#22a85a", fg: "#fff", t0: nowMs, dur: 1800 });
+      const was = this.pitSeen.get(c.id) ?? "none", near = c.team.id === this.myTeam || c.id === this.followId;
+      if (was === "stopped" && c.pit !== "stopped" && near && c.pitTotal) {
+        // parada só de pneu bem feita (até 2,6 s): raio dourado
+        const slow = c.pitTotal > (c.pitClean ?? c.pitTotal) + 0.5, fast = !slow && c.pitTotal <= 2.6;
+        this.floaters.push({ id: c.id, text: `${slow ? "▼" : fast ? "⚡" : "✔"} ${c.pitTotal.toFixed(1).replace(".", ",")} s`, bg: slow ? "#e0303a" : fast ? "#ffcc00" : "#22a85a", fg: fast ? "#111" : "#fff", t0: nowMs, dur: fast ? 2600 : 1800 });
+      }
+      // som do box (pistolas, macaco, saída), só do seu carro e do seguido e até 4x
+      if (near && speed > 0 && speed <= 4) {
+        if (was !== "stopped" && c.pit === "stopped") this.fx.events.push({ k: "box", dur: c.pitTimer / speed, follow: c.id === this.followId });
+        if (was === "stopped" && c.pit !== "stopped") this.fx.events.push({ k: "saida", follow: c.id === this.followId });
       }
       this.pitSeen.set(c.id, c.pit);
     }
     // posições interpoladas (em pixels do mundo)
-    const rt = this.renderTime(nowMs < this.slowUntil ? realDt * 0.15 : realDt);
+    // replay da batida: começa ~1,7 s depois dela; só com a corrida até 2x (mais rápido, perderia muita coisa)
+    if (this.replayWant && !this.replay && nowMs >= this.replayWant.at && speed > 0) {
+      const w = this.replayWant, rb = this.rbuf.get(w.id);
+      this.replayWant = null;
+      if (rb && rb.length > 4 && speed <= 2 && rb[0].t <= w.tImp - 1) this.startReplay(w.id, w.tImp, rb);
+    }
+    const liveRt = this.renderTime(nowMs < this.slowUntil ? realDt * 0.15 : realDt);
+    if (this.replay) {
+      this.replay.t += Math.min(0.1, realDt) * REPLAY_SPEED;
+      if (this.replay.t >= this.replay.to) this.endReplay();
+    }
+    const rt = this.replay ? this.replay.t : liveRt;
+    // (no replay a câmera fica no carro que bateu)
+    const fid = this.replay ? this.replay.id : (shotId ?? this.followId);
+    this.ear = this.replay?.cam ?? shotCam ?? (shotSpec?.fixa ? { x: shotSpec.x, y: shotSpec.y } : null);
+    // nuvens: chovendo, a previsão de chuva chegando ou a pista ainda molhada
+    const fc0 = this.race.weather?.forecast, lapNow = this.race.leader().lap;
+    const coming = fc0 && fc0.chance >= 50 ? Math.max(0, Math.min(1, (lapNow - (fc0.from - 1.5)) / 1.5)) * (lapNow <= fc0.to ? 0.65 : 0) : 0;
+    this.cloudSm += (Math.max(Math.min(1, this.race.rain * 1.4), coming, this.race.wet * 0.5) - this.cloudSm) * Math.min(1, realDt * 0.15);
     // quanto a corrida andou neste quadro no relógio da tela (as suavizações usam este, não o tempo real:
     // o relógio acelera/freia um pouco pra acompanhar a simulação, e com tempos diferentes a lateral e o
     // quanto o carro andou saíam do passo um do outro e o bico balançava)
@@ -397,7 +752,7 @@ export class Renderer {
     const pos = this.pos;
     pos.clear();
     for (const c of race.cars) {
-      const smp = this.sample(this.hist.get(c.id), rt);
+      const smp = this.replay ? this.sample(this.rbuf.get(c.id), rt) : this.sample(this.hist.get(c.id), rt);
       const s = smp ? (((smp.d % L) + L) % L) : c.s;
       const d = smp ? smp.d : c.s;
       // troca de faixa em curva de S, não em linha reta: a lateral desenhada persegue a da simulação com
@@ -429,19 +784,19 @@ export class Renderer {
       this.yawOff.set(c.id, sm);
       q.h += sm;
       pos.set(c.id, q);
-      this.interp.set(c.id, { s, lat, yaw: smp ? smp.yaw : (c.slide?.yaw ?? c.restYaw ?? 0), imp: smp ? smp.imp : (c.impact?.n ?? 0) });
+      this.interp.set(c.id, { s, lat, yaw: smp ? smp.yaw : (c.slide?.yaw ?? c.restYaw ?? 0), imp: smp ? smp.imp : (c.impact?.n ?? 0), rs: this.replay ? (smp as RSnap | null) : null });
     }
     let scPos: { x: number; y: number; h: number } | null = null;
-    if (race.sc.active && race.sc.onTrack) {
-      const smp = this.sample(this.scHist, rt);
+    if (this.replay ? this.scRbuf.length > 0 && this.scRbuf[0].t <= rt && this.scRbuf[this.scRbuf.length - 1].t >= rt : race.sc.active && race.sc.onTrack) {
+      const smp = this.sample(this.replay ? this.scRbuf : this.scHist, rt);
       scPos = this.px(smp ? (((smp.d % L) + L) % L) : race.sc.s, 0);
     }
 
     // câmera presa no carro seguido (transição suave quando troca de carro)
-    const tp = (this.followId === "SC" ? scPos : pos.get(this.followId)) ?? pos.get(race.leader().id)!;
-    if (this.followId !== this.lastFollow) {
+    const tp = (fid === "SC" ? scPos : pos.get(fid)) ?? pos.get(race.leader().id)!;
+    if (fid !== this.lastFollow) {
       if (this.cam.ready) this.camFrom = { x: this.cam.x, y: this.cam.y, t: performance.now() };
-      this.lastFollow = this.followId;
+      this.lastFollow = fid;
     }
     let cx = tp.x, cy = tp.y;
     if (this.camFrom) {
@@ -523,10 +878,12 @@ export class Renderer {
       const a = cv(p), b = cv({ x: p.x + Math.cos(h), y: p.y + Math.sin(h) });
       return Math.atan2(b.y - a.y, b.x - a.x);
     };
+    // (no replay, os pedaços da batida de verdade ficam escondidos: os que voam são as cópias dele)
+    const rp = this.replay, debrisShown = rp ? this.debris.filter((d) => d.ghost || (d.born ?? -1e9) < rp.from) : this.debris;
     const drawDebris = (cv: typeof toCss, mm: number) => {
       // (câmeras 3D: os pedaços são as peças 3D do carro, na cena — RealCars.debris3d)
       if (tiltOn) return;
-      for (const d of this.debris) {
+      for (const d of debrisShown) {
         if (!d.img) continue;
         const air = 1 + Math.min(0.5, d.z * 0.3); // no ar parece maior
         const { x, y } = cv(d);
@@ -549,13 +906,24 @@ export class Renderer {
       // faíscas por baixo dos carros (o assoalho raspa embaixo: só o rastro aparece saindo por trás)
       this.fx.drawAir(o, cv, mm, true, soft);
     };
+    this.drySm += ((race.rain > 0.02 ? 0 : 1) - this.drySm) * Math.min(1, realDt * 0.4);
+    // 2D: nublado deixa tudo um pouco mais escuro e frio (no 3D quem faz é a luz: RealCars.cloud)
+    if (!tiltOn && !real3 && this.cloudSm > 0.03) {
+      o.save();
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.fillStyle = `rgba(32,40,52,${(0.22 * this.cloudSm).toFixed(3)})`;
+      o.fillRect(0, 0, o.canvas.width, o.canvas.height);
+      o.restore();
+    }
+    if (!tiltOn && race.wet > 0.03) this.drawWet2d(o, race, viewX, viewY, m);
     if (!tiltOn) under(toCss, m);
     // 3D de verdade: os carros vão pra camada do Three.js (desenhada de uma vez depois do laço)
     const real = car3dPref.style === "real" ? this.realCars() : null;
     const realList: CarDraw[] = [];
     this.realProps.length = 0;
     this.realOn = !!real;
-    for (const c of sorted) {
+    for (const c0 of sorted) {
+      const c = this.replay ? this.replayCar(c0) : c0;
       const p = pos.get(c.id)!;
       let { x, y } = toCss(p);
       // câmeras de trás e piloto: vale a distância de verdade até o carro seguido (pela tela do 2D, com um
@@ -581,13 +949,16 @@ export class Renderer {
       // bateu na barreira: quando o carro DESENHADO chega no estado da batida (faísca, pedaço, som na hora certa)
       const it = this.interp.get(c.id);
       if (it) {
-        const seen = this.impSeen.get(c.id);
-        if (seen !== undefined && it.imp > seen && c.impact) this.onImpact(c, p, it, real3 ?? null);
-        this.impSeen.set(c.id, it.imp);
+        // (no replay a batida passa de novo só com o que não fica: faísca, lasca, nuvem e som)
+        const seenMap = this.replay ? this.rImpSeen : this.impSeen, seen = seenMap.get(c.id);
+        if (seen !== undefined && it.imp > seen && c.impact) this.onImpact(c, p, it, real3 ?? null, !!this.replay);
+        seenMap.set(c.id, it.imp);
       }
       const yaw = this.fx.update(c, p, dt, curv, !!race.track.def.street, c.id === this.followId, race.track.bumpAt(c.s), this.interp.get(c.id));
+      // largada: pneu de trás patinando nos primeiros 2,2 s
+      if (!this.replay && race.phase === "racing" && race.time < 2.2 && c.v < 40 && speed > 0) this.fx.launchPuff(p.x, p.y, p.h, 1 - race.time / 2.2);
       // (o estrago aparece quando o carro desenhado chega no muro, não quando a corrida avisa)
-      const crashed = this.fx.landed(c.id);
+      const crashed = this.fx.landed(c.id) && !(this.replay && rt < (this.crashAt.get(c.id)?.t ?? -1e9));
       // saída de curva lenta acelerando forte: às vezes a traseira escapa um pouco e o piloto corrige (2-4°,
       // some em ~0,6 s). Mais comum com piloto agressivo e na chuva. Só no desenho: a corrida não muda
       let wig = this.wiggle.get(c.id);
@@ -595,6 +966,12 @@ export class Renderer {
       if (!wig) this.wiggle.set(c.id, (wig = { v: c.v, t: 9, amp: 0, cool: 0 }));
       wig.v = c.v;
       wig.t += drt;
+      // freada forte: às vezes a roda da frente de um lado trava (fumacinha e marca curta); bem rápido, o assoalho
+      // raspa quando o bico afunda (faísca)
+      if (!this.replay && acc < -26 && c.v > 30 && !c.slide && c.spin <= 0 && c.pit === "none") {
+        if (Math.random() < drt * (0.35 + race.wet * 0.8)) this.fx.lockUp(p, Math.random() < 0.5 ? 1 : -1);
+        if (c.v > 68 && Math.random() < drt * 5) this.fx.floorSpark(p, c.v);
+      }
       wig.cool -= drt;
       if (wig.cool <= 0 && wig.t > 1 && !c.slide && c.spin <= 0 && acc > 5 && c.v > 14 && c.v < 45 && Math.abs(curv) > 1 / 160) {
         const aggr = (c.driver.profile?.aggression ?? 55) / 100;
@@ -634,7 +1011,19 @@ export class Renderer {
           o.ellipse(x + 0.25 * m, y + 0.35 * m, 2.5 * mm, 0.95 * mm, hh, 0, Math.PI * 2);
           o.fill();
         }
-        realList.push({ id: c.id, team: c.team, x: x / m + viewX, y: y / m + viewY, h: hh, scale: mm / m, look, v: c.v, compound: c.compound, lift: lift ? (lift.scale - 1) / 0.18 : 0 });
+        let jk = this.jacks.get(c.id);
+        if (!jk) this.jacks.set(c.id, (jk = { h: 0, v: 0 }));
+        if (drt > 0 || jk.h !== 0) {
+          const st = Math.min(0.05, Math.max(drt, 1 / 120));
+          jk.v += (380 * ((c.pit === "stopped" ? 0.07 : 0) - jk.h) - 16 * jk.v) * st;
+          jk.h = Math.max(-0.02, jk.h + jk.v * st);
+          if (Math.abs(jk.h) < 1e-4 && Math.abs(jk.v) < 1e-3) jk.h = jk.v = 0;
+        }
+        const dw = this.drsSm.get(c.id) ?? 0, dTo = c.drs && !this.replay ? 1 : 0;
+        const drs = dw + (dTo - dw) * Math.min(1, realDt * 7);
+        this.drsSm.set(c.id, drs);
+        const pitP = c.pit === "stopped" && c.pitTotal ? Math.max(0, Math.min(1, 1 - c.pitTimer / c.pitTotal)) : -1;
+        realList.push({ id: c.id, team: c.team, x: x / m + viewX, y: y / m + viewY, h: hh, scale: mm / m, look, v: c.v, compound: c.compound, lift: lift ? (lift.scale - 1) / 0.18 : 0, jack: jk.h, drs, pit: pitP });
       } else if (!(car3dPref.on && drawCar3d(o, c.team, x, y, hh, mm, alpha, look, rainLight, performance.now() / 1000)))
         this.drawCar(o, x, y, hh, carImage(c.team, rainLight), mm, alpha);
       if (!lift && c.retired) {
@@ -674,13 +1063,24 @@ export class Renderer {
     }
     if (real) {
       // câmera inclinada: segue o carro seguido (ou o safety car)
-      const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
-      real.followId = this.followId;
+      const fp = fid === "SC" ? scPos : pos.get(fid);
+      real.followId = fid;
+      real.replayCam = this.replay?.cam ?? shotCam;
+      real.camSpec = this.replay || shotCam ? null : shotSpec;
+      const camKind = this.replay || shotCam ? "tv" : TILT;
+      // (cada tomada nova, o replay e os momentos de TV: corte seco; trocar de câmera na mão continua com a transição)
+      const sig = this.replay ? `r${this.replay.tImp}` : shotCam ? `s${shotCam.x.toFixed(0)}` : this.tvDirector && this.shot ? `d${this.shot.n}` : `${camKind}`;
+      if (sig !== this.camSig && (this.tvDirector || /^[rsd]/.test(this.camSig) || /^[rsd]/.test(sig))) real.cutNow = true;
+      this.camSig = sig;
       real.scMode = race.sc.active;
-      real.tilt = TILT && real.ensureTrack(race.track) && fp ? TILT !== "tv" && TILT !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.isoYaw, kind: TILT } : { x: fp.x, y: fp.y, h: fp.h, kind: TILT, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw, cover: this.inset } : null;
+      real.tilt = TILT && real.ensureTrack(race.track) && fp ? camKind !== "tv" && camKind !== "piloto" ? { x: viewX + W / m / 2, y: viewY + H / m / 2, h: 0, iso: true, span: H / m, yaw: this.tvDirector && this.shot?.yaw != null && camKind === "iso" ? this.shot.yaw : this.isoYaw, kind: camKind ?? undefined } : { x: fp.x, y: fp.y, h: fp.h, kind: camKind, yaw: (window as unknown as { __pilotYaw?: number }).__pilotYaw ?? this.pilotYaw, cover: this.inset } : null;
       real.liveScreen(race);
+      real.cloud = this.cloudSm;
+      // telões: 12 s a classificação, 8 s a câmera ao vivo do carro seguido; no replay e nos momentos de TV, a câmera
+      real.screenLive = !!this.replay || !!shotCam || Math.floor(performance.now() / 1000) % 20 >= 12;
+      real.setWet(race.wet, race.rain);
       real.skidMarks(tiltOn ? this.fx.skidList : null, tiltOn ? this.fx.spotList : null);
-      real.debris3d(tiltOn ? this.debris : null);
+      real.debris3d(tiltOn ? debrisShown : null);
       // (fumaça, poeira e pedaços que voam na cena 3D: ficam atrás dos carros e das barreiras quando devem)
       real.airFx(tiltOn ? this.fx.partList : null);
       real.draw(o, W, H, m, viewX, viewY, realList, dt, this.realProps);
@@ -693,7 +1093,7 @@ export class Renderer {
         o.fillRect(0, 0, W, H);
       }
       cvAir = (q) => real.project(q.x, q.y);
-      const fp = this.followId === "SC" ? scPos : pos.get(this.followId);
+      const fp = fid === "SC" ? scPos : pos.get(fid);
       // (câmera piloto: o carro está colado na câmera; o tamanho dos efeitos é o de 15 m à frente, senão
       // faísca e spray cobriam a tela)
       const pil = TILT === "piloto" && fp;
@@ -731,6 +1131,36 @@ export class Renderer {
       o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     }
 
+    // ---- bandeiras (fora do replay: elas são do agora) ----
+    if (!this.replay) {
+      const t = nowMs / 1000, W2 = TRACK_WIDTH / 2;
+      // amarela: dois postos antes do acidente, na beira do lado dele (o pano balança; dupla = duas)
+      for (const z of yellowZones(race)) {
+        const side = z.lat >= 0 ? 1 : -1;
+        for (const back of [70, 160]) {
+          const q = race.track.pose(race.track.wrap(z.s - back), side * (W2 + 3.5));
+          let bx: number, by: number, tx: number, ty: number, k: number;
+          if (tiltOn && real) {
+            const a = real.project(q.x, q.y), b = real.project(q.x, q.y, 2.8);
+            if (a.x < -100 || a.x > W + 100 || a.y < -100 || a.y > H + 100) continue;
+            [bx, by, tx, ty, k] = [a.x, a.y, b.x, b.y, Math.max(0.9, Math.min(3, real.scaleAt(q.x, q.y) / 8))];
+          } else {
+            const a = toCss(q);
+            if (a.x < -100 || a.x > W + 100 || a.y < -100 || a.y > H + 100) continue;
+            [bx, by, k] = [a.x, a.y, Math.max(0.9, Math.min(3, m / 8))];
+            [tx, ty] = [bx, by - 2.8 * m];
+          }
+          drawFlag(o, bx, by, tx, ty, 20 * k, 13 * k, "#ffd400", t + back);
+          if (z.double) drawFlag(o, bx, by, tx - 2 * k, ty + 15 * k, 20 * k, 13 * k, "#ffd400", t + back + 0.4);
+        }
+      }
+      // azul: em cima do retardatário
+      for (const id of blueFlagged(race)) {
+        const sp = this.screenPos.get(id);
+        if (sp) drawFlag(o, sp.x + 8, sp.y - 8, sp.x + 8, sp.y - 30, 15, 10, "#1f6bff", t);
+      }
+    }
+
     // etiquetas: carro seguido, carros dos jogadores e safety car (empilham quando se sobrepõem)
     const placed: { x: number; y: number; w: number }[] = [];
     const lift = Math.max(14, 1.6 * mAir);
@@ -738,7 +1168,21 @@ export class Renderer {
       const sp = this.screenPos.get("SC")!;
       this.label(o, sp.x, sp.y - lift, this.followId === "SC" ? "SAFETY CAR" : "SC", "#ffcc00", "#111", placed);
     }
-    for (const c of race.cars) {
+    // disputa do carro seguido: a menos de 0,8 s do da frente (ou do de trás), etiqueta ⚔ com a diferença no meio
+    // dos dois
+    if (!this.replay && race.phase === "racing") {
+      const order = race.ordered(), i = order.findIndex((c) => c.id === this.followId), fc = order[i];
+      if (fc && !fc.retired && !fc.finished && fc.pit === "none")
+        for (const o2 of [order[i - 1], order[i + 1]]) {
+          if (!o2 || o2.retired || o2.finished || o2.pit !== "none") continue;
+          const [a, b] = o2 === order[i - 1] ? [o2, fc] : [fc, o2], gap = (race.dist(a) - race.dist(b)) / Math.max(20, b.v);
+          const pa = this.screenPos.get(a.id), pb = this.screenPos.get(b.id);
+          if (gap < 0.8 && pa && pb) this.label(o, (pa.x + pb.x) / 2, (pa.y + pb.y) / 2 - lift * 0.4, `⚔ ${gap.toFixed(1).replace(".", ",")} s`, "#ff7a00", "#111", placed);
+        }
+    }
+    for (const c0 of race.cars) {
+      // (no replay a etiqueta é a de como o carro estava: P20, não OUT)
+      const c = this.replay ? this.replayCar(c0) : c0;
       const sp = this.screenPos.get(c.id);
       if (!sp) continue;
       const mine = c.isHuman;
@@ -769,6 +1213,62 @@ export class Renderer {
       o.translate(sp.x, y);
       o.scale(pop, pop);
       this.label(o, 0, 0, f.text, f.bg, f.fg, []);
+      o.restore();
+    }
+    if (this.replay) this.drawReplayBadge(o, W, nowMs);
+    // bandeirada: bandeira quadriculada tremulando na linha (dos dois lados) e fogos por 4,5 s
+    if (race.checkered && !this.finishAt) {
+      this.finishAt = nowMs;
+      this.fwNext = nowMs + 300;
+    }
+    if (this.finishAt && nowMs - this.finishAt < 15000) {
+      for (const side of [1, -1]) {
+        const q = race.track.pose(0, side * (TRACK_WIDTH / 2 + 2.5));
+        if (tiltOn && real) {
+          const a = real.project(q.x, q.y), b = real.project(q.x, q.y, 3.2), k = Math.max(0.9, Math.min(3, real.scaleAt(q.x, q.y) / 8));
+          drawFlag(o, a.x, a.y, b.x, b.y, 26 * k, 17 * k, "xadrez", nowMs / 1000 + side);
+        } else {
+          const a = toCss(q), k = Math.max(0.9, Math.min(3, m / 8));
+          drawFlag(o, a.x, a.y, a.x, a.y - 3.2 * m, 26 * k, 17 * k, "xadrez", nowMs / 1000 + side);
+        }
+      }
+      if (nowMs - this.finishAt < 4500 && nowMs >= this.fwNext) {
+        this.fwNext = nowMs + 380 + Math.random() * 420;
+        const win = race.ordered()[0], cols = [win?.team.color ?? "#ffcc00", "#ffd84a", "#ffffff", "#ff5a3c", "#5ac8ff"];
+        const bx = W * (0.2 + Math.random() * 0.6), by = H * (0.12 + Math.random() * 0.25), n = calm ? 22 : 46, col = cols[Math.floor(Math.random() * cols.length)];
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2, sp = 110 + Math.random() * 120;
+          this.fireworks.push({ x: bx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t: 0, life: 1.1 + Math.random() * 0.6, c: col });
+        }
+      }
+    }
+    if (this.fireworks.length) {
+      const dtf = Math.min(0.05, realDt);
+      o.save();
+      o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      o.globalCompositeOperation = "lighter";
+      this.fireworks = this.fireworks.filter((f) => (f.t += dtf) < f.life);
+      for (const f of this.fireworks) {
+        f.vy += 120 * dtf;
+        f.vx *= 1 - 1.2 * dtf;
+        f.vy *= 1 - 1.2 * dtf;
+        f.x += f.vx * dtf;
+        f.y += f.vy * dtf;
+        o.globalAlpha = Math.max(0, 1 - f.t / f.life);
+        o.fillStyle = f.c;
+        o.beginPath();
+        o.arc(f.x, f.y, 3, 0, Math.PI * 2);
+        o.fill();
+      }
+      o.restore();
+    }
+    // corte pro replay e de volta: clarão branco rápido (como na transmissão)
+    if (this.flashAt && nowMs - this.flashAt < 260 && !calm) {
+      o.save();
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.globalAlpha = 0.55 * (1 - (nowMs - this.flashAt) / 260);
+      o.fillStyle = "#fff";
+      o.fillRect(0, 0, o.canvas.width, o.canvas.height);
       o.restore();
     }
     // seu carro abandonou: a tela perde a cor por um instante e volta
@@ -807,7 +1307,7 @@ export class Renderer {
       const fc = race.cars.find((c) => c.id === this.followId);
       if (fc) this.drawGauge(o, fc, H, realDt);
     }
-    if (race.phase === "lights") this.drawLights(o, W);
+    if (race.phase === "lights" || (race.phase === "racing" && race.time < 0.7 && race.leader().lap < 1)) this.drawLights(o, W);
   }
 
   private tunnelPaths: ReturnType<typeof tunnelPaths> | null = null;
@@ -880,13 +1380,14 @@ export class Renderer {
       const fwd = v0 * (0.3 + Math.random() * 0.3);
       this.addDebris({ img: piece?.img ?? null, node, carId: c.id, x, y, h: p.h, vx: fx * fwd - fy * side, vy: fy * fwd + fx * side, s: c.s, r: node.startsWith("roda") ? 0.33 : 0.6, z: 0.4, vz: 2.5 + Math.random() * 3 });
     }
-    while (this.debris.length > 40) this.debris.shift();
+    while (!this.replay && this.debris.length > 40) this.debris.shift();
   }
 
   /** pedaço solto (com altura, girando e capotando) */
   private addDebris(d: Partial<Debris> & { node: string; x: number; y: number; vx: number; vy: number; s: number; r: number }) {
     const sg = () => (Math.random() < 0.5 ? -1 : 1);
-    this.debris.push({ img: null, carId: "", h: Math.random() * 6.3, spin: (Math.random() - 0.5) * 12, t: 0, z: 0.4, vz: 3, tx: 0, tz: 0, wx: sg() * (4 + Math.random() * 8), wz: sg() * (3 + Math.random() * 7), roll: 0, ...d });
+    // (no replay: pedaço "fantasma", que some quando ele acaba)
+    this.debris.push({ img: null, carId: "", h: Math.random() * 6.3, spin: (Math.random() - 0.5) * 12, t: 0, z: 0.4, vz: 3, tx: 0, tz: 0, wx: sg() * (4 + Math.random() * 8), wz: sg() * (3 + Math.random() * 7), roll: 0, born: this.lastRt, ghost: !!this.replay, ...d });
   }
 
   /**
@@ -962,18 +1463,21 @@ export class Renderer {
    * destruiu, os pedaços grandes (bico, espelhos, placas de fibra; asa e roda saem pelo dropParts) e os pneus da
    * barreira espalhados
    */
-  private onImpact(c: Race["cars"][number], p: { x: number; y: number; h: number }, it: { s: number; lat: number; yaw: number }, real: RealCars | null) {
-    const imp = c.impact!, track = this.race.track, follow = c.id === this.followId;
+  private onImpact(c: Race["cars"][number], p: { x: number; y: number; h: number }, it: { s: number; lat: number; yaw: number }, real: RealCars | null, ghost = false) {
+    // (replay: a batida de verdade foi a guardada em crashAt; a última do carro pode ser um toque depois dela)
+    const was = this.crashAt.get(c.id), atCrash = ghost && !!was && Math.abs(this.lastRt - was.t) < 0.3;
+    const imp = atCrash ? was!.imp : c.impact!, track = this.race.track, follow = c.id === this.followId;
     const { reach, rx, lx, ly } = outerCorner(it.yaw, 2.4, 0.95, imp.side);
     const cp = track.pose(it.s + rx, it.lat + imp.side * reach);
     const barreira = real?.barrierKindAt(cp.x, cp.y) ?? (track.def.street ? "muro" : "");
-    const crash = imp.crash && !this.fx.landed(c.id);
+    const crash = imp.crash && (ghost ? atCrash : !this.fx.landed(c.id));
     // (a roda que sai é a do canto que bateu: frente/trás e o lado do carro)
-    if (crash) this.lostWheel.set(c.id, (lx > 0 ? 0 : 2) + (ly > 0 ? 1 : 0));
-    this.fx.impact(c, p, it.yaw, imp.v, crash, imp.side, follow, barreira, it, cp);
+    if (crash && !ghost) this.lostWheel.set(c.id, (lx > 0 ? 0 : 2) + (ly > 0 ? 1 : 0));
+    this.fx.impact(c, p, it.yaw, imp.v, crash, imp.side, follow || ghost, barreira, it, cp, ghost);
     const th = track.pose(it.s, 0).h, team = c.team.livery?.base ?? c.team.color;
-    if (real && (barreira === "guardrail" || barreira === "muro")) real.scuff(cp.x, cp.y, th, imp.side, 1.5 + Math.min(4, imp.v * 0.15), team);
+    if (!ghost && real && (barreira === "guardrail" || barreira === "muro")) real.scuff(cp.x, cp.y, th, imp.side, 1.5 + Math.min(4, imp.v * 0.15), team);
     if (!crash) return;
+    if (!ghost) this.crashAt.set(c.id, { t: this.lastRt, imp: { ...imp } });
     const v0 = Math.min(55, Math.max(c.v, this.fx.recentSpeed(c.id))), toTrack = -imp.side;
     const fx = Math.cos(th), fy = Math.sin(th);
     const go = (along: number, lat: number): [number, number] => [fx * along - fy * lat, fy * along + fx * lat];
@@ -993,6 +1497,39 @@ export class Renderer {
       }
   }
 
+
+  /** selo do replay no alto da tela: bolinha vermelha piscando, REPLAY e "clique pra pular" */
+  private drawReplayBadge(o: CanvasRenderingContext2D, W: number, nowMs: number) {
+    const dpr = o.canvas.width / Math.max(1, W);
+    o.save();
+    o.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // (abaixo dos botões de velocidade e da faixa do safety car)
+    const x = W / 2, y = 128, hint = tr("clique pra pular");
+    const big = "800 20px 'Barlow Condensed', 'Rajdhani', sans-serif", small = "600 12px 'Barlow Condensed', 'Rajdhani', sans-serif";
+    o.font = big;
+    const w1 = o.measureText("REPLAY").width;
+    o.font = small;
+    const w2 = o.measureText(hint).width, bw = 34 + w1 + 14 + w2 + 14, x0 = x - bw / 2;
+    o.fillStyle = "rgba(12,14,20,0.82)";
+    o.beginPath();
+    o.roundRect(x0, y - 18, bw, 36, 6);
+    o.fill();
+    o.fillStyle = "#e10600";
+    o.fillRect(x0, y - 18, 4, 36);
+    if (Math.floor(nowMs / 450) % 2 === 0) {
+      o.beginPath();
+      o.arc(x0 + 20, y, 6, 0, Math.PI * 2);
+      o.fill();
+    }
+    o.textBaseline = "middle";
+    o.fillStyle = "#fff";
+    o.font = big;
+    o.fillText("REPLAY", x0 + 34, y + 1);
+    o.fillStyle = "rgba(255,255,255,0.6)";
+    o.font = small;
+    o.fillText(hint, x0 + 34 + w1 + 14, y + 1);
+    o.restore();
+  }
 
   private drawCar(o: CanvasRenderingContext2D, x: number, y: number, h: number, img: ReturnType<typeof carImage>, m: number, alpha: number) {
     o.save();
@@ -1480,23 +2017,45 @@ export class Renderer {
     this.rivulets = this.rivulets.filter((f) => f.t < f.life && f.y - f.len < H);
   }
 
+  /** luzes da largada: pórtico de F1, 5 colunas com 2 luzes vermelhas cada, acendendo uma por segundo; ao
+   *  apagar, o pórtico some em 0,7 s */
   private drawLights(o: CanvasRenderingContext2D, W: number) {
-    const lit = Math.min(5, Math.floor(this.race.time));
-    const r = 16, gap = 46;
-    const x0 = W / 2 - gap * 2;
-    o.fillStyle = "#111";
-    o.fillRect(x0 - 30, 70, gap * 4 + 60, 56);
+    const racing = this.race.phase === "racing";
+    const lit = racing ? 0 : Math.min(5, Math.floor(this.race.time));
+    const r = 15, gap = 58, x0 = W / 2 - gap * 2, y0 = 116;
+    o.save();
+    o.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    o.globalAlpha = racing ? Math.max(0, 1 - this.race.time / 0.7) : 1;
+    // trave e as 5 caixas pretas
+    o.fillStyle = "#2a2d33";
+    o.fillRect(x0 - 44, y0 - 52, gap * 4 + 88, 8);
     for (let i = 0; i < 5; i++) {
+      const x = x0 + i * gap;
+      o.fillStyle = "#0c0d10";
       o.beginPath();
-      o.arc(x0 + i * gap, 98, r, 0, Math.PI * 2);
-      o.fillStyle = i < lit ? "#ff2a2a" : "#3a1010";
-      if (i < lit) {
-        o.shadowColor = "#ff2a2a";
-        o.shadowBlur = 18;
-      }
+      o.roundRect(x - 23, y0 - 46, 46, 92, 7);
       o.fill();
-      o.shadowBlur = 0;
+      o.strokeStyle = "rgba(255,255,255,0.08)";
+      o.lineWidth = 1;
+      o.stroke();
+      for (const dy of [-20, 20]) {
+        o.beginPath();
+        o.arc(x, y0 + dy, r, 0, Math.PI * 2);
+        if (i < lit) {
+          o.fillStyle = "#ff2a1f";
+          o.shadowColor = "#ff2a1f";
+          o.shadowBlur = 26;
+        } else o.fillStyle = "#2a0c0c";
+        o.fill();
+        o.shadowBlur = 0;
+        // reflexo no vidro
+        o.fillStyle = "rgba(255,255,255,0.12)";
+        o.beginPath();
+        o.arc(x - 5, y0 + dy - 5, 4, 0, Math.PI * 2);
+        o.fill();
+      }
     }
+    o.restore();
   }
 }
 
@@ -1562,6 +2121,23 @@ export class Minimap {
     const [sx, sy] = this.tf(this.race.track.pts[0].x, this.race.track.pts[0].y);
     g.fillStyle = "#fff";
     g.fillRect(sx - 1, sy - 4, 2, 8);
+    // bandeira amarela: o trecho do acidente pisca em amarelo
+    if (Math.floor(performance.now() / 350) % 3 !== 2) {
+      const tr0 = this.race.track;
+      g.strokeStyle = "#ffd400";
+      g.lineWidth = 4;
+      g.lineCap = "round";
+      for (const z of yellowZones(this.race)) {
+        g.beginPath();
+        for (let d = -170; d <= 25; d += 8) {
+          const q = tr0.pose(tr0.wrap(z.s + d), 0), [x, y] = this.tf(q.x, q.y);
+          if (d === -170) g.moveTo(x, y);
+          else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+      g.lineCap = "butt";
+    }
 
     this.dots.clear();
     const cars = [...this.race.cars].sort((a, b) => Number(a.isHuman) - Number(b.isHuman));

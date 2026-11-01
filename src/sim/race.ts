@@ -135,7 +135,7 @@ export function fuelPerLap(laps: number): number {
 /** campos do carro que mudam durante a corrida (vão no snapshot da rede) */
 const SNAP_KEYS = [
   "s", "lap", "v", "lateral", "compound", "wear", "tyreTemp", "dirtyAir", "drs", "tyreLaps", "usedCompounds", "fuel", "engine", "pace",
-  "boxRequest", "boxFuel", "pit", "pitTimer", "pitTotal", "pitClean", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
+  "boxRequest", "boxFuel", "pit", "pitTimer", "pitTotal", "pitClean", "bestStop", "pitStops", "lastLap", "bestLap", "finished", "finishTime",
   "retired", "retireReason", "offTrack", "offSide", "fault", "faultPen", "spin", "slide", "impact", "restYaw", "recover", "retireAtBox", "damage", "dmg", "dmgSide", "flatWheel", "repair", "engineHealth", "engineSave", "order", "position", "penalty", "targetLap", "isHuman", "plan", "planIdx", "planDue",
 ] as const satisfies readonly (keyof CarState)[];
 
@@ -380,6 +380,7 @@ export class Race {
         duelAt: 0,
         defendLat: 0,
         position: i + 1,
+        grid: i + 1,
         penalty: 0,
         targetLap: 0,
         // arrancada: uns largam muito bem, outros patinam
@@ -1714,6 +1715,7 @@ export class Race {
         c.pitTimer = Math.max(tyres, refuel) + wait;
         c.pitTotal = c.pitTimer;
         c.pitClean = Math.max(cleanTyres, refuel) + wait;
+        c.bestStop = Math.min(c.bestStop ?? Infinity, c.pitTotal);
       }
     } else if (c.pit === "leaving") {
       if (t.wrap(t.pitExitS - prevS) <= ds) {

@@ -189,6 +189,16 @@ export const RACE_DICT: [string, string, string][] = [
   ["2 paradas: Macio → Médio → Médio", "2 stops: Soft → Medium → Medium", "2 paradas: Blando → Medio → Medio"],
   ["no fim da volta", "at the end of lap", "al final de la vuelta"],
   ["estratégia", "strategy", "estrategia"],
+  ["clique pra pular", "click to skip", "clic para saltar"],
+  ["TV (MULTICAM)", "TV (MULTICAM)", "TV (MULTICAM)"],
+  ["Câmera TV (MultiCam)", "TV camera (MultiCam)", "Cámara TV (MultiCam)"],
+  ["Só no modo 3D. De lado: arraste com o botão direito do mouse pra girar. Piloto: em cima da cabeça do piloto, vendo o halo e as rodas. TV (MultiCam): troca sozinha como na transmissão (largada, chegada, briga, box). Na corrida: teclas 1 a 5.", "3D mode only. Side: drag with the right mouse button to rotate. Driver: above the driver's head, seeing the halo and wheels. TV (MultiCam): switches by itself like a broadcast (start, finish, battles, pits). In the race: keys 1 to 5.", "Solo en modo 3D. De lado: arrastra con el botón derecho del mouse para girar. Piloto: sobre la cabeza del piloto, viendo el halo y las ruedas. TV (MultiCam): cambia sola como en la transmisión (largada, llegada, peleas, boxes). En carrera: teclas 1 a 5."],
+  ["VOLTA MAIS RÁPIDA", "FASTEST LAP", "VUELTA MÁS RÁPIDA"],
+  ["QUEM MAIS GANHOU POSIÇÕES", "MOST POSITIONS GAINED", "MÁS POSICIONES GANADAS"],
+  ["MAIS ULTRAPASSAGENS", "MOST OVERTAKES", "MÁS ADELANTAMIENTOS"],
+  ["PARADA MAIS RÁPIDA", "FASTEST PIT STOP", "PARADA MÁS RÁPIDA"],
+  ["ABANDONOS", "RETIREMENTS", "ABANDONOS"],
+  ["Todos chegaram", "Everyone finished", "Todos llegaron"],
 ];
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -311,6 +321,7 @@ export const RACE_PATTERNS: Pat[] = [
   [/^Trecho (\d+):$/, (a) => `Stint ${a}:`, (a) => `Tramo ${a}:`],
   [/^voltas (\d+)–(\d+)$/, (a, b) => `laps ${a}–${b}`, (a, b) => `vueltas ${a}–${b}`],
   [/^Parada (\d+)$/, (a) => `Stop ${a}`, (a) => `Parada ${a}`],
+  [/^\((acidente|bateu no muro|sem combustível|preso na brita|elétrica|câmbio|hidráulica|abandono|motor)\)$/, (a) => `(${lbl(a)})`, (a) => `(${lbl(a)})`],
   [/^(.*?)(\d+) avisos?$/, (a, b) => `${a}${b} ${b === "1" ? "note" : "notes"}`, (a, b) => `${a}${b} ${b === "1" ? "aviso" : "avisos"}`],
 ];
 

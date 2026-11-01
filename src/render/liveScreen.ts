@@ -32,6 +32,19 @@ export function liveScreenTexture() {
   return tex;
 }
 
+/** materiais dos telões (pieces.ts): o RealCars troca o que passa neles (a classificação ou a câmera ao vivo) */
+const mats = new Set<THREE.MeshBasicMaterial>();
+export function screenMaterial() {
+  const m = new THREE.MeshBasicMaterial({ map: liveScreenTexture(), toneMapped: false });
+  mats.add(m);
+  return m;
+}
+/** o que passa nos telões: uma textura (a câmera ao vivo) ou null = a classificação */
+export function setScreenSource(t: THREE.Texture | null) {
+  const want = t ?? tex;
+  for (const m of mats) if (m.map !== want) m.map = want;
+}
+
 /** redesenha a classificação (no máximo ~2 vezes por segundo) */
 export function updateLiveScreen(race: Race) {
   if (!tex || !cv) return;

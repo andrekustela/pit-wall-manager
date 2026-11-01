@@ -6,10 +6,10 @@ import * as THREE from "three";
 import type { PathItem } from "./paths3d";
 import { Terrain } from "./terrain";
 import { apartmentGeo, palaceGeo, hotelGeo, villaGeo, yachtGeo, sailboatGeo, cruiseGeo, pierGeo, lighthouseGeo, tunnelGeo, tyreBlockGeo, brakeBoardGeos, brakeBoardTex, pitLightGeo, inflatableArchGeo, hedgeGeo, rockGeo, toiletGeo, golfCartGeo, generatorGeo } from "./trackParts";
-import { liveScreenTexture } from "./liveScreen";
+import { screenMaterial } from "./liveScreen";
 import { ambulanceGeo, flowerBedGeo, jerseyGeo, photographerGeo, pitCrewGeo, sausageGeo } from "./trackParts";
 import { modelParts } from "./customModels";
-import { BRANDS, containerGeo, cratesGeo, flagpoleGeo, helipadGeo, marshalGeo, podiumGeo, screenGeo, truckGeo, tvTowerGeo, barrierGeo, billboardGeos, billboardTex, blob, bridgeGeo, busGeo, carGeo, coneGeo, crowdGeo, gantryGeo, garageTex, guardrailGeo, houseGeos, lampGeo, motorhomeGeo, palmGeo, pineGeo, standModule, stoneWallGeo, tallBuildingGeo, tentGeo, towerGeo, tyreStackGeo, waterTowerGeo } from "./trackParts";
+import { BRANDS, containerGeo, cratesGeo, flagpoleGeo, helipadGeo, marshalGeo, podiumGeo, screenGeo, truckGeo, tvTowerGeo, barrierGeo, billboardGeos, billboardTex, blob, bridgeGeo, busGeo, carGeo, coneGeo, crowdGeo, gantryGeo, garageTex, guardrailGeo, houseGeos, lampGeo, motorhomeGeo, palmGeo, pineGeo, standModule, standRoof, stoneWallGeo, tallBuildingGeo, tentGeo, towerGeo, tyreStackGeo, waterTowerGeo } from "./trackParts";
 
 export type PieceKind =
   | "arquibancada" | "torcida" | "box" | "torre" | "tenda" | "motorhome" | "onibus" | "pneu" | "barreira" | "guardrail" | "muro" | "cone"
@@ -55,6 +55,52 @@ interface Def {
 }
 
 const lam = (color: string, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+
+/**
+ * telhado que tapa o carro seguido (câmeras inclinadas e a de cima): abre um furo no caminho da câmera até o
+ * carro, pontilhado nas bordas (transparência de verdade precisaria ordenar as peças). O RealCars põe a câmera,
+ * o carro e o tamanho do furo em SEE a cada quadro; uOn 0 = desligado (câmera piloto)
+ */
+export const SEE = { uCam: { value: new THREE.Vector3() }, uCar: { value: new THREE.Vector3() }, uR: { value: 10 }, uOn: { value: 0 } };
+function seeThrough<T extends THREE.Material>(m: T): T {
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, SEE);
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vSeeW;")
+      .replace(
+        "#include <project_vertex>",
+        `#include <project_vertex>
+vec4 seeW = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+seeW = instanceMatrix * seeW;
+#endif
+vSeeW = (modelMatrix * seeW).xyz;`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vSeeW;\nuniform vec3 uCam;\nuniform vec3 uCar;\nuniform float uR;\nuniform float uOn;")
+      .replace(
+        "#include <clipping_planes_fragment>",
+        `#include <clipping_planes_fragment>
+if (uOn > 0.5) {
+  vec3 dir = uCar - uCam;
+  float len = length(dir);
+  dir /= len;
+  vec3 rel = vSeeW - uCam;
+  float t = dot(rel, dir);
+  if (t > 0.0 && t < len - 1.5) {
+    float solid = smoothstep(uR * 0.55, uR, length(rel - dir * t));
+    // pontilhado ordenado 4x4 (Bayer): some aos poucos na borda do furo
+    vec2 q = mod(floor(gl_FragCoord.xy), 4.0), a = mod(q, 2.0), b = floor(q / 2.0);
+    float b1 = a.x < 0.5 ? (a.y < 0.5 ? 0.0 : 2.0) : (a.y < 0.5 ? 3.0 : 1.0);
+    float b2 = b.x < 0.5 ? (b.y < 0.5 ? 0.0 : 2.0) : (b.y < 0.5 ? 3.0 : 1.0);
+    if (solid < (b1 * 4.0 + b2 + 0.5) / 16.0) discard;
+  }
+}`,
+      );
+  };
+  m.customProgramCacheKey = () => "furo-telhado";
+  return m;
+}
 /** material de quem já vem com a cor nos vértices */
 const vc = (extra: THREE.MeshLambertMaterialParameters = {}) => lam("#ffffff", { vertexColors: true, ...extra });
 const trunkGeo = (h: number) => new THREE.CylinderGeometry(0.144, 0.234, h, 5, 1, true).translate(0, h / 2, 0);
@@ -66,7 +112,10 @@ export const PIECES: Record<PieceKind, Def> = {
     variantes: ["Com cobertura", "Sem cobertura", "Sobre pilares, com cobertura", "Sobre pilares, sem cobertura"],
     parts: (v) => {
       const kind = v & 3, lift = kind >= 2 ? 4 : 0;
-      const out: Part[] = [{ geo: standModule(undefined, undefined, kind % 2 === 0, lift), mat: lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), shadow: true }];
+      const covered = kind % 2 === 0;
+      const out: Part[] = [{ geo: standModule(undefined, undefined, covered, lift, false), mat: lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide }), shadow: true }];
+      // (as telhas à parte: ganham o furo pra ver o carro que passa embaixo/atrás)
+      if (covered) out.push({ geo: standRoof(lift), mat: seeThrough(lam("#ffffff", { vertexColors: true, flatShading: true, side: THREE.DoubleSide })), shadow: true });
       if (v & 4) out.push({ geo: crowdGeo(23 + (v >> 3), lift), mat: vc(), shadow: true, far: { geo: crowdGeo(23 + (v >> 3), lift, true), mat: vc() } });
       return out;
     },
@@ -75,11 +124,12 @@ export const PIECES: Record<PieceKind, Def> = {
   box: {
     label: "Box (garagem)",
     parts: () => {
-      const white = lam("#f4f4f2");
+      const white = seeThrough(lam("#f4f4f2"));
       return [
-        { geo: new THREE.BoxGeometry(6.2, 11, 14).translate(0, 5.5, 7), mat: [white, white, white, white, white, lam("#ffffff", { map: garageTex() })], shadow: true },
+        // (o prédio também abre o furo: o carro parado no box fica embaixo da beirada dele, visto de trás)
+        { geo: new THREE.BoxGeometry(6.2, 11, 14).translate(0, 5.5, 7), mat: [white, white, white, white, white, seeThrough(lam("#ffffff", { map: garageTex() }))], shadow: true },
         // telhado marrom passando um pouco da frente
-        { geo: new THREE.BoxGeometry(6.25, 0.7, 16).translate(0, 11.35, 7), mat: lam("#a5653b"), shadow: true },
+        { geo: new THREE.BoxGeometry(6.25, 0.7, 16).translate(0, 11.35, 7), mat: seeThrough(lam("#a5653b")), shadow: true },
       ];
     },
   },
@@ -151,7 +201,7 @@ export const PIECES: Record<PieceKind, Def> = {
     parts: () => [
       { geo: screenGeo(), mat: vc(), shadow: true },
       // (a tela mostra a classificação ao vivo, sem luz nem sombra: brilha como uma tela)
-      { geo: new THREE.PlaneGeometry(12, 6.8).rotateY(Math.PI).translate(0, 11.3, -0.57), mat: new THREE.MeshBasicMaterial({ map: liveScreenTexture(), toneMapped: false }) },
+      { geo: new THREE.PlaneGeometry(12, 6.8).rotateY(Math.PI).translate(0, 11.3, -0.57), mat: screenMaterial() },
     ],
   },
   freada: {

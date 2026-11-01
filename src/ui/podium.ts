@@ -7,7 +7,7 @@ import type { CarState } from "../sim/types";
 import type { DevArea } from "../sim/development";
 import { driverCanvas, driverGround, loadDriver3d, uniformOf } from "../render/driver3d";
 import { esc, updateWaitBar } from "./common";
-import { resultsTable } from "./results";
+import { raceHighlights, resultsTable } from "./results";
 import { bindTelemetry, telemetryHtml } from "./telemetry";
 
 import { POINTS, standings } from "../sim/championship";
@@ -51,6 +51,7 @@ export class PodiumScreen {
         ${champSection(race, lobby)}
 
         <h2>RESULTADO COMPLETO · ${esc(race.track.name)} · ${race.laps} VOLTAS</h2>
+        ${raceHighlights(race, me.teamId ?? "")}
         ${resultsTable(race, me.teamId ?? "")}
         ${telemetryHtml(race, me.teamId ?? "")}
         <div class="row-btns" style="align-items:center"><button class="go" id="pd-go" style="margin:0">${goLabel(lobby)}</button>${onReplay ? `<button class="btn" id="pd-replay">🎬 REPLAYS / MELHORES MOMENTOS</button>` : ""}</div>

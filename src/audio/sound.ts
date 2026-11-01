@@ -116,7 +116,8 @@ class EngineVoice {
     } else if (rpm < 7400 && this.gear > 0) {
       this.gear--;
       // redução com o carro freando: estouro no escapamento
-      if (accel < -5 && Math.random() < 0.7) this.noise(0.05, 0.05 * vol, 1800);
+      // (dois ou três estalos seguidos, como o escapamento de verdade)
+      if (accel < -5 && Math.random() < 0.7) for (let k = 0, n = 2 + Math.floor(Math.random() * 2); k < n; k++) setTimeout(() => this.noise(0.04, 0.07 * vol, 1500 + Math.random() * 900), k * (55 + Math.random() * 40));
     }
     rpm = Math.max(v < 2 ? 4200 : 6000, Math.min(MAX_RPM, (v / GEAR_TOP[this.gear]) * MAX_RPM));
     const throttle = accel > -4 ? 1 : 0.25;
@@ -318,7 +319,12 @@ class Sound {
   }
 
   /** chamado todo frame da corrida */
-  update(race: Race, followId: string, speed: number) {
+  /** carro seguido (a torcida reage mais a ele) */
+  private followId = "";
+  /** câmera parada na beira da pista (Modo TV, largada, bandeirada, replay): o som vem de lá */
+  private lastEar = new Map<string, number>();
+  update(race: Race, followId: string, speed: number, ear: { x: number; y: number } | null = null) {
+    this.followId = followId;
     if (!this.ctx || !this.main) return;
     const now = performance.now();
     const dt = Math.min(0.1, (now - this.lastT) / 1000) * Math.max(1, speed);
@@ -328,10 +334,32 @@ class Sound {
     const running = race.phase !== "finished" && speed > 0 && !!car && !car.retired && car.pit !== "parked" && car.pit !== "stopped";
     // em 8x/16x o motor fica mais baixo (senão vira só zumbido)
     const speedVol = speed > 4 ? 0.35 : speed > 2 ? 0.7 : 1;
-    this.main.update(running ? car : null, dt, speedVol);
+    // câmera na beira da pista: o motor vem de onde o carro está (mais longe, mais baixo; chegando, mais agudo;
+    // passou, mais grave) e o carro que passa mais perto dela faz o "vruuum"
+    if (ear && speed <= 4) {
+      const dop = (o: CarState) => {
+        const p = race.track.pose(o.s, o.lateral), d = Math.hypot(p.x - ear.x, p.y - ear.y), was = this.lastEar.get(o.id) ?? d;
+        this.lastEar.set(o.id, d);
+        return { d, doppler: Math.max(0.75, Math.min(1.3, 343 / (343 - (dt > 0 ? (was - d) / dt : 0)))) };
+      };
+      if (running && car) {
+        const { d, doppler } = dop(car);
+        this.main.update(car, dt, speedVol * Math.max(0.06, Math.pow(Math.max(0, 1 - d / 260), 1.6)), 0, doppler);
+      } else this.main.update(null, dt, 0);
+      let best: CarState | null = null, bd = 120;
+      for (const o of race.cars) {
+        if (o === car || o.retired || o.pit === "parked") continue;
+        const p = race.track.pose(o.s, o.lateral), d = Math.hypot(p.x - ear.x, p.y - ear.y);
+        if (d < bd) [best, bd] = [o, d];
+      }
+      if (best) {
+        const { d, doppler } = dop(best);
+        this.passBy!.update(best, dt, speedVol * Math.pow(1 - d / 120, 2) * 0.8, 0, doppler);
+      } else this.passBy!.update(null, dt, 0);
+    } else this.main.update(running ? car : null, dt, speedVol);
 
     // carro mais próximo passando (com efeito doppler)
-    if (car && running && speed <= 4) {
+    if (!ear && car && running && speed <= 4) {
       const me = race.track.pose(car.s, car.lateral);
       let best: CarState | null = null;
       let bestD = 140;
@@ -354,7 +382,7 @@ class Sound {
         const pan = Math.cos(me.h) * (p.y - me.y) - Math.sin(me.h) * (p.x - me.x) > 0 ? 0.5 : -0.5;
         this.passBy!.update(best, dt, speedVol * Math.pow(1 - bestD / 140, 2) * 0.7, pan, doppler);
       } else this.passBy!.update(null, dt, 0);
-    } else this.passBy!.update(null, dt, 0);
+    } else if (!ear) this.passBy!.update(null, dt, 0);
 
     this.rain!.gain.gain.setTargetAtTime(race.rain * 0.12, t, 0.5);
     // torcida: cresce nas ultrapassagens, na última volta e na bandeirada, e volta devagar
@@ -517,6 +545,35 @@ class Sound {
   }
 
   /**
+   * parada no box (dur = segundos reais até o carro sair): o macaco sobe, as pistolas soltam as 4 porcas (duas
+   * de cada vez), apertam de novo e o macaco desce. near = o carro seguido (o seu, mais baixo se não for o seguido)
+   */
+  pitStop(dur: number, near: boolean) {
+    const k = near ? 1 : 0.55, end = Math.max(1.2, dur);
+    this.hit(0, 0.14, 0.5 * k, 170, "lowpass");
+    this.hit(0.02, 0.07, 0.22 * k, 950, "bandpass", 2);
+    // pistola: rajada de batidinhas agudas (o "brrrt" da porca girando)
+    const gun = (t0: number, len: number, f: number) => {
+      for (let t = 0; t < len; t += 0.026) this.hit(t0 + t, 0.022, 0.16 * k * (0.75 + Math.random() * 0.5), f * (0.94 + Math.random() * 0.12), "bandpass", 5);
+    };
+    gun(0.16, 0.32, 2900);
+    gun(0.22, 0.3, 3300);
+    const tight = Math.min(end - 0.5, 0.16 + Math.max(0.9, end * 0.42));
+    gun(tight, 0.24, 3000);
+    gun(tight + 0.05, 0.22, 3500);
+    // macaco descendo: pancada do carro no chão
+    this.hit(end - 0.1, 0.22, 0.55 * k, 140, "lowpass");
+    this.hit(end - 0.08, 0.08, 0.25 * k, 760, "bandpass", 2);
+  }
+
+  /** saída do box: o motor enche e o pneu chia um pouco */
+  pitRelease(near: boolean) {
+    const k = near ? 1 : 0.55;
+    this.hit(0, 0.55, 0.32 * k, 260, "lowpass");
+    this.hit(0.05, 0.18, 0.18 * k, 1900, "bandpass", 6);
+  }
+
+  /**
    * batida contra a barreira, na hora em que o carro DESENHADO encosta (o renderer avisa): estrondo grave do carro,
    * a pancada na barreira (pneu abafa; guard-rail estala e vibra; concreto bate seco), o estilhaço da fibra e o
    * arrasto — na medida da velocidade contra ela. `near` = o carro seguido (os outros mais baixo)
@@ -582,7 +639,8 @@ class Sound {
       // piloto reclamando no rádio (box lento, toque, punição, abandono...)
       if (mine && teamVoice.enabled && e.kind && REACT_KINDS.has(e.kind)) teamVoice.react(e.text);
       switch (e.kind) {
-        case "start": this.go(); break;
+        // largada: o bipe, o ronco dos 20 carros saindo e a torcida
+        case "start": this.go(); this.hit(0.05, 1.6, 0.32, 170, "lowpass"); this.hit(0.1, 0.9, 0.12, 1700, "bandpass", 3); this.crowdBoost = Math.min(0.16, this.crowdBoost + 0.1); break;
         case "radio":
         case "plan":
         case "fault": {
@@ -594,12 +652,13 @@ class Sound {
         case "pitout": if (mine) this.pitWrench(); break;
         // (o som da batida toca quando o carro DESENHADO encosta na barreira: impact, pelo renderer)
         case "crash": this.crowdBoost += 0.05; break;
-        case "overtake": this.crowdBoost = Math.min(0.08, this.crowdBoost + 0.025); break;
+        // (a torcida vibra mais com a ultrapassagem do carro seguido ou do seu)
+        case "overtake": { const big = mine || e.carId === this.followId; this.crowdBoost = Math.min(big ? 0.14 : 0.08, this.crowdBoost + (big ? 0.06 : 0.025)); break; }
         case "spin": if (mine) this.noise(0.4, 0.15, 900); break;
         case "sc": this.alarm(); break;
         case "green": this.go(); break;
         case "lastlap": this.beep(1047, 0.15, 0.08, "square"); this.beep(1047, 0.15, 0.08, "square", 0.2); this.crowdBoost += 0.05; break;
-        case "checkered": this.fanfare(); break;
+        case "checkered": this.fanfare(); this.crowdBoost = Math.min(0.2, this.crowdBoost + 0.14); break;
         case "rain": this.thunderRain(); break;
         case "fastest": if (mine) this.beep(1568, 0.12, 0.06, "triangle"); break;
         // estratégia que deu certo: arpejo subindo

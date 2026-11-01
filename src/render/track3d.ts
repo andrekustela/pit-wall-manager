@@ -14,6 +14,93 @@ import { TEAMS } from "../sim/data";
 type Kind = "costa" | "cais" | "pista" | "kart" | "rua" | "caminho" | "grama" | "bosque" | "arvores" | "agua" | "predio" | "arquibancada" | "cerca" | "muro" | "piscina" | "estacionamento";
 interface Item { k: Kind; p: [number, number][]; h?: number; fechado?: boolean; w?: number }
 
+/**
+ * PISTA SEM MAPA DE VERDADE (as oficiais inventadas e as do editor): um entorno de cidade inventado, igual em toda
+ * corrida (sorteio pelo nome). Fora da cidade: 3 a 5 bairros de casinhas com ruas e fileira de árvores (a 140-260 m),
+ * 1 ou 2 grupos de prédios altos ao longe (a cidade) e bosques. Circuito de rua: quarteirões de prédios colados no
+ * muro dos dois lados, uma segunda fileira mais alta atrás e praças com árvores. Sem isso o entorno ficava vazio
+ * (só árvores soltas; nas de rua, nada)
+ */
+function synthMap(track: Track, street: boolean): Item[] {
+  let seed = 7;
+  for (const ch of track.name) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const W2 = TRACK_WIDTH / 2, out: Item[] = [], g = new Grid(20);
+  for (let s = 0; s < track.L; s += 4) {
+    const p = track.pose(s, 0);
+    g.add(p.x, p.y);
+  }
+  /** nada da pista a menos de d */
+  const far = (x: number, z: number, d: number) => g.near(x, z, d) >= d - 0.01;
+  const rect = (cx: number, cz: number, a: number, l: number, w: number): [number, number][] =>
+    ([[-l / 2, -w / 2], [l / 2, -w / 2], [l / 2, w / 2], [-l / 2, w / 2], [-l / 2, -w / 2]] as const).map(([x, z]) => [cx + x * Math.cos(a) - z * Math.sin(a), cz + x * Math.sin(a) + z * Math.cos(a)]);
+  const blob = (cx: number, cz: number, r: number): Item => {
+    const p: [number, number][] = [];
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2, rr = r * (0.75 + rnd() * 0.4);
+      p.push([cx + Math.cos(a) * rr, cz + Math.sin(a) * rr]);
+    }
+    p.push(p[0]);
+    return { k: "bosque", p, fechado: true };
+  };
+  const pitS = track.wrap(track.pitExitS - track.pitEntryS);
+  const inPit = (s: number, side: number) => track.wrap(s - track.pitEntryS) < pitS && Math.sign(track.pitLateralAt(s) || 1) === side;
+  if (street) {
+    for (const side of [1, -1])
+      for (const row of [0, 1]) {
+        let s = rnd() * 10;
+        while (s < track.L) {
+          const len = 16 + rnd() * 10, dep = 14 + rnd() * 8, mid = track.wrap(s + len / 2);
+          const lat = side * (W2 + 7 + dep / 2 + row * 30), p = track.pose(mid, lat);
+          if (!inPit(mid, side) && far(p.x, p.y, Math.abs(lat) - 1))
+            out.push({ k: "predio", p: rect(p.x, p.y, p.h, len, dep), fechado: true, h: (row ? 21 : 12) + Math.floor(rnd() * (row ? 8 : 6)) * 3 });
+          s += len + 2 + rnd() * 3;
+        }
+      }
+    // praças: manchas de árvores atrás dos quarteirões
+    for (let n = 0; n < 6; n++) {
+      const side = rnd() < 0.5 ? 1 : -1, p = track.pose(rnd() * track.L, side * (W2 + 75 + rnd() * 60)), r = 18 + rnd() * 16;
+      if (far(p.x, p.y, r + 50)) out.push(blob(p.x, p.y, r));
+    }
+    return out;
+  }
+  // bairros de casinhas
+  for (let n = 0, tries = 0, want = 3 + Math.floor(rnd() * 3); n < want && tries < 80; tries++) {
+    const side = rnd() < 0.5 ? 1 : -1, c = track.pose(rnd() * track.L, side * (140 + rnd() * 120));
+    if (!far(c.x, c.y, 110)) continue;
+    n++;
+    const a = rnd() * Math.PI, ca = Math.cos(a), sa = Math.sin(a), nr = 2 + Math.floor(rnd() * 2), len = 110 + rnd() * 80;
+    for (let r = 0; r < nr; r++) {
+      const off = (r - (nr - 1) / 2) * 34;
+      const ax = c.x - (ca * len) / 2 - sa * off, az = c.y - (sa * len) / 2 + ca * off, bx = ax + ca * len, bz = az + sa * len;
+      out.push({ k: "rua", p: [[ax, az], [bx, bz]], w: 7 });
+      out.push({ k: "arvores", p: [[ax - sa * 6, az + ca * 6], [bx - sa * 6, bz + ca * 6]] });
+      for (let t = 8; t < len - 8; t += 15 + rnd() * 5)
+        for (const sd of [1, -1]) {
+          if (rnd() < 0.15) continue;
+          const hx = ax + ca * t - sa * sd * 13, hz = az + sa * t + ca * sd * 13;
+          if (far(hx, hz, 60)) out.push({ k: "predio", p: rect(hx, hz, a, 10 + rnd() * 4, 8 + rnd() * 3), fechado: true, h: 4 + rnd() * 2 });
+        }
+    }
+  }
+  // a cidade ao longe: prédios altos
+  for (let n = 0, want = 1 + Math.floor(rnd() * 2), tries = 0; n < want && tries < 40; tries++) {
+    const side = rnd() < 0.5 ? 1 : -1, c = track.pose(rnd() * track.L, side * (290 + rnd() * 70));
+    if (!far(c.x, c.y, 230)) continue;
+    n++;
+    for (let k = 0, m = 6 + Math.floor(rnd() * 7); k < m; k++)
+      out.push({ k: "predio", p: rect(c.x + (rnd() - 0.5) * 110, c.y + (rnd() - 0.5) * 110, rnd() * Math.PI, 18 + rnd() * 14, 16 + rnd() * 10), fechado: true, h: 21 + Math.floor(rnd() * 10) * 3 });
+  }
+  // bosques
+  for (let n = 0, want = 4 + Math.floor(rnd() * 5), tries = 0; n < want && tries < 60; tries++) {
+    const side = rnd() < 0.5 ? 1 : -1, c = track.pose(rnd() * track.L, side * (70 + rnd() * 180)), r = 25 + rnd() * 35;
+    if (!far(c.x, c.y, r + 30)) continue;
+    n++;
+    out.push(blob(c.x, c.y, r));
+  }
+  return out;
+}
+
 /** nome da pista -> arquivo (sem acento, minúsculo) */
 export { slugOf } from "../sim/walls";
 import { slugOf } from "../sim/walls";
@@ -25,6 +112,56 @@ const over = (k: number) => ({ polygonOffset: true, polygonOffsetFactor: -Math.m
 // (fosco: sem o brilho que muda com o ângulo, a câmera de cima e a de lado mostram a mesma cor; e pesa menos)
 const mat = (color: string, _rough = 0.9, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
+
+/**
+ * PISTA MOLHADA: o asfalto escurece e reflete o céu de lado (o que as câmeras de TV pegam), junta poça perto das
+ * bordas e, quando a chuva para, a trajetória seca primeiro (faixa mais clara no traçado ideal). WET.uWet = o quanto
+ * a pista está molhada (Race.wet), WET.uDry = 1 sem chuva (secando). O RealCars atualiza a cada quadro (setWet)
+ */
+export const WET = { uWet: { value: 0 }, uDry: { value: 0 }, uSky: { value: new THREE.Color("#a9b6c4") } };
+function wetAsphalt(m: THREE.MeshLambertMaterial, W2: number) {
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, WET);
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float aLine;\nvarying float vLat;\nvarying float vLine;\nvarying vec3 vWetW;")
+      .replace("#include <begin_vertex>", `#include <begin_vertex>
+vLat = mix(${(-W2).toFixed(2)}, ${W2.toFixed(2)}, uv.y);
+vLine = aLine;
+vWetW = (modelMatrix * vec4(position, 1.0)).xyz;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+uniform float uWet;
+uniform float uDry;
+uniform vec3 uSky;
+varying float vLat;
+varying float vLine;
+varying vec3 vWetW;
+float wetHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wetNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(wetHash(i), wetHash(i + vec2(1.0, 0.0)), f.x), mix(wetHash(i + vec2(0.0, 1.0)), wetHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `if (uWet > 0.01) {
+  // trajetória seca primeiro (só sem chuva); poça nas bordas e nos cantos mais baixos
+  float wk = uWet * (1.0 - uDry * 0.8 * smoothstep(1.8, 0.7, abs(vLat - vLine)));
+  float pud = smoothstep(0.58, 0.78, wetNoise(vWetW.xz * 0.11) * 0.7 + wetNoise(vWetW.xz * 0.37) * 0.3) * smoothstep(${(W2 - 4.5).toFixed(2)}, ${(W2 - 1.2).toFixed(2)}, abs(vLat)) * smoothstep(0.25, 0.7, uWet);
+  float ndv = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
+  float fres = pow(1.0 - ndv, 4.0);
+  outgoingLight *= 1.0 - 0.36 * wk - 0.22 * pud;
+  outgoingLight += uSky * (fres * (0.5 * wk + 0.85 * pud) + 0.04 * pud);
+}
+#include <opaque_fragment>`,
+      );
+  };
+  m.customProgramCacheKey = () => "asfalto-molhado";
+  return m;
+}
 
 const merge = (gs: (THREE.BufferGeometry | null)[]) => {
   const ok = gs.filter((g): g is THREE.BufferGeometry => !!g).map((g) => (g.index ? g.toNonIndexed() : g));
@@ -75,6 +212,8 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   } catch {
     /* sem dados reais */
   }
+  // (sem mapa de verdade: um entorno de cidade inventado)
+  if (!items.length) items = synthMap(track, !!track.def.street);
   // (sem o entorno real, só as peças em volta da pista)
   const rnd = rng(7);
   const W2 = TRACK_WIDTH / 2;
@@ -546,7 +685,13 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
     return g;
   };
   // (a ordem do triângulo segue o sentido da pista: se a face sair virada pra baixo, mostra dos dois lados)
-  add(band(-W2, W2, 0.1, 0, track.L, 2, 0.08), mat("#ffffff", 1, { map: asphaltTex, side: THREE.DoubleSide }));
+  // (aLine: onde fica o traçado ideal em cada ponto, pra trajetória secar primeiro: wetAsphalt)
+  const road = band(-W2, W2, 0.1, 0, track.L, 2, 0.08);
+  const ln: number[] = [];
+  for (let s = 0; s <= track.L + 0.01; s += 2) ln.push(track.lineAt(track.wrap(s)), track.lineAt(track.wrap(s)));
+  road.setAttribute("aLine", new THREE.Float32BufferAttribute(ln, 1));
+  const roadMesh = add(road, wetAsphalt(mat("#ffffff", 1, { map: asphaltTex, side: THREE.DoubleSide }), W2));
+  if (roadMesh) roadMesh.name = "asfalto";
   add(merge([band(W2 - 0.14, W2, 0.12), band(-W2, -W2 + 0.14, 0.12)]), mat("#141821", 1, { side: THREE.DoubleSide, ...over(2) }));
   add(merge([band(W2 - 0.66, W2 - 0.14, 0.12), band(-W2 + 0.14, -W2 + 0.66, 0.12)]), mat("#f2f2f2", 0.6, { side: THREE.DoubleSide, ...over(2) }));
   // desgaste no traçado ideal: borracha das rodas com borda que some, duas marcas mais escuras e riscos;
