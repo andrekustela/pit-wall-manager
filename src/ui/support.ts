@@ -6,9 +6,11 @@ import { PLUS_HASHES, PREMIUM_HASHES } from "./plusCodes";
 /** link da doação (PIX, Ko-fi, Mercado Pago...). Vazio = "em breve" */
 export const DONATE_URL = "";
 
+/** shortcut: Plus e Premium liberados pra todo mundo (pedido do usuário, 2026-11-05) — voltar pra false quando a venda pela plataforma começar */
+export const ALL_UNLOCKED = true;
 /** o Premium (tudo do Plus + CRIAR MEU CARRO com adesivos) está ativo neste navegador? */
 export function isPremium(): boolean {
-  return storeGet("pwm.premium") === "1";
+  return ALL_UNLOCKED || storeGet("pwm.premium") === "1";
 }
 /** o Plus está ativo neste navegador? (o Premium inclui o Plus) */
 export function isPlus(): boolean {
