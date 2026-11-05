@@ -13,7 +13,7 @@ mkdirSync(outDir, { recursive: true });
 
 const proc = spawn(EDGE, [
   "--headless=new", "--disable-gpu", "--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", `--remote-debugging-port=${port}`,
-  `--user-data-dir=${join(outDir, ".profile")}`, "--window-size=1600,1000", "about:blank",
+  `--user-data-dir=${join(outDir, ".profile")}`, `--window-size=${process.env.SHOT_SIZE ?? "1600,1000"}`, "about:blank",
 ]);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -51,7 +51,8 @@ const cmd = (method: string, params: object = {}) =>
 
 await cmd("Runtime.enable");
 await cmd("Page.enable");
-await cmd("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+const [SW, SH] = (process.env.SHOT_SIZE ?? "1600,1000").split(",").map(Number);
+await cmd("Emulation.setDeviceMetricsOverride", { width: SW, height: SH, deviceScaleFactor: 1, mobile: false });
 await cmd("Page.navigate", { url });
 await wait(1500);
 

@@ -1,0 +1,937 @@
+<title>Cards da Corrida</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;700&family=Oswald:wght@300;400;600&family=Titillium+Web:wght@400;600;700&display=swap">
+<style>
+/* Layout: a tela inteira da corrida desenhada em 1600x900 (como o jogo) e escalada pra caber; em volta só o
+   seletor de estilos. Página escura de propósito: é a tela de um jogo */
+:root {
+  --bg: #0b0e14;
+  --ink: #e9edf5;
+  --mute: #8a93a6;
+  --line: #262e3d;
+  --red: #e8202a;
+  --f-ui: "Titillium Web", "Segoe UI", sans-serif;
+  --f-cond: "Oswald", "Arial Narrow", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 26px; }
+.wrap { max-width: 1600px; margin: 0 auto; display: grid; gap: 12px; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+.head h1 { margin: 0; font: 600 24px var(--f-cond); letter-spacing: .04em; text-transform: uppercase; }
+.head p { margin: 0; color: var(--mute); font-size: 14px; max-width: 80ch; }
+.picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.picker button { font: 600 13px var(--f-ui); color: var(--mute); background: #141924; border: 1px solid var(--line); padding: 5px 11px 5px 6px; cursor: pointer; display: flex; gap: 7px; align-items: center; transition: color .2s, border-color .2s, background .2s; }
+.picker button b { font: 400 12px var(--f-cond); color: var(--ink); background: #232b3a; min-width: 22px; padding: 1px 4px; text-align: center; }
+.picker button.new b { background: #2d5b3a; }
+.picker button:hover { color: var(--ink); }
+.picker button.on { color: var(--ink); border-color: var(--red); background: #1d1416; }
+.picker button.on b { background: var(--red); }
+button:focus-visible { outline: 2px solid #ffb02e; outline-offset: 2px; }
+.about { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 18px; border-left: 3px solid var(--red); padding: 1px 0 1px 12px; }
+.about h2 { margin: 0; font: 600 17px var(--f-cond); letter-spacing: .05em; text-transform: uppercase; }
+.about p { margin: 0; color: var(--mute); font-size: 14px; max-width: 90ch; grid-column: 1; }
+.about .keys { grid-column: 2; grid-row: 1 / span 2; font-size: 12px; color: var(--mute); text-align: right; }
+.about kbd { font: 11px var(--f-cond); border: 1px solid var(--line); padding: 0 5px; color: var(--ink); }
+.view { position: relative; width: 100%; border: 1px solid var(--line); overflow: hidden; background: #1d3b25; }
+
+/* =================== a tela do jogo (1600x900, escalada por JS) =================== */
+.scr { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; overflow: hidden; font-family: var(--f-body); color: var(--fg); font-size: 13px; }
+.scr canvas.bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* tokens de cada estilo (o padrão é o do jogo atual) */
+.scr {
+  --p-bg: rgba(12,15,21,.9); --p-line: #2a3242; --p-bw: 2px; --p-r: 0px; --p-shadow: 0 0 0 2px #000, 4px 4px 0 2px rgba(0,0,0,.4); --p-blur: none;
+  --h-bg: #e8202a; --h2-bg: #2457c9; --h-fg: #fff; --fg: #e9edf5; --mute: #8a93a6; --acc: #ffb02e; --on: #e8202a; --onfg: #fff;
+  --hot: #e8202a; --cool: #2f8f5b; --well: #090c12; --me-bg: rgba(59,209,111,.16); --row-line: rgba(255,255,255,.04); --up-bg: rgba(59,209,111,.35);
+  --b-r: 0px; --f-disp: "Oswald", sans-serif; --f-body: "Titillium Web", sans-serif; --f-num: "Titillium Web", sans-serif; --ease: cubic-bezier(.3, 1.35, .5, 1);
+}
+.pnl { background: var(--p-bg); border: var(--p-bw) solid var(--p-line); border-radius: var(--p-r); box-shadow: var(--p-shadow); backdrop-filter: var(--p-blur); -webkit-backdrop-filter: var(--p-blur); }
+.hd { background: var(--h-bg); color: var(--h-fg); font: 600 14px var(--f-disp); letter-spacing: .06em; padding: 5px 10px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+
+/* classificação */
+.lb { position: absolute; left: 12px; top: 12px; width: 318px; overflow: hidden; }
+.lb-c, .lb-row { display: grid; grid-template-columns: 22px 4px minmax(0, 1fr) 54px 50px 20px; gap: 7px; align-items: center; padding: 0 10px; }
+.lb-c { padding-block: 3px; font-size: 10px; letter-spacing: .12em; color: var(--mute); }
+.lb-c span:nth-child(4), .lb-c span:nth-child(5) { text-align: right; }
+.lb-rows { position: relative; height: 560px; }
+.lb-row { position: absolute; left: 0; right: 0; height: 28px; border-top: 1px solid var(--row-line); transform: translateY(calc(var(--i) * 28px)); transition: transform .6s cubic-bezier(.77, 0, .175, 1), background .4s; }
+.lb-row .p { text-align: right; color: var(--mute); font: 12px var(--f-num); }
+.lb-row .b { height: 16px; background: var(--tc); border-radius: 1px; }
+.lb-row .n { text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+.lb-row .g, .lb-row .l { text-align: right; font: 12px var(--f-num); font-variant-numeric: tabular-nums; color: var(--mute); }
+.lb-row.me { background: var(--me-bg); }
+.lb-row.me .n { font-weight: 700; }
+.lb-row.fol { box-shadow: inset 0 0 0 1px var(--fg); }
+.lb-row.out .g { color: var(--hot); }
+.lb-row.up { animation: up 1.2s ease-out; }
+@keyframes up { 0%, 30% { background: var(--up-bg); } }
+.ty { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--tcol); background: #111; display: inline-flex; align-items: center; justify-content: center; font: 700 7px var(--f-num); color: #fff; }
+
+/* velocidade da corrida */
+.tb { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; }
+.tb button { font: 600 13px var(--f-body); color: var(--fg); background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); padding: 6px 13px; cursor: pointer; transition: background .2s, color .2s, transform .12s; }
+.tb button:active { transform: scale(.97); }
+.tb button.on { background: var(--on); color: var(--onfg); border-color: var(--on); }
+.tb button.tv { background: var(--hot); border-color: var(--hot); color: #fff; }
+.tb button.tv:not(.on) { background: var(--well); border-color: var(--p-line); color: var(--fg); }
+
+/* caixa CORRIDA */
+.info { position: absolute; top: 12px; right: 12px; width: 206px; overflow: hidden; }
+.info .hd { background: var(--h2-bg); }
+.info dl { margin: 0; padding: 7px 10px 4px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 8px; }
+.info dt { color: var(--mute); }
+.info dd { margin: 0; text-align: right; font-family: var(--f-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.info .wet { height: 3px; background: var(--well); align-self: center; margin-top: 2px; }
+.info p { margin: 0; padding: 2px 10px 8px; font-size: 11px; color: var(--mute); line-height: 1.35; }
+
+/* mensagens */
+.feed { position: absolute; right: 12px; top: 236px; width: 272px; display: flex; flex-direction: column; gap: 3px; }
+.feed > div { padding: 6px 10px; font-size: 12.5px; animation: fin .3s cubic-bezier(.23, 1, .32, 1); }
+.feed > div.hl { border-left: 3px solid var(--acc); }
+@keyframes fin { from { opacity: 0; transform: translateX(30px); } }
+
+/* mapa e velocímetro */
+.mm { position: absolute; right: 12px; bottom: 12px; width: 250px; height: 182px; }
+.mm canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.spd { position: absolute; left: 12px; bottom: 6px; font: 600 26px var(--f-num); font-variant-numeric: tabular-nums; }
+.spd small { font-size: 10px; color: var(--mute); letter-spacing: .08em; margin-left: 4px; }
+
+/* canto de baixo */
+.cn { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 6px; align-items: stretch; }
+.cn > * { padding: 6px 12px; font: 600 13px var(--f-body); color: var(--fg); cursor: pointer; }
+.cn .fps { color: #3bd16f; font-size: 11px; display: flex; align-items: center; cursor: default; }
+
+
+/* ---------- cards dos seus pilotos ---------- */
+/* largura como no jogo: o COMPLETO é largo (carro grande à esquerda), o COMPACTO e o SÓ OS NOMES estreitos */
+.hud { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: 660px; display: flex; flex-direction: column; align-items: center; gap: 6px; transition: width .26s cubic-bezier(.23,1,.32,1); }
+.hud[data-lv="max"] { width: 920px; }
+.hud.sel-top .lvlbar { order: -1; }
+.cards { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
+.card { position: relative; flex: 1 1 0; min-width: 0; padding: 8px 10px 7px; display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 0 12px; transition: grid-template-columns .26s cubic-bezier(.23,1,.32,1); }
+.card.fol { box-shadow: var(--p-shadow), inset 0 0 0 1px color-mix(in srgb, var(--fg) 55%, transparent); }
+.hud[data-lv="min"] .card { grid-template-columns: 26px minmax(0, 1fr); gap: 0 8px; }
+.hud[data-lv="nome"] .card { grid-template-columns: 0 minmax(0, 1fr); gap: 0; }
+.cc { min-width: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+.cc svg { width: 100%; height: auto; display: block; }
+.wt { font: 600 8px var(--f-num); fill: var(--fg); text-anchor: middle; transition: opacity .2s; }
+.hud:not([data-lv="max"]) .wt { opacity: 0; }
+.lmf { width: 100%; }
+.lm { display: grid; gap: 5px; padding-top: 6px; font-size: 10px; color: var(--mute); text-align: center; }
+.lm small { display: block; font: 400 9.5px var(--f-ui, inherit); color: var(--mute); }
+.lm .tyre { margin-right: 4px; vertical-align: -1px; }
+.lm .bar { display: block; margin: 3px auto 0; width: 70%; height: 4px; background: #0006; border-radius: 2px; overflow: hidden; }
+.lm .bar i { display: block; height: 100%; width: calc(var(--v) * 100%); background: var(--bc); }
+.hud[data-lv="max"] [data-k="tyrechip"], .hud[data-lv="max"] [data-k="fuel"] { display: none; }
+.lm em { font-style: normal; display: block; }
+.lm b { display: block; color: var(--fg); font: 600 11px var(--f-num); font-variant-numeric: tabular-nums; }
+.cm { min-width: 0; }
+.c-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.calert { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.calert .act { flex: none; font: 600 11px var(--f-body); letter-spacing: .05em; color: var(--p-bg); background: var(--fg); border: 0; border-radius: var(--b-r); padding: 4px 9px; cursor: pointer; transition: transform .12s; }
+.calert .act:active { transform: scale(.97); }
+kbd { font: 600 9px var(--f-num); border: 1px solid currentColor; border-radius: 2px; padding: 0 3px; margin-left: 6px; opacity: .6; vertical-align: 1px; }
+.pos { font: 600 22px/1 var(--f-disp); }
+.nm { min-width: 0; }
+.nm b { display: block; font: 600 14px/1.15 var(--f-disp); letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm small { display: block; color: var(--mute); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gaps { display: grid; grid-template-columns: auto auto; gap: 1px 6px; font-family: var(--f-num); font-variant-numeric: tabular-nums; text-align: right; font-size: 12px; }
+.gaps em { font-style: normal; font-size: 9px; letter-spacing: .12em; color: var(--mute); align-self: center; }
+.gaps b.close { color: var(--acc); }
+.seal { display: none; font: 600 10px var(--f-disp); letter-spacing: .1em; color: #fff; background: var(--hot); padding: 2px 6px; border-radius: var(--b-r); }
+.leds { display: none; }
+.fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows .26s cubic-bezier(.23,1,.32,1), opacity .2s ease-out; }
+.fold > div { min-height: 0; overflow: hidden; }
+.hud[data-lv="min"] .f-max, .hud[data-lv="nome"] .f-max, .hud[data-lv="nome"] .f-min, .hud[data-lv="nome"] .f-battle, .card.calm .f-battle { grid-template-rows: 0fr; opacity: 0; }
+.hud[data-lv="nome"] .card.hurt .seal { display: inline-block; margin-right: 8px; vertical-align: middle; }
+.hud[data-lv="nome"] .gaps { display: inline-grid; vertical-align: middle; }
+.mini { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 7px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 7px; background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chip.bad { color: #ff8b8b; }
+.chip.good { color: #7fe3a3; }
+.chip .bar { width: 34px; height: 4px; background: #0006; border-radius: 2px; overflow: hidden; }
+.chip .bar i { display: block; height: 100%; width: calc(var(--v) * 100%); background: var(--bc); transition: width .6s; }
+.tyre { width: 13px; height: 13px; border-radius: 50%; border: 3px solid var(--tcol); display: inline-block; background: #111; }
+.calert { margin-top: 6px; padding: 4px 8px; font-size: 11.5px; color: var(--mute); background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); }
+.wide { width: 100%; margin-top: 6px; }
+.battle { margin-top: 7px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; padding: 5px 7px; background: color-mix(in srgb, var(--acc) 13%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 55%, transparent); border-radius: var(--b-r); }
+.battle .bt-t { flex: 1 1 120px; min-width: 0; font-size: 12px; }
+.battle button, .otbig, .boxbtn, .stepper button, .nexts button { font: 600 11px var(--f-body); letter-spacing: .05em; color: var(--fg); background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); padding: 4px 8px; cursor: pointer; transition: background .2s, color .2s, transform .12s; }
+.battle button:active, .otbig:active, .boxbtn:active, .opts button:active { transform: scale(.97); }
+.battle button.on { background: var(--acc); color: #111; border-color: var(--acc); }
+.battle .otb[disabled], .otbig[disabled] { opacity: .45; cursor: default; }
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 35%, transparent); } }
+.body { padding-top: 2px; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 7px 0 3px; }
+.tabs button { font: 600 11px var(--f-body); letter-spacing: .08em; color: var(--mute); background: transparent; border: 0; border-bottom: 2px solid var(--p-line); padding: 4px 0; cursor: pointer; transition: color .2s, border-color .2s; }
+.card[data-tab="race"] .tabs [data-tab="race"], .card[data-tab="box"] .tabs [data-tab="box"] { color: var(--fg); border-color: var(--on); }
+.pane { display: none; }
+.card[data-tab="race"] .pane[data-pane="race"], .card[data-tab="box"] .pane[data-pane="box"] { display: block; animation: paneIn .28s ease-out; }
+@keyframes paneIn { from { opacity: 0; transform: translateY(4px); } }
+.ctl { display: grid; grid-template-columns: 46px minmax(0, 1fr); align-items: center; gap: 6px; margin: 5px 0; }
+.ctl .cl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
+.opts { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--well); border-radius: var(--b-r); padding: 2px; }
+.opts button { position: relative; z-index: 1; background: none; border: 0; color: var(--mute); font: 600 12px var(--f-body); padding: 5px 2px; cursor: pointer; transition: color .2s, transform .12s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.opts button.on { color: var(--onfg); }
+.opts .thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 3); background: var(--on); border-radius: var(--b-r); transform: translateX(calc(var(--idx) * 100%)); transition: transform .32s var(--ease), background .3s; }
+.ctl[data-v="push"] .thumb, .ctl[data-v="rich"] .thumb { background: var(--hot); }
+.ctl[data-v="conserve"] .thumb, .ctl[data-v="lean"] .thumb { background: var(--cool); }
+.trio { display: block; }
+.otcell { margin-top: 6px; min-width: 0; }
+.otctl .opts { grid-template-columns: repeat(2, 1fr); }
+.otctl:not(.w-dial) .opts .thumb { width: calc((100% - 4px) / 2); }
+.otctl.w-dial .thumb { transform: rotate(calc(-50deg + var(--idx) * 100deg)); }
+.otctl.w-dial .opts button:nth-of-type(1) { left: -2px; top: 10px; }
+.otctl.w-dial .opts button:nth-of-type(2) { left: auto; right: -2px; top: 10px; transform: none; }
+.otpush { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 4px; }
+.otpush small { display: block; font-size: 10.5px; color: var(--mute); margin-top: 3px; white-space: nowrap; }
+.otgo { flex: none; width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer; font-size: 16px; color: #fff; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, 0 0 0 2px #2a2c31; transition: transform .12s, box-shadow .2s, color .2s; }
+.otgo:active { transform: scale(.97); }
+.otgo.live { color: var(--acc); box-shadow: 0 2px 0 #000, 0 0 0 2px var(--acc), 0 0 14px var(--acc); }
+.otgo[disabled] { opacity: .4; cursor: default; }
+.tgl[disabled], .seg2 button[disabled] { opacity: .4; cursor: not-allowed; }
+.pips { display: inline-flex; gap: 3px; }
+.pips i { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); transition: background .3s, transform .3s; }
+.pips i.used { background: var(--p-line); transform: scale(.8); }
+.otbar { display: block; height: 3px; background: var(--p-line); margin-top: 5px; border-radius: 2px; overflow: hidden; }
+.otbar b { display: block; height: 100%; width: calc(var(--ot) * 100%); background: var(--acc); transition: width 1s linear; }
+.nexts { display: flex; gap: 4px; }
+.nexts button { width: 26px; padding: 4px 0; }
+.nexts button.on { outline: 2px solid var(--on); outline-offset: 1px; }
+.boxrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.boxrow .cl { width: 46px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
+.stepper { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.stepper button { width: 24px; padding: 3px 0; }
+.boxbtn.live { background: var(--hot); color: #fff; border-color: var(--hot); }
+.plan { font-size: 12px; color: var(--mute); }
+.radio { margin: 6px 0 0; font-size: 11.5px; color: var(--mute); min-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio.new { animation: radioIn .5s ease-out; }
+@keyframes radioIn { from { opacity: 0; transform: translateX(-6px); } }
+.hud[data-lv="nome"] .radio { display: none; }
+.lvlbar { width: 360px; }
+.lvlbar .opts { background: var(--p-bg); border: 1px solid var(--p-line); backdrop-filter: var(--p-blur); -webkit-backdrop-filter: var(--p-blur); }
+.lvlbar .opts button { font-size: 11px; letter-spacing: .08em; padding: 5px 2px; }
+
+/* ============ 2 · VOLANTE ============ */
+.s-volante { --p-bg: rgba(17,18,20,.95); --p-line: #2c2e33; --p-bw: 1px; --p-r: 14px; --p-shadow: 0 8px 24px rgba(0,0,0,.5); --h-bg: #1b1c20; --h2-bg: #1b1c20; --h-fg: #ff7a1a; --fg: #f1f1f1; --mute: #8b8f97; --acc: #ff7a1a; --on: #ff7a1a; --onfg: #111; --hot: #ff3b30; --cool: #2ecc71; --well: #050506; --me-bg: rgba(255,122,26,.12); --up-bg: rgba(255,122,26,.3); --b-r: 7px; }
+.s-volante .pnl { background-image: repeating-linear-gradient(45deg, #ffffff05 0 3px, transparent 3px 6px); }
+.s-volante .hd { border-bottom: 2px solid #ff7a1a; }
+.f-vol .leds { display: flex; gap: 3px; justify-content: center; grid-column: 1 / -1; margin-bottom: 2px; }
+.f-vol .leds i { width: 12px; height: 5px; border-radius: 3px; background: #222; transition: background .15s, box-shadow .15s; }
+.f-vol .leds i.lit:nth-child(-n+4) { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+.f-vol .leds i.lit:nth-child(n+5):nth-child(-n+7) { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+.f-vol .leds i.lit:nth-child(n+8) { background: #3b82ff; box-shadow: 0 0 6px #3b82ff; }
+.f-vol .trio { display: grid; align-items: start; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.w-dial { grid-template-columns: 1fr; justify-items: center; gap: 2px; }
+.w-dial .cl { order: 2; }
+.w-dial .opts { width: 92px; height: 70px; background: none; padding: 0; display: block; }
+.w-dial .opts::before { content: ""; position: absolute; left: 50%; top: 22px; width: 40px; height: 40px; margin-left: -20px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, inset 0 0 0 2px #2a2c31; }
+.w-dial .thumb { z-index: 2; left: 50%; top: 24px; width: 3px; height: 18px; margin-left: -1.5px; border-radius: 2px; transform-origin: 50% 18px; transform: rotate(calc(-62deg + var(--idx) * 62deg)); }
+.w-dial .opts button { position: absolute; font-size: 10px; padding: 1px 2px; width: auto; }
+.w-dial .opts button:nth-of-type(1) { left: -4px; top: 14px; }
+.w-dial .opts button:nth-of-type(2) { left: 50%; top: 0; transform: translateX(-50%); }
+.w-dial .opts button:nth-of-type(3) { right: -4px; top: 14px; }
+.w-dial .opts button.on { color: var(--on); }
+.w-dial kbd { display: none; }
+.s-volante .cn .fps { color: #2ecc71; }
+
+/* ---- variações do Volante: a mesma cara (fibra, botões giratórios, luzes de marcha); muda a cor e o acabamento ---- */
+.v-red { --h-fg: #ff2d3a; --acc: #ff2d3a; --on: #ff2d3a; --onfg: #fff; --me-bg: rgba(255,45,58,.13); --up-bg: rgba(255,45,58,.3); }
+.v-red .hd { border-bottom-color: #ff2d3a; }
+.v-blue { --h-fg: #2f8cff; --acc: #2f8cff; --on: #2f8cff; --onfg: #fff; --me-bg: rgba(47,140,255,.13); --up-bg: rgba(47,140,255,.3); }
+.v-blue .hd { border-bottom-color: #2f8cff; }
+.v-yel { --h-fg: #ffd23b; --acc: #ffd23b; --on: #ffd23b; --onfg: #111; --me-bg: rgba(255,210,59,.12); --up-bg: rgba(255,210,59,.3); }
+.v-yel .hd { border-bottom-color: #ffd23b; }
+/* fibra forjada: carbono manchado, botões giratórios com borda serrilhada, luzes de marcha mais grossas */
+.v-forj .pnl { background-image: radial-gradient(ellipse 14px 6px at 20% 30%, #ffffff08 60%, transparent 62%), radial-gradient(ellipse 10px 16px at 70% 60%, #ffffff07 60%, transparent 62%), radial-gradient(ellipse 18px 8px at 40% 80%, #00000038 60%, transparent 62%); background-size: 26px 22px, 31px 27px, 23px 29px; }
+.v-forj .w-dial .opts::before, .v-forj .knob .cap { background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 58%, transparent 60%), repeating-conic-gradient(#55585f 0 5deg, #15161a 5deg 10deg); box-shadow: 0 3px 0 #000, 0 0 0 1px #000; }
+.v-forj .leds i { height: 8px; }
+.v-forj .ledbar i { height: 22px; }
+/* bicolor: laranja no que você aperta, ciano no que você lê */
+.v-bi { --h-fg: #39d0ff; --acc: #39d0ff; --me-bg: rgba(57,208,255,.12); --up-bg: rgba(57,208,255,.3); }
+.v-bi .hd { border-bottom-color: #39d0ff; }
+/* 2.6 · volante de verdade: disco inteiro em gomos coloridos com o nome dentro, ponteiro preto no centro, botões redondos coloridos */
+.wheel { position: relative; display: block; width: var(--sz); height: var(--sz); padding: 0; border-radius: 50%; background: radial-gradient(circle, transparent 0 59%, #0005 60% 61%, transparent 62%), var(--ring); box-shadow: 0 0 0 2px #000, 0 0 0 4px #2a2c31, 0 4px 8px #000a; flex: none; }
+.wheel .lb { position: absolute; z-index: 1; transform: translate(-50%, -50%); background: none; border: 0; padding: 1px 2px; font: 800 calc(var(--sz) * .075) var(--f-body); letter-spacing: -.01em; line-height: 1; color: var(--tx); cursor: pointer; white-space: nowrap; overflow: visible; opacity: .8; transition: opacity .2s; }
+.wheel .lb.on { color: var(--tx); opacity: 1; }
+.wheel .lb:active { transform: translate(-50%, -50%) scale(.95); }
+.wheel .fin { position: absolute; left: 50%; top: 21%; width: 28%; height: 29%; margin-left: -14%; z-index: 2; transform-origin: 50% 100%; transform: rotate(calc(var(--a0) + var(--idx) * var(--step))); transition: transform .32s cubic-bezier(.3, 1.35, .5, 1); clip-path: polygon(36% 0, 64% 0, 100% 100%, 0 100%); background: linear-gradient(90deg, #000, #5d6068 45%, #0b0b0d); filter: drop-shadow(0 2px 2px #000); }
+.wheel .base { position: absolute; left: 50%; top: 50%; width: 28%; height: 28%; transform: translate(-50%, -50%); z-index: 3; border: 0; padding: 0; border-radius: 50%; background: radial-gradient(circle at 40% 30%, #5d6068, #0b0b0d 70%); box-shadow: 0 2px 5px #000, inset 0 0 0 2px #000; }
+button.base { cursor: pointer; }
+.w-wheel { grid-template-columns: 1fr; justify-items: center; gap: 6px; }
+.w-wheel .cl { order: 2; }
+/* botões de apertar: redondos (ou pílula), coloridos, com brilho em cima, como N, P, K1, OIL */
+.v-real .tgl, .v-real .cfg-keys kbd, .v-real .battle button, .v-real .boxbtn.wide, .v-real .calert .act, .v-real .otbig { background: radial-gradient(ellipse at 45% 20%, #ffffff8c, transparent 45%), var(--bc, #ffd23b); color: #111; border: 2px solid #000; box-shadow: 0 3px 0 #000, inset 0 -3px 0 #0003; font-weight: 700; }
+.v-real .battle button, .v-real .boxbtn.wide, .v-real .calert .act, .v-real .otbig { border-radius: 999px; }
+.v-real .tgl::after { border-color: #000; }
+.v-real .tgl.on::after { border-color: #fff; box-shadow: 0 0 10px #fff9; }
+.v-real .tgl:not(.on) { filter: saturate(.2) brightness(.55); }
+.v-real .it:nth-child(4n+2) .tgl, .v-real .cfg-keys div:nth-child(4n+2) kbd { --bc: #ff8a00; }
+.v-real .it:nth-child(4n+3) .tgl, .v-real .cfg-keys div:nth-child(4n+3) kbd { --bc: #e8202a; color: #fff; }
+.v-real .it:nth-child(4n) .tgl, .v-real .cfg-keys div:nth-child(4n) kbd { --bc: #b48cff; }
+.v-real [data-fight="atk"] { --bc: #e8202a; color: #fff !important; }
+.v-real .otb, .v-real .otbig { --bc: #b48cff; }
+.v-real .boxbtn.wide { --bc: #ff8a00; }
+.v-real .battle button.on { box-shadow: 0 0 0 3px #fff, 0 3px 0 #000; }
+
+/* ============ MESCLA: a cara do jogo de hoje (tokens padrão: vermelho e preto, Oswald, cabeçalho vermelho, CORRIDA
+   azul, borda dura com sombra) + as peças do Volante (f-vol: botões giratórios, luzes de marcha, botões redondos) ============ */
+.s-mescla .ctl:not(.w-dial) .opts { gap: 2px; padding: 0; background: none; }
+.s-mescla .ctl:not(.w-dial) .opts .thumb { display: none; }
+.s-mescla .ctl:not(.w-dial) .opts button { background: #1b2130; }
+.s-mescla .ctl:not(.w-dial) .opts button.on { background: #e9edf5; color: #111; }
+.s-mescla .ctl .cl, .s-mescla .otrow .cl { text-transform: none; letter-spacing: 0; font-size: 12px; }
+.s-mescla .card { border-color: #24452e; }
+.s-mescla .boxbtn.wide { background: #1b2130; padding: 7px; }
+.s-mescla .w-dial .opts button.on { color: #fff; }
+/* (ponteiro branco; vermelho só no Atacar) */
+.s-mescla .w-dial .thumb, .s-mescla .ctl[data-v] .thumb { background: #e9edf5; }
+.s-mescla .ctl[data-v="push"] .thumb { background: var(--hot); }
+.s-mescla .ctl[data-v="conserve"] .thumb { background: #2f8cff; }
+.s-mescla .w-dial .opts::before { box-shadow: 0 2px 0 #000, inset 0 0 0 2px #2a2c31, 0 0 0 2px #e8202a55; }
+/* A · o jogo de hoje: seletor de tamanho em cima, menor */
+.m-oficial .lvlbar { width: auto; }
+.m-oficial .lvlbar .opts { padding: 0; }
+.m-oficial .lvlbar .opts button { padding: 4px 9px; font-size: 10px; }
+.m-oficial .lvlbar .thumb { background: #e9edf5; }
+.m-oficial .lvlbar .opts button.on { color: #111; }
+/* M2 · + fibra de carbono discreta nos painéis */
+.m-carb .pnl, .m-ref .pnl { background-image: repeating-linear-gradient(45deg, #ffffff05 0 3px, transparent 3px 6px); }
+/* M3 · + o acabamento do refinado: bordas finas, cantos suaves, sombra macia, os dois cabeçalhos vermelhos */
+.m-ref { --p-bw: 1px; --p-r: 8px; --p-shadow: 0 10px 28px rgba(0,0,0,.45); --h2-bg: #e8202a; --b-r: 5px; --p-line: #2b3446; }
+.m-ref .hd { letter-spacing: .1em; padding: 7px 12px; }
+
+/* =================== CONFIGURAÇÕES (abre por cima da corrida, como no jogo) =================== */
+.cfg { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s ease-out; }
+.scr.show-cfg .cfg { opacity: 1; pointer-events: auto; }
+.cfg-box { width: 1000px; max-height: 820px; overflow: auto; padding-bottom: 14px; transform: scale(.97); transition: transform .22s cubic-bezier(.23,1,.32,1); }
+.show-cfg .cfg-box { transform: none; }
+.cfg-box .hd button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.cfg-tabs { display: flex; gap: 6px; padding: 12px 16px 4px; }
+.cfg-tabs button { font: 600 13px var(--f-body); letter-spacing: .06em; color: var(--fg); background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); padding: 7px 14px; cursor: pointer; transition: background .2s, color .2s, transform .12s; }
+.cfg-tabs button:active { transform: scale(.97); }
+.cfg-tabs button.on { background: var(--on); color: var(--onfg); border-color: var(--on); }
+.cfg-lcd { margin: 8px 16px; padding: 8px 12px; background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); font: 13px var(--f-num); display: flex; justify-content: space-between; gap: 12px; color: var(--fg); }
+.cfg-lcd b { color: var(--acc); }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 6px 16px; }
+.it { padding: 10px; border: 1px solid var(--p-line); border-radius: var(--b-r); background: color-mix(in srgb, var(--well) 55%, transparent); display: flex; flex-direction: column; gap: 8px; align-items: center; min-width: 0; }
+.it .l { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); text-align: center; }
+.seg2 { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+.seg2 button { font: 600 11px var(--f-body); color: var(--fg); background: var(--well); border: 1px solid var(--p-line); border-radius: var(--b-r); padding: 5px 8px; cursor: pointer; transition: background .2s, color .2s, transform .12s; }
+.seg2 button:active { transform: scale(.97); }
+.seg2 button.on { background: var(--on); color: var(--onfg); border-color: var(--on); }
+.it input[type="range"] { width: 100%; accent-color: var(--on); }
+.it .val { font: 600 16px var(--f-num); font-variant-numeric: tabular-nums; }
+/* no Volante: botões giratórios, botões redondos com anel aceso e barra de luzes */
+.knob { position: relative; width: 170px; height: 112px; }
+.knob .cap { position: absolute; left: 50%; top: 62px; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, inset 0 0 0 2px #2a2c31; transition: transform .12s; }
+.knob .cap:active { transform: scale(.97); }
+.knob .cap i { position: absolute; left: 50%; top: 5px; width: 4px; height: 20px; margin-left: -2px; border-radius: 2px; background: var(--on); transform-origin: 50% 23px; transform: rotate(var(--ang)); transition: transform .3s cubic-bezier(.3,1.35,.5,1); }
+.knob .o { position: absolute; transform: translate(-50%, -50%); font: 600 10px var(--f-body); letter-spacing: .03em; color: var(--mute); background: none; border: 0; padding: 2px; cursor: pointer; white-space: nowrap; transition: color .2s; }
+.knob .o.on { color: var(--on); }
+.tgl { width: 54px; height: 54px; border-radius: 50%; border: 0; position: relative; cursor: pointer; color: var(--mute); font: 700 11px var(--f-body); background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, inset 0 0 0 3px #2a2c31; margin: 6px 0; transition: color .2s, transform .12s; }
+.tgl:active { transform: scale(.97); }
+.tgl::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid #333; transition: border-color .2s, box-shadow .2s; }
+.tgl.on { color: #fff; }
+.tgl.on::after { border-color: var(--on); box-shadow: 0 0 10px var(--on); }
+.ledbar { display: grid; grid-template-columns: repeat(15, 1fr); gap: 3px; width: 100%; }
+.ledbar i { height: 16px; border-radius: 3px; background: #24262b; cursor: pointer; transition: background .12s, box-shadow .12s; }
+.ledbar i.lit:nth-child(-n+6) { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+.ledbar i.lit:nth-child(n+7):nth-child(-n+11) { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+.ledbar i.lit:nth-child(n+12) { background: #3b82ff; box-shadow: 0 0 6px #3b82ff; }
+.cfg-keys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 22px; padding: 6px 16px; }
+.cfg-keys div { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--p-line); border-radius: var(--b-r); }
+.cfg-keys kbd { opacity: 1; font-size: 12px; padding: 2px 8px; min-width: 30px; text-align: center; margin: 0; }
+.f-vol .cfg-keys kbd { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; color: var(--on); background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000; }
+/* =================== SEDE DA EQUIPE (campeonato, entre uma etapa e outra) =================== */
+.hq { position: absolute; inset: 0; background: rgba(5,6,8,.72); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s ease-out; }
+.scr.show-hq .hq { opacity: 1; pointer-events: auto; }
+.hq-box { width: 1480px; max-height: 850px; display: flex; flex-direction: column; transform: scale(.98); transition: transform .22s cubic-bezier(.23,1,.32,1); }
+.show-hq .hq-box { transform: none; }
+.hq-top { display: flex; align-items: center; gap: 18px; padding: 12px 18px 4px; }
+.hq-top .ttl { font: 600 24px var(--f-disp); letter-spacing: .04em; }
+.hq-top .ttl small { display: block; font: 400 12px var(--f-body); color: var(--mute); letter-spacing: .08em; }
+.hq-top .season { flex: 1; display: grid; gap: 4px; font-size: 11px; color: var(--mute); letter-spacing: .1em; }
+.hq-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 18px 16px; }
+.hq-grid { display: grid; gap: 12px; }
+.box { border: 1px solid var(--p-line); border-radius: var(--b-r); background: color-mix(in srgb, var(--well) 55%, transparent); padding: 12px 14px; min-width: 0; }
+.box h4 { margin: 0 0 8px; font: 600 12px var(--f-disp); letter-spacing: .12em; color: var(--h-fg); text-transform: uppercase; }
+.lvbar { display: grid; gap: 3px; width: 100%; }
+.lvbar i { height: 12px; border-radius: 3px; background: #24262b; transition: background .25s, box-shadow .25s; }
+.lvbar i.lit { background: var(--on); box-shadow: 0 0 6px var(--on); }
+.lvbar.season i.lit { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+.lvbar.season i.next { background: var(--on); box-shadow: 0 0 8px var(--on); animation: blink 1.4s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .45; } }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tbl td { padding: 5px 6px; border-top: 1px solid var(--row-line); white-space: nowrap; }
+.tbl td.n { text-align: right; color: var(--mute); width: 26px; }
+.tbl td.pt { text-align: right; font: 600 13px var(--f-num); }
+.tbl td.st { text-align: right; color: var(--mute); }
+.tbl tr.me td { background: var(--me-bg); font-weight: 700; }
+.tbl tr.nx td { background: color-mix(in srgb, var(--on) 16%, transparent); color: var(--fg); }
+.tbl .tc { display: inline-block; width: 4px; height: 14px; background: var(--c); margin-right: 8px; vertical-align: -2px; border-radius: 1px; }
+.trk svg { width: 100%; height: 210px; display: block; }
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px; text-align: center; }
+.facts b { display: block; font: 600 18px var(--f-num); }
+.facts span { font-size: 11px; color: var(--mute); letter-spacing: .06em; }
+.big { font: 700 15px var(--f-body); letter-spacing: .08em; color: var(--onfg); background: var(--on); border: 0; border-radius: var(--b-r); padding: 13px 18px; cursor: pointer; transition: transform .12s, box-shadow .2s; width: 100%; box-shadow: 0 0 18px color-mix(in srgb, var(--on) 40%, transparent); }
+.big:active, .upg:active { transform: scale(.97); }
+.dev { display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; }
+.dev .ic { font-size: 26px; }
+.dev b.t { font: 600 16px var(--f-disp); letter-spacing: .04em; }
+.dev p { margin: 0; color: var(--mute); font-size: 12.5px; min-height: 34px; max-width: 34ch; }
+.dev .lvl { font: 600 12px var(--f-num); color: var(--mute); }
+.upg { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; color: var(--fg); font: 600 11px var(--f-body); letter-spacing: .06em; cursor: pointer; }
+.upg[disabled] { opacity: .4; cursor: default; }
+.upg .tgl { margin: 6px 0 2px; font-size: 20px; pointer-events: none; }
+.trophies { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.trophy { display: flex; gap: 12px; align-items: center; }
+.trophy .ic { flex: none; width: 58px; height: 58px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, 0 0 0 2px color-mix(in srgb, var(--on) 60%, transparent), 0 0 12px color-mix(in srgb, var(--on) 30%, transparent); }
+.trophy b { display: block; font: 600 14px var(--f-disp); }
+.trophy span { font-size: 12px; color: var(--mute); }
+.trophy.empty { opacity: .35; }
+.trophy.empty .ic { box-shadow: 0 2px 0 #000; }
+.pil { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; }
+.pil .av { width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 600 26px var(--f-disp); color: #fff; background: radial-gradient(circle at 40% 35%, var(--c), color-mix(in srgb, var(--c) 35%, #000) 75%); box-shadow: 0 2px 0 #000, 0 0 0 3px #111, 0 0 0 5px var(--on); }
+.pil b.t { font: 600 18px var(--f-disp); letter-spacing: .03em; }
+.stat { display: grid; grid-template-columns: 104px minmax(0, 1fr) 26px; gap: 8px; align-items: center; font-size: 12px; margin: 5px 0; color: var(--mute); }
+.stat b { color: var(--fg); font: 600 12px var(--f-num); text-align: right; }
+.ctr { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--p-line); font-size: 12.5px; }
+.ctr .upg { flex-direction: row; }
+.ctr .upg .tgl { width: 40px; height: 40px; font-size: 14px; margin: 0; }
+.modes { display: flex; gap: 6px; }
+.modes button { font: 600 13px var(--f-ui); color: var(--mute); background: #141924; border: 1px solid var(--line); padding: 6px 14px; cursor: pointer; }
+.modes button.on { color: var(--ink); border-color: #ffb02e; background: #241c10; }
+
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <h1>Estilo Volante</h1>
+    <p>O Volante e variações dele na corrida, nas Configurações e na sede do campeonato. Clique em tudo: velocidade, comandos dos pilotos, tamanho do painel, botões giratórios, evoluir o carro.</p>
+  </div>
+  <nav class="picker" aria-label="Estilos"></nav>
+  <div class="modes"><button data-mode="race">🏁 CORRIDA</button><button data-mode="cfg">⚙ CONFIGURAÇÕES</button><button data-mode="hq">🏆 CAMPEONATO (SEDE)</button></div>
+  <div class="about"><h2 id="st-name"></h2><p id="st-desc"></p><div class="keys"><kbd>M</kbd> troca o tamanho · <kbd>←</kbd> <kbd>→</kbd> troca o estilo</div></div>
+  <div class="view">
+    <div class="scr">
+      <canvas class="bg" width="1600" height="900"></canvas>
+      <section class="lb pnl"><div class="hd"><span>POS</span><span id="lb-lap"></span><span>◂</span></div><div class="lb-c"><span></span><span></span><span>PILOTO</span><span>GAP</span><span>ÚLT</span><span></span></div><div class="lb-rows"></div></section>
+      <div class="tb pnl"><button data-sp="0">❚❚</button><button data-sp="1">1x</button><button data-sp="2">2x</button><button data-sp="4">4x</button><button data-sp="8">8x</button><button data-sp="16">16x</button><button class="tv" data-tog="tv">📺 TV</button><button class="tv" data-tog="mc">🎥 MULTICAM</button></div>
+      <section class="info pnl"><div class="hd">CORRIDA</div><dl><dt>Volta</dt><dd id="i-lap"></dd><dt>Tempo</dt><dd id="i-time"></dd><dt>Melhor</dt><dd>ALB 1:23.912</dd><dt>Clima</dt><dd>☀ Seco</dd><dt>Pista</dt><dd style="display:flex;gap:6px;align-items:center;justify-content:flex-end"><span class="wet" style="width:70px"></span>0%</dd></dl><p>Pista seca · Previsão: 25% de chance de chuva fraca entre as voltas 4 e 7.</p></section>
+      <div class="feed"></div>
+      <div class="mm pnl"><canvas width="250" height="182"></canvas><div class="spd" id="spd"></div></div>
+      <div class="cn"><span class="pnl fps">70 FPS</span><button class="pnl">☰ MENU</button><button class="pnl">?</button><button class="pnl">⛶</button><button class="pnl" data-mode="cfg" title="Configurações">⚙</button></div>
+      <div class="hud" data-lv="min"><div class="cards"></div><div class="lvlbar"></div></div>
+      <div class="cfg"><div class="cfg-box pnl"></div></div>
+      <div class="hq"><div class="hq-box pnl"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STYLES = [
+  { k: "A", id: "mescla m-oficial", n: "Jogo atual", w: "seg", top: true, d: "O jogo de hoje, pra comparar: vermelho e preto, cabeçalho vermelho, CORRIDA azul, escolhido em branco, seletor de tamanho em cima." },
+  { k: "M1", id: "mescla", n: "Jogo + botões giratórios", w: "dial", nw: 1, d: "A cara do jogo intacta (cores, letras, bordas, cabeçalhos); do Volante entram os botões giratórios de Ritmo, Motor e Ultrapassagem (ponteiro branco, vermelho no Atacar), o botão redondo ⚡, as luzes de marcha na briga e, nas Configurações e na sede, os botões redondos e as barras de luz." },
+  { k: "M2", id: "mescla m-carb", n: "Jogo + fibra", w: "dial", nw: 1, d: "O M1 com fibra de carbono discreta no fundo dos painéis: o jogo continua vermelho e preto, só ganha a textura do volante." },
+  { k: "M3", id: "mescla m-ref", n: "Jogo refinado + volante", w: "dial", nw: 1, d: "O M2 com acabamento mais caprichado: bordas finas, cantos suaves, sombra macia e os dois cabeçalhos em vermelho." },
+  { k: "2", id: "volante", n: "Volante", w: "dial", d: "O original: laranja sobre fibra de carbono, botões giratórios e luzes de troca de marcha." },
+  { k: "2.1", id: "volante v-red", n: "Vermelho", w: "dial", nw: 1, d: "O mesmo volante com vermelho no lugar do laranja: mais agressivo e combina com o vermelho do jogo." },
+  { k: "2.2", id: "volante v-blue", n: "Azul elétrico", w: "dial", nw: 1, d: "O mesmo volante em azul: mais frio, cara de tela de telemetria." },
+  { k: "2.3", id: "volante v-yel", n: "Amarelo", w: "dial", nw: 1, d: "O mesmo volante em amarelo de corrida: é o que mais aparece sobre a pista verde." },
+  { k: "2.4", id: "volante v-forj", n: "Fibra forjada", w: "dial", nw: 1, d: "O laranja de sempre com fibra de carbono forjada (manchada), botões giratórios com borda serrilhada e luzes de marcha mais grossas." },
+  { k: "2.5", id: "volante v-bi", n: "Bicolor", w: "dial", nw: 1, d: "Laranja no que você aperta (comandos, abas), ciano no que você lê (cabeçalhos, destaques): separa ação de informação." },
+  { k: "2.6", id: "volante v-real", n: "Volante de verdade", w: "wheel", nw: 1, d: "Como um volante de F1 de verdade: botões giratórios em disco de gomos coloridos com o nome dentro de cada gomo e o ponteiro preto no centro; botões de apertar redondos e coloridos (amarelo, laranja, vermelho, roxo)." },
+];
+/** as Configurações do jogo (abas e opções de verdade), pra ver no estilo escolhido */
+const CFG_TABS = [["graficos", "GRÁFICOS"], ["sons", "SONS"], ["tela", "TELA"], ["atalhos", "ATALHOS"], ["multicam", "MULTICAM"]];
+const LVL4 = ["DESL.", "BAIXO", "MÉDIO", "ALTO"];
+const CFG = {
+  graficos: [
+    { t: "knob", l: "Predefinição", o: ["MÍNIMO", "BAIXO", "MÉDIO", "ALTO"], v: 2 },
+    { t: "knob", l: "Carros na pista", o: ["2D", "ESTILIZADO", "3D"], v: 2 },
+    { t: "knob", l: "Câmera do 3D", o: ["CIMA", "LADO", "ATRÁS", "PILOTO", "TV"], v: 4 },
+    { t: "knob", l: "Detalhe dos carros", o: ["BAIXO", "MÉDIO", "ALTO"], v: 1 },
+    { t: "knob", l: "Sombras", o: LVL4, v: 3 },
+    { t: "knob", l: "Fumaça", o: LVL4, v: 2 },
+    { t: "knob", l: "Chuva", o: LVL4, v: 3 },
+    { t: "knob", l: "Marcas de pneu", o: LVL4, v: 2 },
+    { t: "toggle", l: "Antisserrilhado", v: true },
+    { t: "toggle", l: "Pódio em 3D", v: true },
+    { t: "toggle", l: "Câmera onboard", v: false, dis: true },
+    { t: "knob", l: "Limite de FPS", o: ["30", "60", "SEM"], v: 2 },
+  ],
+  sons: [
+    { t: "level", l: "Volume geral", v: 80 }, { t: "level", l: "Motores", v: 70 }, { t: "level", l: "Música", v: 40 },
+    { t: "level", l: "Rádio da equipe", v: 90 }, { t: "level", l: "Torcida", v: 60 }, { t: "toggle", l: "Som no box", v: true },
+  ],
+  tela: [
+    { t: "level", l: "Brilho", v: 100, max: 150 }, { t: "level", l: "Contraste", v: 100, max: 150 }, { t: "level", l: "Saturação", v: 110, max: 150 },
+    { t: "knob", l: "Idioma", o: ["PORTUGUÊS", "ENGLISH", "ESPAÑOL"], v: 0 }, { t: "toggle", l: "Reduzir tremor e flashes", v: false },
+  ],
+  atalhos: [["Ritmo: atacar", "Q"], ["Ritmo: normal", "W"], ["Ritmo: poupar", "E"], ["Motor: rica", "Z"], ["Motor: normal", "X"], ["Motor: pobre", "C"], ["Chamar pro box", "B"], ["Pausa", "␣"], ["Câmeras 1 a 4", "1–4"], ["MultiCam", "5"], ["Drone", "8"], ["Foto", "9"], ["Tamanho do painel", "M"], ["Próxima música", "N"]],
+  multicam: ["Baixa", "Alta", "Grua", "Frontal", "Torre", "Rente ao chão", "Muro do box", "Helicóptero", "Perseguição", "Lateral", "Drone", "Roda", "Asa", "Órbita", "Onboard"].map((l, i) => ({ t: "toggle", l, v: i !== 6 })),
+};
+const OPTS = { pace: [["push", "Atacar"], ["normal", "Normal"], ["conserve", "Poupar"]], engine: [["rich", "Rica"], ["normal", "Normal"], ["lean", "Pobre"]], order: [["letPass", "Deixar passar"], ["hold", "Manter"], ["none", "Livre"]] };
+const LABEL = { pace: "Ritmo", engine: "Motor", order: "Equipe" };
+const COST = { pace: ["mais rápido, gasta o pneu 1,5× mais", "", "mais lento, o pneu dura mais"], engine: ["mais potência, gasta mais combustível", "", "menos potência, economiza combustível"], order: ["", "", ""] };
+const REPLY = { pace: ["Entendido, vou pra cima.", "Ok, ritmo normal.", "Certo, cuidando dos pneus."], engine: ["Motor no máximo!", "Mapa normal.", "Mistura pobre, economizando."], order: ["Entendido… deixo passar.", "Mantendo a posição.", "Liberado pra brigar!"] };
+const TYRES = { S: ["Macio", "#ff3b3b"], M: ["Médio", "#ffd23b"], H: ["Duro", "#f2f2f2"], I: ["Intermed.", "#3bd16f"], W: ["Chuva", "#3b8bff"] };
+const LAPS = 16, ME = "#2fd36b";
+
+// grid (como no print: seus pilotos são P17 e P18)
+const D = [
+  ["K. Räikkönen", "#e8202a", "M"], ["A. Ascari", "#8a3cff", "M"], ["E. Gutiérrez", "#e8202a", "M"], ["A. Albon", "#2bb5ff", "M"], ["M. Salo", "#f2f2f2", "M"],
+  ["R. Arnoux", "#ff8a00", "M"], ["A. Prost", "#2bb5ff", "M"], ["G. Farina", "#ffd23b", "M"], ["J. Hunt", "#00a19b", "M"], ["O. Piastri", "#ff5fa2", "M"],
+  ["J. Vergne", "#8a3cff", "M"], ["F. Nasr", "#f2f2f2", "M"], ["N. Hülkenberg", "#ff8a00", "M"], ["L. Lawson", "#ffd23b", "M"], ["L. Stroll", "#00a19b", "M"],
+  ["A. Senna", "#ff5fa2", "M"], ["P. Maldonado", ME, "H"], ["D. Coulthard", ME, "H"], ["J. Villeneuve", "#2bb5ff", "M"], ["F. Massa", "#e8202a", "S"],
+].map(([n, tc, ty], i) => ({ n, tc, ty, ab: n.split(" ").pop().slice(0, 3).toUpperCase(), gap: i ? 4 + i * 2.3 + Math.random() * 1.5 : 0, last: 84.4 + Math.random() * 2.2, out: i >= 18, me: i === 16 || i === 17 }));
+const order = D.map((_, i) => i);
+// (Maldonado colado no Senna: a briga aparece logo de cara)
+D[16].gap = D[15].gap + 0.8;
+D[17].gap = D[16].gap + 2.4;
+const cars = [
+  { di: 16, name: "P. Maldonado", team: "Falcão F1", tc: ME, gf: 0.8, gb: 11.6, lap: 11, tyre: "H", tl: 4, wear: [.28, .26, .33, .31], fuel: 6.5, last: 90.945, best: 89.761, dmg: null, pace: "normal", engine: "normal", order: "none", tab: "race", ot: 5, otT: 0, otm: "auto", fight: null, fightL: 0, next: "M", fuelAdd: 0, pit: false, radio: "Piloto: O Senna está logo ali.", pitLap: 0 },
+  { di: 17, name: "D. Coulthard", team: "Falcão F1", tc: ME, gf: 11.6, gb: 0, lap: 11, tyre: "H", tl: 4, wear: [.27, .25, .31, .3], fuel: 6.7, last: 92.665, best: 91.162, dmg: "Asa dianteira: dano leve", pace: "normal", engine: "normal", order: "none", tab: "race", ot: 5, otT: 0, otm: "auto", fight: null, fightL: 0, next: "M", fuelAdd: 0, pit: false, radio: "Piloto: Saí do box, pneu frio.", pitLap: 0 },
+];
+const S = { style: 1, lv: "max", sp: 1, lap: 12, time: 18 * 60 + 48, tv: true, mc: true, cfg: false, cfgTab: "graficos" };
+try { const v = JSON.parse(localStorage.getItem("telas4") || "{}"); if (v.style >= 0 && v.style < STYLES.length) S.style = v.style; if (["max", "min", "nome"].includes(v.lv)) S.lv = v.lv; } catch (e) {}
+const save = () => { try { localStorage.setItem("telas4", JSON.stringify({ style: S.style, lv: S.lv })); } catch (e) {} };
+
+const $ = (s, el = document) => el.querySelector(s);
+const scr = $(".scr"), hud = $(".hud"), cardsEl = $(".cards"), lvlbar = $(".lvlbar");
+const fmtGap = (g) => g.toFixed(1).replace(".", ",") + " s";
+const fmtLap = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, "0")}`;
+const fmtLapShort = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0").replace(".", ",")}`;
+const wearCol = (w) => (w < 0.45 ? "#3bd16f" : w < 0.72 ? "#ffd23b" : "#ff4a3d");
+const posOf = (di) => order.indexOf(di);
+
+// ---- escala da tela (1600x900 no tamanho da página) ----
+const view = $(".view");
+function fit() { const s = view.clientWidth / 1600; scr.style.transform = `scale(${s})`; view.style.height = 900 * s + "px"; }
+new ResizeObserver(fit).observe(view);
+
+// ---- classificação: linhas fixas, a posição é um deslocamento (troca de posição desliza) ----
+$(".lb-rows").innerHTML = D.map((d, i) => `<div class="lb-row ${d.me ? "me" : ""} ${i === 4 ? "fol" : ""} ${d.out ? "out" : ""}" data-d="${i}" style="--tc:${d.tc}"><span class="p"></span><span class="b"></span><span class="n">${d.n}</span><span class="g"></span><span class="l"></span><span class="ty" style="--tcol:${TYRES[d.ty][1]}">${d.ty}</span></div>`).join("");
+function updateBoard() {
+  $("#lb-lap").textContent = `VOLTA ${S.lap}/${LAPS}`;
+  order.forEach((di, p) => {
+    const r = $(`.lb-row[data-d="${di}"]`), d = D[di];
+    r.style.setProperty("--i", p);
+    r.querySelector(".p").textContent = p + 1;
+    r.querySelector(".g").textContent = d.out ? "OUT" : p === 0 ? "Líder" : "+" + (d.gap - D[order[0]].gap).toFixed(1);
+    r.querySelector(".l").textContent = fmtLapShort(d.last).replace(",", ".");
+  });
+  $("#i-lap").textContent = `${S.lap} / ${LAPS}`;
+  $("#i-time").textContent = `${Math.floor(S.time / 60)}:${String(S.time % 60).padStart(2, "0")}`;
+  document.querySelectorAll("[data-sp]").forEach((b) => b.classList.toggle("on", +b.dataset.sp === S.sp));
+  document.querySelectorAll("[data-tog]").forEach((b) => b.classList.toggle("on", S[b.dataset.tog]));
+}
+// ---- mensagens ----
+const feedEl = $(".feed");
+function say(t, hl) {
+  const d = document.createElement("div");
+  d.className = `pnl ${hl ? "hl" : ""}`;
+  d.textContent = t;
+  feedEl.appendChild(d);
+  while (feedEl.children.length > 6) feedEl.firstChild.remove();
+}
+["ASC passa GUT!", "Liam Lawson volta pra pista.", "Liam Lawson passou reto na curva!", "Ayrton Senna volta pra pista.", "Ayrton Senna passou reto na curva!"].forEach((t) => say(t));
+say("David Coulthard sai dos boxes: Duro e +52 kg", true);
+
+// ---- cards ----
+/** teclas de atalho (no piloto seguido), como no jogo */
+const KEYS = { pace: ["Q", "W", "E"], engine: ["Z", "X", "C"] };
+/** gomos do disco na corrida: Ritmo vermelho/amarelo/verde, Motor laranja/branco/azul */
+const WHEEL_COLS = { pace: [["#e8202a", "#fff"], ["#ffd23b", "#111"], ["#2ecc71", "#111"]], engine: [["#ff8a00", "#111"], ["#f2f2f2", "#111"], ["#2f8cff", "#fff"]] };
+function ctl(key, w, keys) {
+  if (w === "wheel" && WHEEL_COLS[key])
+    return `<div class="ctl w-wheel" data-ctl="${key}"><span class="cl">${LABEL[key]}</span>${wheelHtml(OPTS[key].map(([v, l], i) => [l, `data-set="${key}:${v}" title="${LABEL[key]}: ${l}${COST[key][i] ? ` (${COST[key][i]})` : ""}"`]), 1, WHEEL_COLS[key], 124)}</div>`;
+  const ww = key === "order" && ["dial", "wheel"].includes(w) ? "seg" : w;
+  return `<div class="ctl w-${ww}" data-ctl="${key}"><span class="cl">${LABEL[key]}</span><div class="opts"><i class="thumb"></i>${OPTS[key].map(([v, l], i) => `<button data-set="${key}:${v}" title="${LABEL[key]}: ${l}${COST[key][i] ? ` (${COST[key][i]})` : ""}">${l}${keys && KEYS[key] ? `<kbd>${KEYS[key][i]}</kbd>` : ""}</button>`).join("")}</div></div>`;
+}
+/** o carro visto de cima, com o quanto sobra de cada pneu (% ao lado de cada roda, como no jogo) */
+const carSvg = () => `<svg viewBox="0 0 64 112" aria-hidden="true"><rect class="fw" x="8" y="2" width="48" height="7" rx="2" fill="#9aa3b5"/><rect x="29" y="8" width="6" height="22" fill="var(--tc)"/>
+  <rect class="ty2" data-w="0" x="3" y="13" width="12" height="20" rx="3"/><rect class="ty2" data-w="1" x="49" y="13" width="12" height="20" rx="3"/>
+  <text class="wt" data-wt="0" x="9" y="42"></text><text class="wt" data-wt="1" x="55" y="42"></text>
+  <path d="M22 32 h20 l5 26 -4 28 h-22 l-4 -28z" fill="var(--tc)"/><circle cx="32" cy="50" r="5" fill="#111"/><circle cx="32" cy="49" r="3" fill="#ffd23b"/>
+  <rect class="ty2" data-w="2" x="1" y="64" width="15" height="23" rx="3"/><rect class="ty2" data-w="3" x="48" y="64" width="15" height="23" rx="3"/>
+  <text class="wt" data-wt="2" x="9" y="97"></text><text class="wt" data-wt="3" x="55" y="97"></text>
+  <rect x="13" y="102" width="38" height="7" rx="2" fill="#9aa3b5"/></svg>`;
+// estrutura igual à do jogo: coluna do carro à esquerda (grande no COMPLETO, carrinho no COMPACTO, some no SÓ OS
+// NOMES) e à direita posição, nome, distâncias, chips, aviso com ação, abas e o botão do box
+function cardHtml(c, i, w) {
+  return `<article class="card pnl ${i === 0 ? "fol" : ""}" data-i="${i}" data-tab="${c.tab}" style="--tc:${c.tc}">
+  <div class="cc">${carSvg()}<div class="fold f-max lmf"><div><div class="lm"><span><em>Pneu</em><b data-k="lmT"></b></span><span><em>Comb.</em><b data-k="lmF"></b></span></div></div></div></div>
+  <div class="cm">
+  <header class="c-top"><div class="leds">${"<i></i>".repeat(10)}</div><span class="pos" data-k="pos"></span>
+    <span class="nm"><b>${c.name}</b><small>${c.team} · volta <span data-k="lap"></span>/${LAPS}</small></span>
+    <span><span class="seal">DANO</span><span class="gaps"><em>FRENTE</em><b data-k="gf"></b><em>ATRÁS</em><b data-k="gb"></b></span></span></header>
+  <div class="fold f-min"><div><div class="mini"><span class="chip" data-k="tyrechip"></span><span class="chip" data-k="fuel"></span><span class="chip" data-k="dmgchip"></span></div>
+    <div class="calert"><span data-k="alert"></span><button class="act" data-act hidden></button></div></div></div>
+  <div class="fold f-battle"><div><div class="battle"><span class="bt-t">⚔ <b data-k="btxt"></b></span><button data-fight="atk" title="Atacar o da frente por 3 voltas: arrisca erro ou toque">ATACAR</button><button data-fight="def" title="Defender a posição por 3 voltas: um pouco mais lento, arrisca toque">DEFENDER</button><button class="otb" data-ot title="Modo ultrapassagem: uma volta com potência extra">⚡ <span data-k="otn"></span></button></div></div></div>
+  <div class="fold f-max"><div><div class="body">
+    <nav class="tabs"><button data-tab="race">⚔ PILOTAGEM</button><button data-tab="box">🔧 BOX</button></nav>
+    <div class="pane" data-pane="race"><div class="trio">${ctl("pace", w, i === 0)}${ctl("engine", w, i === 0)}
+      <div class="otcell"><div class="ctl ${w === "dial" ? "w-dial" : "w-seg"} otctl" data-ctl="otm"><span class="cl">Ultrapassagem</span><div class="opts"><i class="thumb"></i><button data-otm="auto" title="O piloto decide quando usar as cargas (atrás de alguém a menos de 0,6 s)">Auto</button><button data-otm="manual" title="Só quando você aperta o ⚡">Manual</button></div></div>
+        <div class="otpush"><button class="otgo" data-ot title="Usar uma carga agora: uma volta com potência extra">⚡</button><span><span class="pips" data-k="pips"></span><small data-k="ottxt"></small></span></div><i class="otbar"><b></b></i></div></div>${ctl("order", w)}</div>
+    <div class="pane" data-pane="box">
+      <div class="boxrow"><span class="cl">Pneu</span><span class="nexts">${Object.keys(TYRES).map((t) => `<button data-next="${t}" title="${TYRES[t][0]}" style="color:${TYRES[t][1]}">${t}</button>`).join("")}</span></div>
+      <div class="boxrow"><span class="cl">Comb.</span><span class="stepper"><button data-fuel="-1">−</button><b data-k="fueladd"></b><button data-fuel="1">+</button></span></div>
+      <div class="boxrow"><span class="plan" data-k="plan"></span></div>
+    </div>
+  </div></div></div>
+  <div class="fold f-min"><div><button class="boxbtn wide" data-pit></button></div></div>
+  <p class="radio" data-k="radio"></p>
+  </div>
+</article>`;
+}
+
+// ---- Configurações: no Volante viram botões giratórios, botões redondos com anel aceso e barra de luzes;
+// nos outros estilos, os botões e barras de hoje ----
+const cfgBox = $(".cfg-box");
+const valTxt = (it) => (it.t === "knob" ? it.o[it.v] : it.t === "toggle" ? (it.v ? "LIGADO" : "DESLIGADO") : `${it.v}%`);
+function fpsGuess() {
+  const g = CFG.graficos, k = (i) => g[i].v;
+  return Math.max(24, Math.round(150 - k(0) * 16 - (k(1) === 2 ? 28 : k(1) * 8) - k(4) * 6 - k(5) * 3 - k(6) * 3 - (g[8].v ? 6 : 0)));
+}
+/** cores dos gomos do disco (fundo, letra) */
+const RINGC = [["#e8202a", "#fff"], ["#ff8a00", "#111"], ["#ffd23b", "#111"], ["#2ecc71", "#111"], ["#2f8cff", "#fff"], ["#b48cff", "#111"]];
+/**
+ * DISCO do volante de verdade (2.6): o círculo inteiro em gomos coloridos, o nome de cada opção dentro do seu gomo
+ * e o ponteiro preto saindo do centro. labels = [texto, atributos do botão]; cols = [fundo, letra] de cada gomo.
+ * O ponteiro gira por --idx (a corrida muda só ele; as Configurações redesenham)
+ */
+function wheelHtml(labels, idx, cols, size, baseAttr = "") {
+  const n = labels.length, step = 360 / n, a0 = -((n - 1) / 2) * step;
+  const ring = `conic-gradient(from ${a0 - step / 2}deg, ${cols.map(([c], i) => `${c} 0 ${(i + 1) * step}deg`).join(", ")})`;
+  return `<div class="opts wheel" style="--sz:${size}px;--ring:${ring};--a0:${a0}deg;--step:${step}deg;--idx:${idx}">${labels
+    .map(([t, attr], i) => { const a = ((a0 + i * step) * Math.PI) / 180; return `<button class="lb ${i === idx ? "on" : ""}" ${attr} style="left:${50 + Math.sin(a) * 37}%;top:${50 - Math.cos(a) * 37}%;--tx:${cols[i][1]}">${t}</button>`; })
+    .join("")}<i class="fin"></i>${baseAttr ? `<button class="base" ${baseAttr}></button>` : `<i class="base"></i>`}</div>`;
+}
+function knobHtml(it, id) {
+  if (STYLES[S.style].w === "wheel") return wheelHtml(it.o.map((o, i) => [o, `data-cfg="${id}:${i}"`]), it.v, it.o.map((_, i) => RINGC[i % RINGC.length]), 128, `data-cfgc="${id}" title="Girar"`);
+  const n = it.o.length, span = n > 3 ? 210 : 180, ang = (i) => -span / 2 + (i * span) / (n - 1);
+  return `<div class="knob"><button class="cap" data-cfgc="${id}" title="Girar" style="--ang:${ang(it.v)}deg"><i></i></button>${it.o
+    .map((o, i) => { const a = (ang(i) * Math.PI) / 180; return `<button class="o ${i === it.v ? "on" : ""}" data-cfg="${id}:${i}" style="left:${85 + Math.sin(a) * 58}px;top:${62 - Math.cos(a) * 48}px">${o}</button>`; })
+    .join("")}</div>`;
+}
+function itemHtml(it, id, vol) {
+  let w;
+  if (it.t === "knob") w = vol ? knobHtml(it, id) : `<div class="seg2">${it.o.map((o, i) => `<button class="${i === it.v ? "on" : ""}" data-cfg="${id}:${i}">${o}</button>`).join("")}</div>`;
+  else if (it.t === "toggle") w = vol ? `<button class="tgl ${it.v ? "on" : ""}" data-cfgt="${id}" ${it.dis ? "disabled title=\"Desligada: o painel COMPLETO não tem mais a onboard\"" : ""}>${it.v ? "ON" : "OFF"}</button>` : `<div class="seg2"><button class="${it.v ? "on" : ""}" data-cfgt="${id}:1" ${it.dis ? "disabled" : ""}>LIGADO</button><button class="${it.v ? "" : "on"}" data-cfgt="${id}:0">DESLIGADO</button></div>`;
+  else {
+    const max = it.max ?? 100, lit = Math.round((it.v / max) * 15);
+    w = vol ? `<div class="ledbar">${Array.from({ length: 15 }, (_, n) => `<i class="${n < lit ? "lit" : ""}" data-cfgl="${id}:${n}"></i>`).join("")}</div><b class="val">${it.v}%</b>` : `<input type="range" min="0" max="${max}" value="${it.v}" data-cfgr="${id}" aria-label="${it.l}"><b class="val">${it.v}%</b>`;
+  }
+  return `<div class="it"><span class="l">${it.l}</span>${w}</div>`;
+}
+let lcd = "Escolha uma opção";
+function renderCfg() {
+  const vol = ["dial", "wheel"].includes(STYLES[S.style].w), tab = S.cfgTab;
+  cfgBox.innerHTML = `<div class="hd"><span>⚙ CONFIGURAÇÕES</span><button data-cfgx title="Fechar">✕</button></div>
+    <div class="cfg-tabs">${CFG_TABS.map(([k, n]) => `<button class="${k === tab ? "on" : ""}" data-cfgtab="${k}">${n}</button>`).join("")}</div>
+    <div class="cfg-lcd"><span>${lcd}</span><span>Estimativa: <b>~${fpsGuess()} FPS</b></span></div>
+    ${tab === "atalhos" ? `<div class="cfg-keys">${CFG.atalhos.map(([a, k]) => `<div><span>${a}</span><kbd>${k}</kbd></div>`).join("")}</div>` : `<div class="cfg-grid">${CFG[tab].map((it, j) => itemHtml(it, `${tab}.${j}`, vol)).join("")}</div>`}`;
+}
+/** muda uma opção pelo atributo clicado (data-cfg / cfgc / cfgt / cfgl / cfgr) */
+function cfgSet(t) {
+  const d = t.dataset, raw = d.cfg ?? d.cfgc ?? d.cfgt ?? d.cfgl ?? d.cfgr;
+  if (raw == null) return false;
+  const [id, x] = raw.split(":"), [tab, j] = id.split("."), it = CFG[tab][+j];
+  if (d.cfg != null) it.v = +x;
+  else if (d.cfgc != null) it.v = (it.v + 1) % it.o.length;
+  else if (d.cfgt != null) it.v = x == null ? !it.v : x === "1";
+  else if (d.cfgl != null) it.v = Math.round((((+x + 1) / 15) * (it.max ?? 100)) / 5) * 5;
+  else {
+    it.v = +t.value;
+    t.nextElementSibling.textContent = `${it.v}%`;
+    cfgBox.querySelector(".cfg-lcd span").innerHTML = (lcd = `${it.l.toUpperCase()}: <b>${valTxt(it)}</b>`);
+    return true;
+  }
+  lcd = `${it.l.toUpperCase()}: <b>${valTxt(it)}</b>`;
+  renderCfg();
+  return true;
+}
+
+// ---- SEDE DA EQUIPE (campeonato): as abas de verdade do jogo, com dados de exemplo ----
+const HQ_TABS = [["resumo", "RESUMO"], ["fabrica", "FÁBRICA"], ["mecanicos", "MECÂNICOS"], ["trofeus", "TROFÉUS"], ["pilotos", "PILOTOS"], ["calendario", "CALENDÁRIO"]];
+const CAL = ["Circuito de Praga", "Autódromo de Lisboa", "Circuito Urbano do Cairo", "Autódromo de Bogotá", "Circuito de Lyon", "Circuito do Porto", "Autódromo de Nairóbi", "Autódromo de Copenhague", "Autódromo de Bangkok", "Circuito de Osaka"];
+const WINNERS = ["K. Räikkönen", "A. Ascari", "K. Räikkönen", "A. Albon"];
+const DEV_A = [["aero", "🪽", "Aerodinâmica", "Mais rápido nas curvas. Rende mais em pista travada."], ["engine", "🔥", "Motor", "Mais velocidade de reta e motor que gasta menos. Rende mais em pista rápida."], ["chassis", "⚙", "Chassi", "Carro mais estável: um pouco mais rápido em todo lugar e gasta menos pneu."]];
+const CREW_A = [["pneus", "🛞", "Mecânicos dos pneus", "Trocam os quatro pneus mais rápido."], ["gasolina", "⛽", "Mecânico do combustível", "Reabastecimento mais rápido."], ["pecas", "🔧", "Mecânicos de peças", "Trocam bico, asa e suspensão danificados em menos tempo."], ["chefe", "🚦", "Chefe de box", "Menos erros: parada lenta e liberação insegura."]];
+const HQ = { tab: "resumo", dev: { aero: 3, engine: 2, chassis: 4 }, devPts: 9, crew: { pneus: 3, gasolina: 2, pecas: 1, chefe: 2 }, crewPts: 5, renew: false, lcd: "Etapa 5 de 10: próxima pista, Circuito de Lyon" };
+const P_STAND = [["K. Räikkönen", "#e8202a", 86], ["A. Ascari", "#8a3cff", 71], ["A. Albon", "#2bb5ff", 64], ["E. Gutiérrez", "#e8202a", 52], ["M. Salo", "#f2f2f2", 44], ["A. Prost", "#2bb5ff", 39], ["R. Arnoux", "#ff8a00", 35], ["P. Maldonado", ME, 31, 1], ["J. Hunt", "#00a19b", 26], ["G. Farina", "#ffd23b", 22], ["D. Coulthard", ME, 18, 1], ["O. Piastri", "#ff5fa2", 15]];
+const T_STAND = [["Rubro GP", "#e8202a", 138], ["Céu Azul", "#2bb5ff", 103], ["Violeta F1", "#8a3cff", 88], ["Laranja Motorsport", "#ff8a00", 61], ["Falcão F1", ME, 49, 1], ["Prata Team", "#f2f2f2", 47], ["Turquesa", "#00a19b", 34], ["Ouro Racing", "#ffd23b", 29], ["Rosa GP", "#ff5fa2", 20], ["Aço Racing", "#9aa3b5", 9]];
+const lvbar = (n, lit, cls = "") => `<span class="lvbar ${cls}" style="grid-template-columns:repeat(${n},1fr)">${Array.from({ length: n }, (_, i) => `<i class="${i < lit ? "lit" : ""} ${cls === "season" && i === lit ? "next" : ""}"></i>`).join("")}</span>`;
+const standTbl = (rows) => `<table class="tbl">${rows.map(([n, c, p, me], i) => `<tr class="${me ? "me" : ""}"><td class="n">${i + 1}</td><td><span class="tc" style="--c:${c}"></span>${n}</td><td class="pt">${p}</td></tr>`).join("")}</table>`;
+function trackSvg() {
+  let d = "";
+  for (let i = 0; i <= 120; i++) { const a = (i / 120) * Math.PI * 2; d += `${i ? "L" : "M"}${(200 + 150 * Math.cos(a) + 30 * Math.cos(2 * a) - 22 * Math.sin(3 * a)).toFixed(1)} ${(105 + 75 * Math.sin(a) - 25 * Math.cos(3 * a)).toFixed(1)}`; }
+  return `<svg viewBox="0 0 400 210" aria-hidden="true"><path d="${d}Z" fill="none" stroke="#000" stroke-width="11" stroke-linejoin="round" opacity=".5"/><path d="${d}Z" fill="none" style="stroke:var(--fg)" stroke-width="5" stroke-linejoin="round"/><circle cx="350" cy="105" r="7" style="fill:var(--on)"/></svg>`;
+}
+const hqBox = $(".hq-box");
+function renderHq() {
+  const tab = HQ.tab, done = WINNERS.length;
+  let body = "";
+  if (tab === "resumo")
+    body = `<div class="hq-grid" style="grid-template-columns:1.15fr 1fr 1fr">
+      <div class="box"><h4>Próxima etapa · ${done + 1} de ${CAL.length}</h4><b style="font:600 22px var(--f-disp)">${CAL[done]}</b><div class="trk">${trackSvg()}</div>
+        <div class="facts"><div><b>52</b><span>VOLTAS</span></div><div><b>4,6 km</b><span>POR VOLTA</span></div><div><b>30%</b><span>DE CHUVA</span></div></div>
+        <button class="big" data-go>▶ IR PRA PRÓXIMA ETAPA</button></div>
+      <div class="box"><h4>Pilotos</h4>${standTbl(P_STAND)}</div>
+      <div class="box"><h4>Equipes</h4>${standTbl(T_STAND)}<div class="ctr"><span>Pontos pra gastar</span><span><b style="color:var(--acc)">${HQ.devPts}</b> fábrica · <b style="color:var(--acc)">${HQ.crewPts}</b> mecânicos</span></div></div></div>`;
+  else if (tab === "fabrica" || tab === "mecanicos") {
+    const fab = tab === "fabrica", areas = fab ? DEV_A : CREW_A, lv = fab ? HQ.dev : HQ.crew, max = fab ? 6 : 5, pts = fab ? HQ.devPts : HQ.crewPts;
+    body = `<div class="cfg-lcd" style="margin:0 0 12px"><span>${fab ? "Pontos de evolução do carro" : "Pontos pra contratar mecânicos"}: <b>${pts}</b></span><span>Ganha pontos a cada corrida, pela posição</span></div>
+      <div class="hq-grid" style="grid-template-columns:repeat(${areas.length},1fr)">${areas
+        .map(([id, ic, t, d]) => {
+          const l = lv[id], cost = fab ? l + 2 : l + 1, can = l < max && cost <= pts;
+          return `<div class="box dev"><span class="ic">${ic}</span><b class="t">${t}</b><p>${d}</p>${lvbar(max, l)}<span class="lvl">NÍVEL ${l} DE ${max}</span>
+            <button class="upg" data-${fab ? "dev" : "crew"}="${id}" ${can ? "" : "disabled"}><span class="tgl ${can ? "on" : ""}">+</span>${l >= max ? "NO MÁXIMO" : `${fab ? "EVOLUIR" : "MELHORAR"} · ${cost} PTS`}</button></div>`;
+        })
+        .join("")}</div>`;
+  } else if (tab === "trofeus")
+    body = `<div class="trophies">${[["🏆", "3º lugar", "Circuito Urbano do Cairo · Maldonado"], ["⏱", "Volta mais rápida", "Autódromo de Lisboa · Coulthard"], ["⚡", "Parada mais rápida", "Circuito de Praga · 2,1 s"], ["⬆", "Mais posições ganhas", "Autódromo de Bogotá · +9"]]
+      .map(([ic, t, s]) => `<div class="box trophy"><span class="ic">${ic}</span><span><b>${t}</b><span>${s}</span></span></div>`)
+      .join("")}${["Vitória", "Pole position", "Dobradinha", "Campeão"].map((t) => `<div class="box trophy empty"><span class="ic">?</span><span><b>${t}</b><span>Ainda não</span></span></div>`).join("")}</div>`;
+  else if (tab === "pilotos")
+    body = `<div class="hq-grid" style="grid-template-columns:1fr 1fr">${[["P. Maldonado", "PM", [74, 61, 68, 80, 55], "Contrato: mais 1 temporada", false], ["D. Coulthard", "DC", [71, 77, 73, 58, 82], HQ.renew ? "Renovado por mais 2 temporadas" : "Último ano de contrato", !HQ.renew]]
+      .map(([n, ini, st, ct, renew]) => `<div class="box"><div class="pil" style="--c:${ME}"><span class="av">${ini}</span><div><b class="t">${n}</b><div style="color:var(--mute);font-size:12px;margin-bottom:6px">Falcão F1</div>${["Ritmo", "Na chuva", "Cuida do pneu", "Ultrapassagem", "Constância"].map((l, i) => `<div class="stat">${l}${lvbar(10, Math.round(st[i] / 10))}<b>${st[i]}</b></div>`).join("")}</div></div>
+        <div class="ctr"><span>${ct}</span>${renew ? `<button class="upg" data-renew><span class="tgl on">✍</span>RENOVAR · 6 PTS</button>` : ""}</div></div>`)
+      .join("")}</div>`;
+  else
+    body = `<div class="box"><table class="tbl">${CAL.map((c, i) => `<tr class="${i === done ? "nx" : ""}"><td class="n">${i + 1}</td><td>${c}</td><td class="st">${i < done ? `🏆 ${WINNERS[i]}` : i === done ? "PRÓXIMA" : "—"}</td></tr>`).join("")}</table></div>`;
+  hqBox.innerHTML = `<div class="hd"><span>🏆 SEDE DA EQUIPE · CAMPEONATO</span><button data-mode="race" title="Fechar" style="background:none;border:0;color:inherit;font:inherit;cursor:pointer">✕</button></div>
+    <div class="hq-top"><div class="ttl">Falcão F1<small>TEMPORADA 1 · 5º NOS CONSTRUTORES · 49 PONTOS</small></div><div class="season">ETAPA ${done + 1} DE ${CAL.length}${lvbar(CAL.length, done, "season")}</div></div>
+    <div class="cfg-tabs">${HQ_TABS.map(([k, n]) => `<button class="${k === tab ? "on" : ""}" data-hqtab="${k}">${n}</button>`).join("")}</div>
+    <div class="cfg-lcd"><span>${HQ.lcd}</span><span>Mercado de pilotos abre no fim da temporada</span></div>
+    <div class="hq-body">${body}</div>`;
+}
+/** cliques da sede; devolve true se era dela */
+function hqClick(t) {
+  const d = t.dataset;
+  if (d.hqtab) HQ.tab = d.hqtab;
+  else if (d.dev) { const l = HQ.dev[d.dev], c = l + 2; HQ.devPts -= c; HQ.dev[d.dev]++; HQ.lcd = `${DEV_A.find((a) => a[0] === d.dev)[2]} evoluiu pro nível ${l + 1} (−${c} pts)`; }
+  else if (d.crew) { const l = HQ.crew[d.crew], c = l + 1; HQ.crewPts -= c; HQ.crew[d.crew]++; HQ.lcd = `${CREW_A.find((a) => a[0] === d.crew)[2]}: nível ${l + 1} (−${c} pts)`; }
+  else if ("renew" in d) { HQ.renew = true; HQ.lcd = "Coulthard renovou por mais 2 temporadas"; }
+  else if ("go" in d) { setMode("race"); return true; }
+  else return false;
+  renderHq();
+  return true;
+}
+
+function render() {
+  const st = STYLES[S.style];
+
+  modesOn();
+  renderCfg();
+  renderHq();
+  scr.className = `scr s-${st.id}${["dial", "wheel"].includes(st.w) ? " f-vol" : ""}${S.cfg ? " show-cfg" : ""}${S.hq ? " show-hq" : ""}`;
+  hud.classList.toggle("sel-top", !!st.top);
+  cardsEl.innerHTML = cars.map((c, i) => cardHtml(c, i, st.w)).join("");
+  lvlbar.innerHTML = `<div class="opts"><i class="thumb"></i><button data-lv="max">${st.top ? "COMPLETO" : "MAXIMIZADO"}</button><button data-lv="min">${st.top ? "COMPACTO" : "MINIMIZADO"}</button><button data-lv="nome">${st.top ? "SÓ OS NOMES" : "SÓ O NOME"}</button></div>`;
+  document.querySelectorAll(".picker button").forEach((b, i) => b.classList.toggle("on", i === S.style));
+  $("#st-name").textContent = `${st.k} · ${st.n}`;
+  $("#st-desc").textContent = st.d;
+  update();
+}
+
+function update() {
+  updateBoard();
+  hud.dataset.lv = S.lv;
+  const li = ["max", "min", "nome"].indexOf(S.lv);
+  lvlbar.querySelector(".opts").style.setProperty("--idx", li);
+  lvlbar.querySelectorAll("button").forEach((b, i) => b.classList.toggle("on", i === li));
+  cars.forEach((c, i) => {
+    const el = cardsEl.children[i];
+    if (!el) return;
+    const k = (n) => el.querySelector(`[data-k="${n}"]`), p = posOf(c.di);
+    const ahead = D[order[p - 1]], behind = D[order[p + 1]];
+    c.gb = behind && !behind.out ? behind.gap - D[c.di].gap : 0;
+    c.gf = ahead ? D[c.di].gap - ahead.gap : 0;
+    const fightOn = (ahead && c.gf < 1) || (behind && !behind.out && c.gb < 1);
+    el.dataset.tab = c.tab;
+    el.classList.toggle("calm", !fightOn && !c.fight);
+    el.classList.toggle("hurt", !!c.dmg);
+    k("pos").textContent = `P${p + 1}`;
+    k("lap").textContent = S.lap;
+    k("gf").textContent = ahead ? `−${fmtGap(c.gf)} ${ahead.ab}` : "--";
+    k("gb").textContent = behind && !behind.out ? `+${fmtGap(c.gb)} ${behind.ab}` : "--";
+    k("gf").classList.toggle("close", !!ahead && c.gf < 1);
+    k("gb").classList.toggle("close", !!behind && !behind.out && c.gb < 1);
+    const avg = c.wear.reduce((a, b) => a + b, 0) / 4;
+    k("tyrechip").innerHTML = `<i class="tyre" style="--tcol:${TYRES[c.tyre][1]}"></i>${TYRES[c.tyre][0].toUpperCase()} · ${c.tl} V <span class="bar" style="--v:${1 - avg};--bc:${wearCol(avg)}"><i></i></span>${Math.round((1 - avg) * 100)}%`;
+    k("fuel").innerHTML = `⛽ ${c.fuel.toFixed(1).replace(".", ",")} V <span class="bar" style="--v:${Math.min(1, c.fuel / 10)};--bc:#3bd16f"><i></i></span>`;
+    k("dmgchip").textContent = c.dmg ? "DANO LEVE" : "SEM DANOS";
+    k("dmgchip").className = `chip ${c.dmg ? "bad" : "good"}`;
+    k("lmT").innerHTML = `<i class="tyre" style="--tcol:${TYRES[c.tyre][1]}"></i>${TYRES[c.tyre][0].toUpperCase()} · ${Math.round((1 - avg) * 100)}%<small>${c.tl} voltas</small>`;
+    k("lmF").innerHTML = `${c.fuel.toFixed(1).replace(".", ",")} V<span class="bar" style="--v:${Math.min(1, c.fuel / 10)};--bc:#3bd16f"><i></i></span>`;
+    // aviso do card, com a ação dele quando tem (como o "BOX AGORA" do safety car no jogo)
+    const [alert, act] = c.pit ? ["🔧 Box nesta volta", "CANCELAR"] : avg > 0.6 ? ["⚠ Pneu gasto: hora de parar?", "BOX AGORA"] : c.dmg ? ["⚠ Asa com dano leve: dá pra seguir", "TROCAR NO BOX"] : ["✓ Tudo certo · sem parada planejada", ""];
+    k("alert").textContent = alert;
+    const ab = el.querySelector("[data-act]");
+    ab.hidden = !act;
+    ab.textContent = act;
+    el.querySelectorAll(".ty2").forEach((t) => t.setAttribute("fill", wearCol(c.wear[+t.dataset.w])));
+    el.querySelectorAll("[data-wt]").forEach((t) => (t.textContent = Math.round((1 - c.wear[+t.dataset.wt]) * 100)));
+    el.querySelectorAll(".fw").forEach((f) => f.setAttribute("fill", c.dmg ? "#ff4a3d" : "#9aa3b5"));
+    const near = Math.min(ahead ? c.gf : 99, behind && !behind.out ? c.gb : 99), isAhead = ahead && c.gf <= (behind && !behind.out ? c.gb : 99);
+    k("btxt").textContent = c.fight ? `${c.fight === "atk" ? "Atacando" : "Defendendo"} · ${c.fightL} volta${c.fightL > 1 ? "s" : ""}` : fightOn ? `${(isAhead ? ahead : behind).n} a ${fmtGap(near)} ${isAhead ? "à frente" : "atrás"}` : "";
+    el.querySelectorAll("[data-fight]").forEach((b) => b.classList.toggle("on", c.fight === b.dataset.fight));
+    el.querySelector(".battle").classList.toggle("pulse", fightOn && !c.fight);
+    k("otn").textContent = c.otT ? "LIGADO" : c.ot;
+    el.querySelectorAll("[data-ot]").forEach((b) => { b.disabled = !c.ot && !c.otT; b.classList.toggle("live", !!c.otT); });
+    k("pips").innerHTML = Array.from({ length: 5 }, (_, n) => `<i class="${n < c.ot ? "" : "used"}"></i>`).join("");
+    el.style.setProperty("--ot", c.otT / 6);
+    const oi = c.otm === "manual" ? 1 : 0, oc = el.querySelector(".otctl");
+    oc.dataset.v = c.otm;
+    oc.querySelector(".opts").style.setProperty("--idx", oi);
+    oc.querySelectorAll("button").forEach((b, n) => b.classList.toggle("on", n === oi));
+    k("ottxt").textContent = c.otT ? `ligada · ${c.otT} s` : !c.ot ? "sem cargas" : c.otm === "auto" ? "o piloto decide" : "você aperta";
+    for (const key of Object.keys(OPTS)) {
+      const box = el.querySelector(`[data-ctl="${key}"]`), idx = OPTS[key].findIndex(([v]) => v === c[key]);
+      box.dataset.v = c[key];
+      box.querySelector(".opts").style.setProperty("--idx", idx);
+      box.querySelectorAll("button").forEach((b, n) => b.classList.toggle("on", n === idx));
+    }
+    el.querySelectorAll("[data-next]").forEach((b) => b.classList.toggle("on", b.dataset.next === c.next));
+    k("fueladd").textContent = `${(c.fuel + c.fuelAdd).toFixed(1).replace(".", ",")} V`;
+    k("plan").textContent = c.pit ? "Box nesta volta" : "Sem parada planejada";
+    el.querySelectorAll("[data-pit]").forEach((b) => { b.classList.toggle("live", c.pit); b.innerHTML = (c.pit ? "CANCELAR BOX" : "CHAMAR PRO BOX") + (i === 0 ? " <kbd>B</kbd>" : ""); });
+    const r = k("radio");
+    if (r.dataset.t !== c.radio) { r.dataset.t = c.radio; r.textContent = c.radio; r.classList.remove("new"); void r.offsetWidth; r.classList.add("new"); }
+    el.querySelectorAll(".leds i").forEach((l, n) => l.classList.toggle("lit", fightOn && n < Math.round((1 - near) * 10) + 1));
+  });
+}
+
+// ---- cliques ----
+$(".picker").innerHTML = STYLES.map((s, i) => `<button data-st="${i}" class="${s.nw ? "new" : ""}" title="${s.nw ? "Novo" : ""}"><b>${s.k}</b>${s.n}</button>`).join("");
+$(".picker").addEventListener("click", (e) => { const b = e.target.closest("[data-st]"); if (!b) return; S.style = +b.dataset.st; save(); render(); });
+/** o que está aberto por cima da corrida: nada ("race"), as Configurações ou a Sede */
+const modeNow = () => (S.cfg ? "cfg" : S.hq ? "hq" : "race");
+function modesOn() { document.querySelectorAll(".modes [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === modeNow())); }
+function setMode(m) { S.cfg = m === "cfg"; S.hq = m === "hq"; scr.classList.toggle("show-cfg", S.cfg); scr.classList.toggle("show-hq", S.hq); modesOn(); }
+const setCfg = (on) => setMode(on ? "cfg" : "race");
+$(".modes").addEventListener("click", (e) => { const b = e.target.closest("[data-mode]"); if (b) setMode(b.dataset.mode); });
+scr.addEventListener("input", (e) => { if (e.target.dataset.cfgr != null) cfgSet(e.target); });
+scr.addEventListener("click", (e) => {
+  const led = e.target.closest("[data-cfgl]");
+  if (led) return cfgSet(led);
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.dataset.sp) { S.sp = +t.dataset.sp; return update(); }
+  if (t.dataset.mode) return setMode(t.dataset.mode);
+  if ("cfgx" in t.dataset) return setCfg(false);
+  if (t.dataset.cfgtab) { S.cfgTab = t.dataset.cfgtab; return renderCfg(); }
+  if (hqClick(t)) return;
+  if (cfgSet(t)) return;
+  if (t.dataset.tog) { S[t.dataset.tog] = !S[t.dataset.tog]; return update(); }
+  if (t.dataset.lv) { S.lv = t.dataset.lv; save(); return update(); }
+  const el = t.closest(".card");
+  if (!el) return;
+  const c = cars[+el.dataset.i];
+  if (t.dataset.tab) c.tab = t.dataset.tab;
+  else if (t.dataset.set) { const [key, v] = t.dataset.set.split(":"), n = OPTS[key].findIndex(([x]) => x === v); if (c[key] !== v) { c[key] = v; c.radio = `Piloto: ${REPLY[key][n]}`; } }
+  else if (t.dataset.fight) { c.fight = c.fight === t.dataset.fight ? null : t.dataset.fight; c.fightL = c.fight ? 3 : 0; c.radio = c.fight === "atk" ? "Piloto: Vou atacar o da frente!" : c.fight === "def" ? "Piloto: Fechando a porta!" : "Piloto: Ok, de volta ao plano."; }
+  else if ("ot" in t.dataset) { if (!c.otT && c.ot > 0) { c.ot--; c.otT = 6; c.radio = "Piloto: Ultrapassagem ligada!"; } }
+  else if (t.dataset.otm) { c.otm = t.dataset.otm; c.radio = c.otm === "auto" ? "Engenheiro: Ultrapassagem no automático, usa quando der." : "Engenheiro: Ultrapassagem só quando eu mandar."; }
+  else if (t.dataset.next) c.next = t.dataset.next;
+  else if (t.dataset.fuel) c.fuelAdd = Math.max(-c.fuel, Math.min(40, c.fuelAdd + +t.dataset.fuel));
+  else if ("pit" in t.dataset || "act" in t.dataset) { c.pit = !c.pit; c.radio = c.pit ? "Engenheiro: Box, box, box!" : "Engenheiro: Fica fora, cancela o box."; }
+  update();
+});
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && modeNow() !== "race") setMode("race");
+  if (e.key === "m" || e.key === "M") { S.lv = ["max", "min", "nome"][(["max", "min", "nome"].indexOf(S.lv) + 1) % 3]; save(); update(); }
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft") { S.style = (S.style + (e.key === "ArrowRight" ? 1 : STYLES.length - 1)) % STYLES.length; save(); render(); }
+});
+
+// ---- corrida simulada (1 passo = 1 s de corrida; a velocidade do topo acelera) ----
+let tick = 0, acc = 0, simT = 0;
+function step() {
+  tick++;
+  S.time++;
+  D.forEach((d, i) => { if (!d.out && i !== order[0]) d.gap += (Math.random() - 0.5) * 0.25; });
+  const m = D[16];
+  m.gap += (cars[0].pace === "push" ? -0.12 : cars[0].pace === "conserve" ? 0.1 : 0) + (cars[0].engine === "rich" ? -0.08 : cars[0].engine === "lean" ? 0.08 : 0) - (cars[0].fight === "atk" || cars[0].otT ? 0.15 : 0);
+  cars.forEach((c, i) => {
+    if (c.otT) c.otT--;
+    // AUTO: o piloto usa uma carga quando está colado no da frente (a menos de 0,6 s)
+    else if (c.otm === "auto" && c.ot > 0 && c.gf > 0 && c.gf < 0.6 && Math.random() < 0.35) { c.ot--; c.otT = 6; c.radio = "Piloto: Tô colado, usei a ultrapassagem!"; }
+    if ((tick + i * 3) % 8 === 0) {
+      c.tl++;
+      const k = c.pace === "push" ? 1.5 : c.pace === "conserve" ? 0.62 : 1;
+      c.wear = c.wear.map((w) => Math.min(0.98, w + 0.02 * k));
+      c.fuel = Math.max(0, c.fuel - (c.engine === "rich" ? 1.18 : c.engine === "lean" ? 0.84 : 1) * 0.5);
+      c.last = c.best + 0.2 + Math.random() * 0.9 - (c.pace === "push" ? 0.3 : 0);
+      if (c.last < c.best) c.best = c.last;
+      if (c.fight) { c.fightL--; if (!c.fightL) c.fight = null; }
+    }
+  });
+  if (tick % 8 === 0) { S.lap = Math.min(LAPS, S.lap + 1); D.forEach((d) => (d.last = 84.4 + Math.random() * 2.4)); }
+  // ultrapassagem: quem chega a 0,3 s do da frente passa (posições deslizam na tabela)
+  for (let p = 1; p < 18; p++) {
+    const a = D[order[p - 1]], b = D[order[p]];
+    if (b.gap - a.gap < 0.3 && Math.random() < 0.5) {
+      [order[p - 1], order[p]] = [order[p], order[p - 1]];
+      // (quem passou fica com o lugar do outro; o ultrapassado logo atrás)
+      const g0 = a.gap;
+      b.gap = g0;
+      a.gap = g0 + 0.4;
+      say(`${b.ab} passa ${a.ab}!`, b.me);
+      const r = $(`.lb-row[data-d="${order[p - 1]}"]`);
+      r.classList.remove("up"); void r.offsetWidth; r.classList.add("up");
+      const mine = cars.find((c) => c.di === order[p - 1]);
+      if (mine) mine.radio = "Piloto: Passei! Passei!";
+    }
+  }
+  if (tick % 11 === 0) say(["Liam Lawson volta pra pista.", "Bandeira azul pra Stroll.", "Volta mais rápida: Albon 1:23.912", "Hunt passou reto na curva!"][tick % 4]);
+}
+setInterval(() => { acc += 0.25 * S.sp; let n = 0; while (acc >= 1 && n++ < 16) { acc--; step(); } if (n) update(); }, 250);
+
+// ---- pista ao fundo e mapa ----
+const bg = $("canvas.bg"), g = bg.getContext("2d"), mm = $(".mm canvas"), gm = mm.getContext("2d");
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const trackPt = (t, W, H, ox = 0, oy = 0) => { const a = t * Math.PI * 2; return [ox + W * (0.5 + 0.36 * Math.cos(a) + 0.07 * Math.cos(3 * a)), oy + H * (0.45 + 0.28 * Math.sin(a) + 0.08 * Math.sin(2 * a))]; };
+let last = 0;
+function draw(ts) {
+  const dt = Math.min(0.1, (ts - last) / 1000 || 0); last = ts;
+  if (!still) simT += dt * (S.sp || 0);
+  const W = 1600, H = 900;
+  g.fillStyle = "#1d3b25"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#21432a";
+  for (let x = -H; x < W; x += 70) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 35, 0); g.lineTo(x + 35 + H, H); g.lineTo(x + H, H); g.fill(); }
+  const path = new Path2D();
+  for (let i = 0; i <= 260; i++) { const [x, y] = trackPt(i / 260, W, H); i ? path.lineTo(x, y) : path.moveTo(x, y); }
+  g.lineJoin = "round";
+  g.strokeStyle = "#c9cfd8"; g.lineWidth = 64; g.stroke(path);
+  g.setLineDash([12, 12]); g.strokeStyle = "#d33"; g.lineWidth = 62; g.stroke(path); g.setLineDash([]);
+  g.strokeStyle = "#3a3f48"; g.lineWidth = 54; g.stroke(path);
+  // mapa
+  gm.clearRect(0, 0, 250, 182);
+  const mp = new Path2D();
+  for (let i = 0; i <= 160; i++) { const [x, y] = trackPt(i / 160, 220, 150, 15, 6); i ? mp.lineTo(x, y) : mp.moveTo(x, y); }
+  gm.strokeStyle = "#ffffffcc"; gm.lineWidth = 2.5; gm.stroke(mp);
+  order.forEach((di, p) => {
+    const d = D[di];
+    if (d.out) return;
+    const t = (simT * 0.012 + 0.9 - p * 0.012) % 1;
+    const [x, y] = trackPt(t, W, H), [x2, y2] = trackPt((t + 0.002) % 1, W, H), ang = Math.atan2(y2 - y, x2 - x);
+    g.save(); g.translate(x, y); g.rotate(ang);
+    g.fillStyle = "#0007"; g.fillRect(-10, -3, 22, 10);
+    g.fillStyle = d.tc; g.fillRect(-11, -5, 22, 10); g.fillStyle = "#111"; g.fillRect(-9, -7, 5, 14); g.fillRect(5, -7, 5, 14);
+    g.restore();
+    const [mx, my] = trackPt(t, 220, 150, 15, 6);
+    gm.fillStyle = d.tc; gm.beginPath(); gm.arc(mx, my, d.me ? 4.5 : 3, 0, Math.PI * 2); gm.fill();
+    if (d.me) { gm.strokeStyle = "#fff"; gm.lineWidth = 1.5; gm.stroke(); }
+  });
+  $("#spd").innerHTML = `${Math.round(225 + 70 * Math.sin(simT * 0.9))}<small>KM/H SAL</small>`;
+  if (!still) requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+render();
+fit();
+</script>

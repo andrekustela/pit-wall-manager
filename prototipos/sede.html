@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sede · protótipo</title>
+<style>
+  :root { --bg: #0c0e14; --bar: #141822; --line: #2a2f3c; --red: #e10600; --txt: #f2f3f5; --dim: #9aa3b2; --cy: #39d0ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt); font: 500 15px/1.35 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #cena { position: fixed; inset: 0; }
+  #cena canvas { display: block; }
+  header, footer { position: fixed; left: 0; right: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: color-mix(in srgb, var(--bar) 92%, transparent); border-color: var(--line); z-index: 5; }
+  header { top: 0; height: 56px; border-bottom: 1px solid var(--line); }
+  footer { bottom: 0; height: 60px; border-top: 1px solid var(--line); }
+  .logo { width: 30px; height: 30px; border-radius: 6px; background: var(--team); box-shadow: inset 0 -8px 0 var(--acc); }
+  .nome { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .chip { padding: 6px 10px; border-radius: 6px; background: #0b0d12; border: 1px solid var(--line); white-space: nowrap; }
+  .chip b { color: #6fdc8c; }
+  .chip.pp b { color: #b48cff; }
+  .sp { flex: 1; }
+  select { background: #0b0d12; color: var(--txt); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .tab { background: none; border: 0; color: var(--dim); font: 700 15px/1 "Segoe UI", sans-serif; letter-spacing: .06em; padding: 20px 14px; cursor: pointer; border-bottom: 3px solid transparent; }
+  .tab:hover { color: var(--txt); }
+  .tab.on { color: var(--txt); border-bottom-color: var(--red); }
+  .go { background: var(--red); color: #fff; border: 0; border-radius: 8px; padding: 12px 18px; font: 700 15px/1 "Segoe UI", sans-serif; letter-spacing: .05em; cursor: pointer; }
+  .proto { position: fixed; top: 64px; left: 16px; z-index: 4; font-size: 12px; color: var(--dim); background: #0b0d12cc; border: 1px dashed var(--line); padding: 4px 8px; border-radius: 6px; }
+  #rotulos { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+  .rot { position: absolute; transform: translate(-50%, -100%); padding: 7px 12px; border-radius: 7px; background: #10141dee; border: 2px solid var(--cor); color: var(--txt); font-weight: 700; letter-spacing: .06em; font-size: 14px; white-space: nowrap; pointer-events: auto; cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  .rot::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 18px; background: var(--cor); }
+  .rot.on { transform: translate(-50%, -100%) scale(1.08); box-shadow: 0 0 18px var(--cor); }
+  .rot.baixo { transform: translate(-50%, 0); }
+  .rot.baixo.on { transform: translate(-50%, 0) scale(1.08); }
+  .rot.baixo::after { top: auto; bottom: 100%; }
+  #painel { position: fixed; top: 72px; right: 16px; bottom: 76px; width: min(360px, calc(100% - 32px)); background: #10141df2; border: 1px solid var(--line); border-radius: 10px; padding: 16px; z-index: 6; overflow-y: auto; transform: translateX(110%); transition: transform .28s cubic-bezier(.2,.8,.2,1); }
+  #painel.on { transform: none; }
+  #painel h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: .05em; border-left: 4px solid var(--cor, var(--red)); padding-left: 10px; }
+  #painel p { color: var(--dim); margin: 6px 0 12px; }
+  #painel .x { position: absolute; top: 10px; right: 10px; background: none; border: 1px solid var(--line); color: var(--txt); border-radius: 6px; cursor: pointer; padding: 4px 8px; }
+  .lin { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 8px; }
+  .luzes { display: flex; gap: 3px; }
+  .luzes i { width: 12px; height: 12px; border-radius: 50%; background: #262b36; }
+  .luzes i.on { background: var(--cy); box-shadow: 0 0 6px var(--cy); }
+  @media (max-width: 760px) { .tab { padding: 20px 6px; font-size: 12px; } .chip.esc { display: none; } }
+</style>
+</head>
+<body>
+<div id="cena"></div>
+<div id="rotulos"></div>
+<header>
+  <div class="logo"></div><span class="nome" id="nome"></span>
+  <span class="sp"></span>
+  <span class="chip">$ <b>12,4 mi</b></span>
+  <span class="chip pp">PP <b>750</b></span>
+  <span class="chip esc" id="etapa"></span>
+  <select id="equipe" title="Trocar a equipe (só pra ver as cores)"></select>
+</header>
+<div class="proto">PROTÓTIPO · dados de exemplo · clique numa sala</div>
+<aside id="painel"><button class="x" id="fechar">✕</button><div id="conteudo"></div></aside>
+<footer>
+  <button class="tab on" data-tab="geral">PAINEL</button>
+  <button class="tab" data-tab="oficina">CARROS</button>
+  <button class="tab" data-tab="qg">EQUIPE</button>
+  <button class="tab" data-tab="engenharia">P&amp;D</button>
+  <button class="tab" data-tab="trofeus">TROFÉUS</button>
+  <span class="sp"></span>
+  <button class="go">PRÓXIMA CORRIDA ▸</button>
+</footer>
+<script type="module" src="./sede.ts"></script>
+</body>
+</html>

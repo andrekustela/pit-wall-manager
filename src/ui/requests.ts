@@ -2,12 +2,12 @@
 // companheiro, poupar combustível) e você aceita ou recusa — botão, tecla S/N ou voz ("sim"/"não").
 // Sem resposta em 12 s, conta como recusado. Atacar e motor rico voltam ao normal sozinhos depois.
 import type { Race } from "../sim/race";
-import type { CarState } from "../sim/types";
+import { MOOD_BAD, type CarState } from "../sim/types";
 import type { VoiceAction } from "../audio/voiceCmd";
 import { teamVoice } from "../audio/voice";
 import { esc } from "./common";
 
-type Kind = "atacar" | "motor" | "box" | "trocar" | "poupar";
+type Kind = "atacar" | "motor" | "box" | "trocar" | "poupar" | "liberar";
 type Act = Exclude<VoiceAction, { kind: "yes" } | { kind: "no" }>;
 interface Req { kind: Kind; slot: number; carId: string; text: string; t0: number }
 
@@ -69,9 +69,16 @@ export class DriverRequests {
     }
     const mate = this.race.cars.find((c) => c.team.id === car.team.id && c.id !== car.id);
     const plan: Record<Kind, () => void> = {
-      atacar: () => this.run({ kind: "pace", slot: r.slot, mode: "push" }, r, { kind: "pace", slot: r.slot, mode: "normal" }, 3, "ritmo de volta ao normal"),
+      // atacar = a briga (ATACAR por 3 voltas, acaba sozinha), pelo mesmo botão do card
+      atacar: () => {
+        if (car.fight !== "atk") document.querySelector<HTMLButtonElement>(`.driver.panel[data-id="${car.id}"] [data-fight="atk"]`)?.click();
+        this.note(`📻 Você → P${r.slot + 1}: atacar por 3 voltas`);
+        teamVoice.sayId("ok_atacar", r.slot);
+      },
       motor: () => this.run({ kind: "engine", slot: r.slot, mode: "rich" }, r, { kind: "engine", slot: r.slot, mode: "normal" }, 2, "motor de volta ao normal"),
       box: () => this.run({ kind: "box", slot: r.slot }, r),
+      // piloto irritado preso no "Manter": libera a briga entre os dois
+      liberar: () => this.run({ kind: "order", slot: r.slot, mode: "none" }, r),
       poupar: () => this.run({ kind: "engine", slot: r.slot, mode: "lean" }, r),
       // a ordem vai pro companheiro (o que está na frente abre)
       trocar: () => {
@@ -140,7 +147,8 @@ export class DriverRequests {
         ["poupar", hold("poupar", fuelLaps < left - 0.3 && c.engine !== "lean" && !c.boxRequest && (c.plan?.length ?? 0) <= (c.planIdx ?? 0), 4), "O combustível não vai chegar. Posso poupar?"],
         ["trocar", hold("trocar", !!ahead && ahead.team.id === c.team.id && gap < 0.8 && (c.lastLap ?? 99) < (ahead.lastLap ?? 99) - 0.25 && c.order === "none" && ahead.order === "none", 8), `Sou mais rápido que o ${ahead ? name(ahead) : ""}. Pede pra ele abrir?`],
         ["motor", hold("motor", !!ahead && ahead.team.id !== c.team.id && gap < 0.6 && c.engine === "normal" && (c.engineHealth ?? 1) > 0.55 && fuelLaps > left + 0.6 && !c.engineSave, 4), `Me dá mais motor, quero passar o ${ahead ? name(ahead) : ""} na reta!`],
-        ["atacar", hold("atacar", !!ahead && ahead.team.id !== c.team.id && gap < 1.0 && c.pace !== "push" && c.wear < 0.6 && c.lap >= 1 && !c.engineSave, 6), `Tô mais rápido que o ${ahead ? name(ahead) : ""}. Posso atacar?`],
+        ["liberar", hold("liberar", c.order === "hold" && (c.mood ?? 1) < MOOD_BAD && !!ahead && ahead.team.id === c.team.id && gap < 1.5, 4), "Tô mais rápido e preso aqui atrás. Me libera do Manter!"],
+        ["atacar", hold("atacar", !!ahead && ahead.team.id !== c.team.id && gap < 1.0 && c.fight !== "atk" && c.wear < 0.6 && c.lap >= 1 && !c.engineSave, 6), `Tô mais rápido que o ${ahead ? name(ahead) : ""}. Posso atacar?`],
       ];
       const ask = asks.find((x) => x[1]);
       if (!ask) return;

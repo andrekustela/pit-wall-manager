@@ -218,7 +218,9 @@ export async function buildTrack3d(track: Track, shadows: boolean, opts: { piece
   const rnd = rng(7);
   const W2 = TRACK_WIDTH / 2;
   const street = !!track.def.street;
-  const FENCE = W2 + 12; // alambrado (dos dois lados)
+  // alambrado (dos dois lados); na rua, na frente dos prédios (eles começam a W2 + 6: a 12 m o carro entrava nos
+  // prédios antes de achar o muro da corrida)
+  const FENCE = W2 + (street ? 5 : 12);
   const STAND = W2 + 14; // frente das arquibancadas
   const UP = new THREE.Vector3(0, 1, 0);
   const add = (g: THREE.BufferGeometry | null, m: THREE.Material | THREE.Material[], cast = false) => {

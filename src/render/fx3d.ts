@@ -10,11 +10,19 @@ function puff() {
   const c = document.createElement("canvas");
   c.width = c.height = 128;
   const g = c.getContext("2d")!;
-  for (let i = 0; i < 9; i++) {
-    const x = 64 + (i ? (Math.random() - 0.5) * 44 : 0), y = 64 + (i ? (Math.random() - 0.5) * 44 : 0), r = i ? 22 + Math.random() * 18 : 58;
+  // (fumaça de verdade é fiapo e rolo, não bola: base fraca e muitos tufos pequenos de força variada, mais densos no
+  // meio; com 9 manchas grandes saía uma bola translúcida de borda lisa)
+  const base = g.createRadialGradient(64, 64, 0, 64, 64, 60);
+  base.addColorStop(0, "rgba(255,255,255,0.35)");
+  base.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = base;
+  g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 60; i++) {
+    const a = Math.random() * Math.PI * 2, d = Math.pow(Math.random(), 0.7) * 46;
+    const x = 64 + Math.cos(a) * d, y = 64 + Math.sin(a) * d, r = 6 + Math.random() * 16 * (1 - d / 70);
     const gr = g.createRadialGradient(x, y, 0, x, y, r);
-    gr.addColorStop(0, `rgba(255,255,255,${i ? 0.42 : 0.62})`);
-    gr.addColorStop(0.55, `rgba(255,255,255,${i ? 0.2 : 0.3})`);
+    const k = (0.12 + Math.random() * 0.22) * (1 - d / 60);
+    gr.addColorStop(0, `rgba(255,255,255,${k.toFixed(3)})`);
     gr.addColorStop(1, "rgba(255,255,255,0)");
     g.fillStyle = gr;
     g.fillRect(0, 0, 128, 128);

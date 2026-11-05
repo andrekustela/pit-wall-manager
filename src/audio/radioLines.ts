@@ -129,6 +129,7 @@ export const RADIO_LINES: RadioLine[] = [
   { id: "req_box", who: "driver", react: true, match: /^$/, lines: ["Os pneus já foram. Posso parar?", "Não tenho mais pneu, me chama pro box?"] },
   { id: "req_trocar", who: "driver", react: true, match: /^$/, lines: ["Sou mais rápido que o meu companheiro. Pede pra ele abrir?", "Tô preso atrás do meu companheiro, deixa eu passar?"] },
   { id: "req_poupar", who: "driver", react: true, match: /^$/, lines: ["O combustível não vai chegar. Posso poupar?", "Tô gastando demais, posso economizar?"] },
+  { id: "req_liberar", who: "driver", react: true, match: /^$/, lines: ["Tô mais rápido e preso aqui atrás. Me libera!", "Deixa eu brigar com ele, por favor!"] },
   { id: "req_nao", who: "driver", react: true, match: /^$/, lines: ["Tá bom, vou segurar.", "Entendido... mas eu tava mais rápido.", "Ok, sigo assim então."] },
   { id: "nao_entendi", who: "driver", react: true, match: /^$/, lines: ["Não entendi, repete?", "Não copiei. Pode repetir?"] },
 ];

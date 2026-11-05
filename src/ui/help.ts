@@ -69,7 +69,7 @@ const CONTENT: Record<Tab, string> = {
       <li><b>Plano de paradas:</b> é só um lembrete. Na volta marcada o engenheiro avisa no rádio e o botão de box fica amarelo, já com o pneu e o combustível do plano, mas <b>você decide</b> se para. Em "editar plano" dá pra mudar, cancelar ou adicionar paradas durante a corrida.</li>
       <li><b>Safety car:</b> clique na faixa amarela, no carro dele na pista ou no minimapa pra câmera seguir o safety car.</li>
       <li><b>Minimizar:</b> o botão em cima dos cards (ou a tecla M) deixa o painel pequeno pra ver mais pista.</li>
-      <li><b>CHAMAR PRO BOX:</b> o carro entra na próxima vez que passar pela entrada dos boxes. Clique de novo pra cancelar.</li>
+      <li><b>CHAMAR PARA O BOX:</b> o carro entra na próxima vez que passar pela entrada dos boxes. Clique de novo pra cancelar.</li>
       <li><b>Safety car:</b> depois de uma batida o pelotão anda devagar e ninguém ultrapassa. É a hora mais barata pra parar!</li>
       <li><b>Chuva:</b> a barra azul mostra quanta água tem na pista. O piloto avisa no rádio quando precisa trocar de pneu.</li>
       <li><b>Tabela:</b> GAP é a distância pro líder e ÚLT é o tempo da última volta

@@ -125,7 +125,8 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
         <div class="livsec"><b>ESTILO DA PINTURA</b><div class="livpats">${freeFirst(PATTERNS).map(([p]) => `<button class="livpat ${p.id === lv.pattern ? "on" : ""} ${p.plus ? "plus" : ""}" data-pat="${p.id}"><canvas data-patcv="${p.id}"></canvas><span>${esc(p.label)}${p.plus ? " ★" : ""}</span></button>`).join("")}</div>
           <p class="hint" style="margin:6px 0 0">★ = pacote Plus${isPlus() ? " (ativo)" : ": clique pra ver a prévia no carro; pra salvar, ❤ Apoiar o jogo no menu"}.</p></div>
         <div class="livsec"><b>ADESIVOS ★★ PREMIUM</b>
-          <button class="m2btn small" data-stickers style="width:100%;clip-path:none"><b>★★ CRIAR MEU CARRO</b><span>${lv.stickers?.length ? `${lv.stickers.length} adesivo(s) no carro` : "Estrelas, raios, números, textos... onde você quiser"}</span><i>▶</i></button></div>`;
+          <button class="m2btn small" data-stickers="3d" style="width:100%;clip-path:none"><b>★★ CRIAR MEU CARRO 3D</b><span>${lv.decals?.length ? `${lv.decals.length} adesivo(s) no carro 3D` : "Cole estrelas, raios, números, textos... onde quiser no carro"}</span><i>▶</i></button>
+          <button class="m2btn small" data-stickers="2d" style="width:100%;clip-path:none;margin-top:6px"><b>★★ CRIAR MEU CARRO 2D</b><span>${lv.stickers?.length ? `${lv.stickers.length} adesivo(s) no carro 2D` : "O carro 2D estilizado visto de cima (e o 2D simples)"}</span><i>▶</i></button></div>`;
       // miniaturas de cada estilo (com as cores atuais)
       box.querySelectorAll<HTMLCanvasElement>("[data-patcv]").forEach((cv) => {
         const id = cv.dataset.patcv as Livery["pattern"];
@@ -306,12 +307,13 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
       close();
     }
     if (t.closest("[data-3d]")) return void showViewer3d(previewTeam(cleanLivery(lv)!));
-    if (t.closest("[data-stickers]"))
-      return showStickerEditor(lv, teamId, (list) => {
-        lv.stickers = list;
+    const sb = t.closest<HTMLElement>("[data-stickers]");
+    if (sb)
+      return showStickerEditor(lv, teamId, sb.dataset.stickers as "2d" | "3d", (part) => {
+        Object.assign(lv, part);
         update();
         renderCtrl();
-        if (list.length && !isPremium()) toast("★★ Adesivos em prévia: pra salvar a pintura com eles, ative o Premium em ❤ Apoiar o jogo.");
+        if ((part.stickers ?? part.decals)?.length && !isPremium()) toast("★★ Adesivos em prévia: pra salvar a pintura com eles, ative o Premium em ❤ Apoiar o jogo.");
       });
     if (t.closest("[data-save]")) {
       // (com item do Plus na prévia e sem o Plus: não salva, explica o que está em prévia)
@@ -325,7 +327,7 @@ export function showLiveryEditor(current: Livery | null, teamId: string, teamNam
         ].filter(Boolean);
         if (using.length) return toast(`★ ${using.join(", ")} ${using.length > 1 ? "são" : "é"} do pacote Plus (prévia). Ative o Plus em ❤ Apoiar o jogo ou escolha um sem ★.`);
       }
-      if (!isPremium() && lv.stickers?.length) return toast("★★ Os adesivos são do Premium (prévia). Ative o Premium em ❤ Apoiar o jogo, ou tire os adesivos em CRIAR MEU CARRO.");
+      if (!isPremium() && (lv.stickers?.length || lv.decals?.length)) return toast("★★ Os adesivos são do Premium (prévia). Ative o Premium em ❤ Apoiar o jogo, ou tire os adesivos em CRIAR MEU CARRO 3D e 2D.");
       if (!lv.emblem.initials) lv.emblem.initials = initialsOf(teamName || t0.name);
       onSave(cleanLivery(lv));
       close();

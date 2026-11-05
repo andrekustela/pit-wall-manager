@@ -24,8 +24,8 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Team } from "../sim/types";
 import type { CarLook } from "./car3d";
 import { SCENE_LOD_DIST, gfx } from "./gfx";
-import { drawStickers, patternShapes } from "./carArt";
-import { liveryKey } from "../sim/livery";
+import { patternShapes, stickerShape } from "./carArt";
+import { MAX_STICKERS, liveryKey, type Livery } from "../sim/livery";
 import { SPOT_COLOR, type Part as FxPart, type Skid, type Spot } from "./carFx";
 import { Billboards, rgbOf, type Billboard } from "./fx3d";
 import type { GroundSrc } from "./ground";
@@ -77,9 +77,49 @@ export interface CarDraw {
   pit?: number;
 }
 
+/**
+ * divide as malhas de uma asa em metade esquerda (+X) e direita pelo meio de cada triângulo: a asa quebrada pela
+ * metade esconde só o lado que voou (antes a asa inteira ficava no carro e uma cópia inteira voava)
+ */
+function splitHalves(part: THREE.Object3D, wing: string): THREE.Mesh[] {
+  part.updateMatrixWorld(true);
+  const inv = part.matrixWorld.clone().invert(), M = new THREE.Matrix4(), v = new THREE.Vector3(), out: THREE.Mesh[] = [];
+  const meshes: THREE.Mesh[] = [];
+  part.traverse((o) => ((o as THREE.Mesh).isMesh ? meshes.push(o as THREE.Mesh) : null));
+  for (const m of meshes) {
+    const g = m.geometry as THREE.BufferGeometry, pos = g.attributes.position;
+    const idx = g.index ? Array.from(g.index.array) : Array.from({ length: pos.count }, (_, i) => i);
+    M.multiplyMatrices(inv, m.matrixWorld);
+    const side: [number[], number[]] = [[], []];
+    for (let i = 0; i + 2 < idx.length; i += 3) {
+      let x = 0;
+      for (let k = 0; k < 3; k++) x += v.fromBufferAttribute(pos, idx[i + k]).applyMatrix4(M).x;
+      side[x >= 0 ? 0 : 1].push(idx[i], idx[i + 1], idx[i + 2]);
+    }
+    m.userData.wing = wing;
+    out.push(m);
+    if (!side[0].length || !side[1].length) {
+      m.userData.half = side[0].length ? "l" : "r";
+      continue;
+    }
+    const r = m.clone();
+    r.geometry = g.clone();
+    r.geometry.setIndex(side[1]);
+    r.userData = { wing, half: "r" };
+    m.geometry = g.clone();
+    m.geometry.setIndex(side[0]);
+    m.userData.half = "l";
+    m.parent!.add(r);
+    out.push(r);
+  }
+  return out;
+}
+
 interface CarObj {
   root: THREE.Group;
   parts: Record<Part, THREE.Object3D>;
+  /** as metades das asas (userData.wing = "asa_d"/"asa_t", userData.half = "l"/"r") */
+  halves?: THREE.Mesh[];
   key: string;
   spin: number;
   seen: number;
@@ -308,9 +348,7 @@ function load() {
 // (128 px por metro: de perto, na câmera piloto, 64 ficava borrado)
 const PAD = 0.15, TEX_PX = 128;
 /** caixa da textura da pintura (a do primeiro modelo carregado; os outros mapeiam na proporção deles) */
-let paintBox: { cx: number; cz: number; L: number; W: number; slope: number } | null = null;
-/** eixo da carroceria pintada (x no meio da caixa e a inclinação dx/dz), depois de carregar um modelo */
-export const paintAxis = () => paintBox;
+let paintBox: { cx: number; cz: number; L: number; W: number; slope: number; yLo: number; H: number } | null = null;
 /**
  * coordenadas de textura da carroceria pintada vindo de cima (frente = x da imagem, lado direito = y).
  * O meio de lado é o EIXO da carroceria pintada: o modelo vem levemente girado (o meio vai de x 0,07 na
@@ -328,10 +366,13 @@ export function paintUV(root: THREE.Object3D, box: THREE.Box3) {
   });
   // fatias: menor e maior x de cada 25 cm de comprimento
   const bins = new Map<number, [number, number, number]>();
+  let yMin = Infinity, yMax = -Infinity;
   for (const mesh of bodies) {
     const pos = mesh.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      yMin = Math.min(yMin, v.y);
+      yMax = Math.max(yMax, v.y);
       const k = Math.floor(v.z * 4), b = bins.get(k);
       if (b) {
         b[0] = Math.min(b[0], v.x);
@@ -356,22 +397,38 @@ export function paintUV(root: THREE.Object3D, box: THREE.Box3) {
   const cx = n > 2 ? (sx - slope * sz) / n + slope * c.z : c.x;
   // (largura simétrica em volta do eixo)
   const half = Math.max(box.max.x - cx, cx - box.min.x);
-  const mine = { cx, cz: c.z, L: size.z + 2 * PAD, W: 2 * half + 2 * PAD, slope };
+  const mine = { cx, cz: c.z, L: size.z + 2 * PAD, W: 2 * half + 2 * PAD, slope, yLo: yMin - 0.08, H: yMax - yMin + 0.16 };
   paintBox ??= mine;
   const axisAt = (z: number) => mine.cx + slope * (z - mine.cz);
   const lats = wrapLateral(bodies, axisAt);
+  const nw = new THREE.Vector3();
+  const frame = { cx: mine.cx, cz: mine.cz, slope, y0: yMin };
+  root.userData.carFrame = frame;
   bodies.forEach((mesh, bi) => {
-    const pos = mesh.geometry.attributes.position;
-    const uv = new Float32Array(pos.count * 2);
-    const lat = lats[bi];
+    const pos = mesh.geometry.attributes.position, nor = mesh.geometry.attributes.normal;
+    const uv = new Float32Array(pos.count * 2), car = new Float32Array(pos.count * 3), carN = new Float32Array(pos.count * 3);
+    const lat = lats[bi], nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
       // (o lado direito do carro é -X no modelo; a textura vira de cabeça pra baixo no WebGL)
       uv[i * 2] = (v.z - (mine.cz - mine.L / 2)) / mine.L;
       uv[i * 2 + 1] = 1 - (mine.W / 2 - lat[i]) / mine.W;
+      // ponto e direção no espaço do carro (Decal): os adesivos 3D são projetados por eles
+      carFrame(frame, v).toArray(car, i * 3);
+      if (nor) nw.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize();
+      else nw.set(0, 1, 0);
+      nw.toArray(carN, i * 3);
     }
     mesh.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    mesh.geometry.setAttribute("aCar", new THREE.BufferAttribute(car, 3));
+    mesh.geometry.setAttribute("aCarN", new THREE.BufferAttribute(carN, 3));
   });
+}
+
+/** ponto do modelo (sem escala) -> espaço do carro dos adesivos 3D (Decal: x de lado a partir do eixo, y acima do
+ *  ponto mais baixo da carroceria, z a partir do meio). Muda `v` */
+export function carFrame(f: { cx: number; cz: number; slope: number; y0: number }, v: THREE.Vector3) {
+  return v.set(v.x - (f.cx + f.slope * (v.z - f.cz)), v.y - f.y0, v.z - f.cz);
 }
 
 /**
@@ -467,29 +524,179 @@ export function paintTexture(team: Team): THREE.CanvasTexture {
     g.fillStyle = lv?.patternColor ?? team.accent;
     g.fill();
   } else patternShapes(g, lv);
-  // adesivos (Premium) por cima; passam pra lateral e por baixo junto com o desenho
-  drawStickers(g, lv);
   return canvasTex(cv);
 }
 
-/** material da carroceria com a pintura da equipe (cor, desenho e adesivos na textura) */
+// ---- adesivos 3D (Decal): projetados na carroceria pela direção dela, como um adesivo de verdade ----
+// Cada um vira 4 linhas numa textura de números (centro e alcance; eixo da direita do desenho e qual é; eixo de cima e
+// quanto entra; direção da superfície e quanto sai) e o desenho dele numa casa de um atlas (DEC_TILE px).
+// O shader da pintura testa cada ponto contra cada adesivo: sem malha nova e igual nos 3 modelos (leve/normal/HD)
+/** linhas da textura de números: os espelhados (m) contam 2 */
+const DEC_MAX = MAX_STICKERS * 2, DEC_TILE = 256, DEC_COLS = 8, DEC_ROWS = Math.ceil(MAX_STICKERS / DEC_COLS);
+/** o desenho ocupa 90% da casa (a borda vazia evita puxar o vizinho no mipmap) */
+const DEC_FILL = 0.9;
+
+/**
+ * cada adesivo 3D (e a cópia do outro lado) pronto pra projetar: centro c, U = direita do desenho e V = cima (de
+ * quem olha de fora, unitários), direção n da superfície, tamanho s (m) e `i` = qual adesivo da lista.
+ * O "cima" do desenho: na lateral, pro céu; em cima do carro, pro outro lado (lido de quem está do lado mais perto);
+ * no bico e na traseira (de frente/de costas), pro céu.
+ * A cópia do outro lado (m): texto e número refeitos lá (continuam legíveis); desenho = o reflexo de verdade (o
+ * coração com a ponta pra direita do desenho, refeito, apontava pro lado contrário do original)
+ */
+export function decalFrames(lv: Livery | undefined) {
+  const out: { i: number; c: THREE.Vector3; u: THREE.Vector3; v: THREE.Vector3; n: THREE.Vector3; s: number }[] = [];
+  const Y = new THREE.Vector3(0, 1, 0), Zf = new THREE.Vector3(0, 0, 1), Zb = new THREE.Vector3(0, 0, -1);
+  const mx = (a: THREE.Vector3) => new THREE.Vector3(-a.x, a.y, a.z);
+  (lv?.decals ?? []).forEach((d, i) => {
+    if (d.h) return;
+    const base = (n: THREE.Vector3, r: number) => {
+      const v = new THREE.Vector3().crossVectors(n, n.x > 0 ? Zb : Zf);
+      if (v.lengthSq() < 0.04) v.copy(Y).addScaledVector(n, -n.dot(Y));
+      v.normalize().applyAxisAngle(n, r);
+      const u = new THREE.Vector3().crossVectors(v, n);
+      // (espelhado ↔ / invertido ↕: o desenho virado na casa dele)
+      if (d.fx) u.negate();
+      if (d.fy) v.negate();
+      return { u, v };
+    };
+    const n = new THREE.Vector3(...d.n).normalize(), c = new THREE.Vector3(...d.p), f = base(n, d.r);
+    out.push({ i, c, ...f, n, s: d.s });
+    if (!d.m) return;
+    // (no texto o giro também espelha)
+    const nm = mx(n), text = d.k === "texto" || d.k === "numero";
+    out.push({ i, c: mx(c), ...(text ? base(nm, -d.r) : { u: mx(f.u), v: mx(f.v) }), n: nm, s: d.s });
+  });
+  return out;
+}
+/** quanto o adesivo alcança pra DENTRO da superfície (m): pega a curva da carroceria sem vazar pra peça de dentro
+ *  (a lateral da tampa do motor, ~30 cm pra dentro do sidepod) */
+const decIn = (s: number) => Math.min(0.15, Math.max(0.04, s * 0.35));
+/** e pra FORA (m): sobe num ressalto da carroceria (o sidepod estufado acima do ponto colado), sem cortar reto */
+const decOut = (s: number) => Math.min(0.5, Math.max(0.06, s * 0.8));
+
+/** o desenho dos adesivos 3D, cada um numa casa (cor, tipo e texto) */
+function decalAtlas(lv: Livery) {
+  const cv = document.createElement("canvas");
+  cv.width = DEC_COLS * DEC_TILE;
+  cv.height = DEC_ROWS * DEC_TILE;
+  const g = cv.getContext("2d")!;
+  (lv.decals ?? []).forEach((d, i) => {
+    const k = DEC_TILE * DEC_FILL;
+    g.setTransform(k, 0, 0, k, ((i % DEC_COLS) + 0.5) * DEC_TILE, (Math.floor(i / DEC_COLS) + 0.5) * DEC_TILE);
+    g.fillStyle = d.c;
+    stickerShape(g, d, lv);
+  });
+  const t = canvasTex(cv);
+  // (com o alfa já multiplicado: na borda do desenho não aparece contorno escuro)
+  t.premultiplyAlpha = true;
+  return t;
+}
+
+type DecalUniforms = { data: { value: THREE.DataTexture }; atlas: { value: THREE.Texture }; n: { value: number }; sel: { value: number }; look: string };
+const decalsOf = new WeakMap<THREE.Material, DecalUniforms>();
+/**
+ * põe (ou troca) os adesivos 3D de `lv` na pintura `mat` (feita por paintMaterial). sel = adesivo com contorno
+ * (o escolhido no editor; -1 = nenhum). O desenho só é refeito quando muda o que aparece (não ao arrastar)
+ */
+export function setDecals(mat: THREE.Material, lv: Livery | undefined, sel = -1) {
+  const u = decalsOf.get(mat);
+  if (!u) return;
+  const fr = decalFrames(lv), a = u.data.value.image.data as unknown as Float32Array;
+  a.fill(0);
+  fr.forEach((f, row) => {
+    const o = row * 16;
+    f.c.toArray(a, o);
+    a[o + 3] = f.s * 0.75 + decOut(f.s);
+    f.u.clone().divideScalar(f.s).toArray(a, o + 4);
+    a[o + 7] = f.i;
+    f.v.clone().divideScalar(f.s).toArray(a, o + 8);
+    a[o + 11] = decIn(f.s);
+    f.n.toArray(a, o + 12);
+    a[o + 15] = decOut(f.s);
+  });
+  u.data.value.needsUpdate = true;
+  u.n.value = fr.length;
+  u.sel.value = sel;
+  const look = JSON.stringify((lv?.decals ?? []).map((d) => [d.k, d.c, d.t])) + (lv?.number ?? "");
+  if (lv?.decals?.length && look !== u.look) {
+    u.atlas.value.dispose();
+    u.atlas.value = decalAtlas(lv);
+    u.look = look;
+  }
+}
+
+/** material da carroceria com a pintura da equipe (cor e desenho na textura, adesivos 3D projetados por cima) */
 export function paintMaterial(base: THREE.Material, team: Team): THREE.MeshStandardMaterial {
   const c = (base as THREE.MeshStandardMaterial).clone();
   c.name = base.name;
   c.map = paintTexture(team);
   c.color.set("#ffffff");
+  const data = new THREE.DataTexture(new Float32Array(4 * 4 * DEC_MAX), 4, DEC_MAX, THREE.RGBAFormat, THREE.FloatType);
+  const u: DecalUniforms = { data: { value: data }, atlas: { value: new THREE.Texture() }, n: { value: 0 }, sel: { value: -1 }, look: "" };
+  decalsOf.set(c, u);
+  setDecals(c, team.livery);
+  c.addEventListener("dispose", () => {
+    data.dispose();
+    u.atlas.value.dispose();
+  });
   // (onde a projeção de cima estica, aFade de paintUV: o desenho vira a cor de base)
   const bc = new THREE.Color(team.livery?.base ?? team.color);
   c.onBeforeCompile = (sh) => {
     sh.uniforms.uBase = { value: bc };
+    sh.uniforms.uDecData = u.data;
+    sh.uniforms.uDecAtlas = u.atlas;
+    sh.uniforms.uDecN = u.n;
+    sh.uniforms.uDecSel = u.sel;
     sh.vertexShader = sh.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aFade;\nvarying float vFade;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;");
+      .replace("#include <common>", "#include <common>\nattribute float aFade;\nvarying float vFade;\nattribute vec3 aCar;\nattribute vec3 aCarN;\nvarying vec3 vCar;\nvarying vec3 vCarN;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;\nvCar = aCar;\nvCarN = aCarN;");
     sh.fragmentShader = sh.fragmentShader
-      .replace("#include <common>", "#include <common>\nvarying float vFade;\nuniform vec3 uBase;")
-      .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uBase, vFade);");
+      .replace("#include <common>", "#include <common>\nvarying float vFade;\nuniform vec3 uBase;\nvarying vec3 vCar;\nvarying vec3 vCarN;\nuniform highp sampler2D uDecData;\nuniform sampler2D uDecAtlas;\nuniform int uDecN;\nuniform int uDecSel;")
+      .replace("#include <map_fragment>", `#include <map_fragment>
+diffuseColor.rgb = mix(diffuseColor.rgb, uBase, vFade);
+{
+  // (a variação do ponto na tela, fora do laço: o mipmap do atlas sai certo mesmo com o "continue")
+  vec3 dpx = dFdx(vCar), dpy = dFdy(vCar), cn = normalize(vCarN);
+  const vec2 GRID = vec2(${DEC_COLS}.0, ${DEC_ROWS}.0);
+  vec2 sc = ${DEC_FILL} / GRID;
+  for (int i = 0; i < ${DEC_MAX}; i++) {
+    if (i >= uDecN) break;
+    vec4 c0 = texelFetch(uDecData, ivec2(0, i), 0);
+    vec3 d = vCar - c0.xyz;
+    if (dot(d, d) > c0.w * c0.w) continue;
+    vec4 c1 = texelFetch(uDecData, ivec2(1, i), 0), c2 = texelFetch(uDecData, ivec2(2, i), 0), c3 = texelFetch(uDecData, ivec2(3, i), 0);
+    float face = dot(cn, c3.xyz), h = dot(d, c3.xyz);
+    if (face < -0.1 || h > c3.w || -h > c2.w) continue;
+    vec2 st = vec2(dot(d, c1.xyz), dot(d, c2.xyz));
+    // DOBRANDO A CURVA: onde a carroceria vira pra longe do adesivo, a projeção reta esticava o desenho. Conta o
+    // comprimento pela superfície: num arco, virou θ e afastou h do plano -> andou h·(θ - sen θ)/(1 - cos θ) a
+    // mais que a projeção, na direção pra onde ela virou
+    vec3 tl = cn - c3.xyz * face;
+    vec2 t2 = vec2(dot(tl, c1.xyz), dot(tl, c2.xyz));
+    float tq = length(t2), th = acos(clamp(face, -1.0, 1.0)), oc = 1.0 - cos(th);
+    if (tq > 1e-5) {
+      t2 /= tq;
+      float g = oc > 1e-4 ? (th - sin(th)) / oc : th / 3.0;
+      st += t2 * sign(dot(st, t2)) * abs(h) * g * length(c1.xyz);
+    }
+    st += 0.5;
+    if (st.x < 0.0 || st.y < 0.0 || st.x > 1.0 || st.y > 1.0) continue;
+    vec2 cell = vec2(mod(c1.w, GRID.x), floor(c1.w / GRID.x));
+    vec2 uv = vec2((cell.x + 0.5 + (st.x - 0.5) * ${DEC_FILL}) / GRID.x, 1.0 - (cell.y + 0.5 - (st.y - 0.5) * ${DEC_FILL}) / GRID.y);
+    vec4 col = textureGrad(uDecAtlas, uv, vec2(dot(dpx, c1.xyz), dot(dpx, c2.xyz)) * sc, vec2(dot(dpy, c1.xyz), dot(dpy, c2.xyz)) * sc);
+    // (some aos poucos onde a carroceria vira de lado em relação ao adesivo)
+    float f = smoothstep(-0.1, 0.15, face);
+    diffuseColor.rgb = diffuseColor.rgb * (1.0 - col.a * f) + col.rgb * f;
+    // contorno tracejado do escolhido (editor)
+    if (int(c1.w) == uDecSel) {
+      vec2 e = min(st, 1.0 - st);
+      if (min(e.x, e.y) < 0.015 && fract((st.x + st.y) * 10.0) < 0.5) diffuseColor.rgb = vec3(1.0, 0.82, 0.23);
+    }
+  }
+}`);
   };
-  c.customProgramCacheKey = () => "pintura-desbota";
+  c.customProgramCacheKey = () => "pintura-decal";
   return c;
 }
 
@@ -1038,6 +1245,12 @@ function blobMat() {
   // (empurrão de profundidade pequeno: forte, visto de lado a mancha passava na frente da base do pneu)
   return (blobM = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
 }
+let contactM: THREE.Material | null = null;
+/** a mesma mancha, mais fraca, pra sombra de contato (logo embaixo do carro) */
+function contactMat() {
+  const b = blobMat() as THREE.MeshBasicMaterial;
+  return (contactM ??= new THREE.MeshBasicMaterial({ map: b.map, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
+}
 
 export class RealCars {
   private renderer: THREE.WebGLRenderer;
@@ -1240,6 +1453,15 @@ export class RealCars {
       blob.renderOrder = 1;
       blob.visible = false;
       root.add(blob);
+      // sombra de contato: escura e logo embaixo do carro (a do sol cai ~0,9 m pro lado e, sem nada embaixo, o carro
+      // parecia flutuar — pior na chuva, com o céu fechado)
+      const contact = new THREE.Mesh(blobGeo(), contactMat());
+      contact.name = "contato";
+      contact.scale.set(0.9, 1, 0.94);
+      contact.position.y = 0.006;
+      contact.renderOrder = 1;
+      contact.visible = false;
+      root.add(contact);
       const parts = {} as Record<Part, THREE.Object3D>;
       for (const p of PARTS) parts[p] = inner.getObjectByName(p) ?? new THREE.Object3D();
       // rodas: giram e esterçam em volta do centro delas (a compressão do modelo tirou o ponto de giro
@@ -1377,7 +1599,8 @@ export class RealCars {
           if (mesh.isMesh && (mesh.material as THREE.Material).name.includes("wheel_cover")) covers.push(mesh);
         });
       const flap = drsFlap(parts.asa_t);
-      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings, steer, arms, head, screen, driver, brakes, strobe, blurs, flap, glow };
+      const halves = [...splitHalves(parts.asa_d, "asa_d"), ...splitHalves(parts.asa_t, "asa_t")];
+      c = { root, parts, key: "", spin: 0, seen: 0, tyre: "", covers, rings, steer, arms, head, screen, driver, brakes, strobe, blurs, flap, glow, halves };
       this.scene.add(root);
       this.cars.set(cid, c);
     }
@@ -1590,6 +1813,15 @@ export class RealCars {
   cutNow = false;
   /** tomada da TV (MultiCam) valendo agora (null = a câmera escolhida) */
   camSpec: CamSpec | null = null;
+  /** câmera drone (tecla 8): solta no mundo (x, z do chão, y altura; yaw/pitch em rad). Manda em cima de todas */
+  freeCam: { x: number; y: number; z: number; yaw: number; pitch: number } | null = null;
+  /** onde a câmera está agora (pro drone sair dali) */
+  camNow() {
+    const c = this.curPose;
+    return c ? { pos: c.pos.clone(), look: c.look.clone() } : null;
+  }
+  /** tomada presa no carro: puxa a câmera (x, z do mundo) pra antes do muro; null = já está no lugar (renderer) */
+  camFit: ((x: number, z: number) => { x: number; y: number } | null) | null = null;
   private specRef: CamSpec | null = null;
   private specH: number | null = null;
   private specT = 0;
@@ -1614,7 +1846,9 @@ export class RealCars {
       const a = Math.atan2(sp.side, sp.back) + sp.orbit * ((now - this.specT0) / 1000), rr = Math.hypot(sp.back, sp.side);
       [back, side] = [rr * Math.cos(a), rr * Math.sin(a)];
     }
-    const px = tf.x - fx * back - fz * side, pz = tf.y - fz * back + fx * side, lx = tf.x + fx * sp.look, lz = tf.y + fz * sp.look;
+    let px = tf.x - fx * back - fz * side, pz = tf.y - fz * back + fx * side;
+    const fit = this.camFit?.(px, pz), lx = tf.x + fx * sp.look, lz = tf.y + fz * sp.look;
+    if (fit) [px, pz] = [fit.x, fit.y];
     return { pos: new THREE.Vector3(px, this.hAt(px, pz) + sp.h, pz), look: new THREE.Vector3(lx, this.hAt(lx, lz) + 0.8, lz), fov: sp.fov };
   }
   private hadReplay = false;
@@ -1731,6 +1965,19 @@ export class RealCars {
    * - os pedaços do carro: lascas de fibra e da carenagem (cor da equipe) deitadas no chão.
    * null = esconde
    */
+  /** teste (&muros): onde a CORRIDA acha que o muro está (linha vermelha, vista através de tudo), pra comparar com o desenhado */
+  private wallLine: THREE.Group | null = null;
+  showWallLine(sides: [number, number][][]) {
+    if (this.wallLine) this.scene.remove(this.wallLine);
+    const g = new THREE.Group(), mat = new THREE.LineBasicMaterial({ color: 0xff2020, depthTest: false, transparent: true });
+    for (const pts of sides) {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.map(([x, z]) => new THREE.Vector3(x, 0.5, z))), mat);
+      line.renderOrder = 999;
+      g.add(line);
+    }
+    this.scene.add(g);
+    this.wallLine = g;
+  }
   skidMarks(list: readonly Skid[] | null, spots: readonly Spot[] | null = null) {
     const ground = (x: number, y: number, up: number) => this.groundY + this.hAt(x, y) + up;
     // (iluminado como o chão: na sombra dos carros e das arquibancadas a marca escurece junto)
@@ -1833,7 +2080,7 @@ export class RealCars {
    * Asa e roda são cópias da peça do carro (com a pintura dele); bico, espelhos, placas de fibra e pneus da barreira
    * são peças simples. null = tira todos
    */
-  debris3d(list: readonly { x: number; y: number; h: number; z: number; tx: number; tz: number; roll: number; node: string; carId: string; c?: string }[] | null) {
+  debris3d(list: readonly { x: number; y: number; h: number; z: number; tx: number; tz: number; roll: number; node: string; carId: string; c?: string; half?: "l" | "r" }[] | null) {
     const alive = new Set<object>();
     for (const d of list ?? []) {
       let f = this.flying.get(d);
@@ -1846,6 +2093,14 @@ export class RealCars {
           if (!src?.parent) continue;
           piece = src.clone(true);
           piece.visible = true;
+          // (meia asa: só a metade que voou; a outra continua no carro)
+          // (tira a outra metade da cópia: escondida, ela ainda entraria na caixa e a peça giraria em volta do meio da asa)
+          const drop: THREE.Object3D[] = [];
+          piece.traverse((o) => {
+            if (o.userData.half) (d.half && o.userData.half !== d.half ? drop : []).push(o);
+            if (o.userData.half) o.visible = true;
+          });
+          for (const o of drop) o.removeFromParent();
           piece.position.set(0, 0, 0);
           piece.rotation.set(0, 0, 0);
           scale.copy(src.parent.getWorldScale(new THREE.Vector3()));
@@ -2111,8 +2366,11 @@ export class RealCars {
       const pil = tf?.kind === "piloto";
       const sh = tf ? (tf.iso ? Math.max(90, (tf.span ?? 100) * 0.95) : pil ? 40 : 90) : Math.max(hw, hh);
       // (de perto a sombra se desenhava na própria carroceria em listras: afasta mais da superfície)
-      this.sun.shadow.normalBias = pil ? 0.045 : 0.02;
-      this.sun.shadow.bias = pil ? -0.0012 : -0.0005;
+      // (o bias é fração da profundidade da sombra: inclinada ela vai de 1 a 400 m e -0,0005 virava ~20 cm — a sombra
+      // do pneu começava longe do chão e, de cima, aparecia asfalto entre os dois: o pneu parecia no ar. ~3 cm agora;
+      // as listras na carroceria ficam com o normalBias, que anda pela superfície)
+      this.sun.shadow.normalBias = pil ? 0.045 : tf ? 0.03 : 0.02;
+      this.sun.shadow.bias = pil ? -0.0012 : tf ? -0.00008 : -0.0005;
       // (inclinada: o chão do autódromo já recebe a sombra; o chão de sombra por cima escurecia um quadrado)
       this.shadowFloor.visible = !tf;
       this.shadowFloor.position.set(cx, 0.01, cz);
@@ -2133,6 +2391,9 @@ export class RealCars {
       // (inclinada: menos luz ambiente e mais sol, pra sombra marcar e as cores não lavarem)
       this.hemi.intensity = (tf ? 1.05 : 1.3) * (1 - 0.28 * this.cloud);
       this.sun.intensity = (tf ? 2.3 : 2.2) * (1 - 0.6 * this.cloud);
+      // (céu fechado: a mancha do sol enfraquece e a de contato fica mais forte; no asfalto molhado escuro ela sumia)
+      if (blobM) blobM.opacity = 1 - 0.5 * this.cloud;
+      contactMat().opacity = 0.7 + 0.25 * this.cloud;
       this.renderer.toneMappingExposure = tf ? 0.85 : 1;
       if (tf) this.sun.position.set(sx - 60, 150, sz - 80);
       else this.sun.position.set(cx - 14, 12, cz - 18);
@@ -2155,9 +2416,12 @@ export class RealCars {
       if (blob) {
         blob.visible = !!tf && up <= 0 && this.realShadow;
         // (o sol vem de -x/-z: a sombra cai ~0,9 m pra +x/+z no mundo; o carro gira, então desfaz o giro dele)
-        const ry = Math.PI / 2 - d.h, wx = 0.54, wz = 0.72;
+        // (céu fechado/chuva: sem sol a sombra vem pra baixo do carro — deslocada, de cima, parecia o carro no ar)
+        const sun = 1 - 0.85 * this.cloud, ry = Math.PI / 2 - d.h, wx = 0.54 * sun, wz = 0.72 * sun;
         blob.position.set(wx * Math.cos(ry) - wz * Math.sin(ry), 0.008, wx * Math.sin(ry) + wz * Math.cos(ry));
       }
+      const contact = c.root.getObjectByName("contato");
+      if (contact) contact.visible = !!tf && up <= 0;
       // nariz do modelo pra +Z; no 2D a direção h aponta pra (cos h, sen h) = (X, Z)
       // (câmera piloto: o carro seguido gira junto com a câmera)
       const onboardMe = tf?.kind === "piloto" && d.id === this.followId && this.pilotH != null;
@@ -2186,6 +2450,11 @@ export class RealCars {
       if (lostI >= 0 && !onboardMe) c.root.rotation.x += lostI < 2 ? 0.05 : -0.04;
       c.parts.asa_d.visible = L.fw.state !== "none";
       c.parts.asa_t.visible = L.rw.state !== "none";
+      // asa quebrada pela metade: some só o lado que voou (o do lado da pancada)
+      for (const m of c.halves ?? []) {
+        const w = m.userData.wing === "asa_d" ? L.fw : L.rw;
+        m.visible = w.state !== "half" || m.userData.half !== w.side;
+      }
       const wheels: Part[] = ["roda_fe", "roda_fd", "roda_te", "roda_td"];
       // giro pelo quanto o carro andou neste quadro na tela (a velocidade da simulação vezes o tempo real
       // oscilava e a roda acelerava e freava sozinha)
@@ -2333,11 +2602,17 @@ export class RealCars {
       }
       // (câmera da beira da pista e cortes do Modo TV: corte seco, sem a transição de câmera)
       const rc = this.replayCam;
-      if (rc || this.hadReplay || this.cutNow || this.camSpec) this.trans = null;
+      const free = this.freeCam;
+      if (rc || this.hadReplay || this.cutNow || this.camSpec || free) this.trans = null;
       this.cutNow = false;
       this.hadReplay = !!rc;
       let cp = pose(kind);
-      if (rc) cp = { pos: new THREE.Vector3(rc.x, this.hAt(rc.x, rc.y) + 7, rc.y), look: new THREE.Vector3(tf.x, this.hAt(tf.x, tf.y) + 0.8, tf.y), fov: 30 };
+      if (free) {
+        // (drone: não entra no chão)
+        free.y = Math.max(free.y, this.hAt(free.x, free.z) + 0.4);
+        const cpit = Math.cos(free.pitch);
+        cp = { pos: new THREE.Vector3(free.x, free.y, free.z), look: new THREE.Vector3(free.x + Math.cos(free.yaw) * cpit, free.y + Math.sin(free.pitch), free.z + Math.sin(free.yaw) * cpit), fov: 60 };
+      } else if (rc) cp = { pos: new THREE.Vector3(rc.x, this.hAt(rc.x, rc.y) + 7, rc.y), look: new THREE.Vector3(tf.x, this.hAt(tf.x, tf.y) + 0.8, tf.y), fov: 30 };
       else if (this.camSpec) cp = this.specPose(tf, this.camSpec);
       if (this.trans) {
         const k = Math.min(1, (now - this.trans.t0) / 900);
@@ -2355,8 +2630,11 @@ export class RealCars {
       // (câmera piloto: o carro está a centímetros; nas outras, corte em 1,5 m pra a pintura do asfalto não serrilhar)
       // (perto demais com a distância longe dá briga de profundidade no carro: 0,3 a 1600 m na piloto)
       const pil = kind === "piloto" && !this.trans;
-      p.near = pil ? 0.15 : 1.5;
-      p.far = pil ? 1600 : Math.max(3000, cp.pos.y * 4);
+      // (tomada da TV baixa ou colada no carro — roda, chão, asa, T-cam: com o corte em 1,5 m sumiam o carro e o
+      // asfalto da frente da lente; o corte fica a metade da altura e 1/5 da distância até o carro)
+      const close = free ? 0.3 : this.camSpec && !pil ? Math.min(0.5 * (cp.pos.y - this.hAt(cp.pos.x, cp.pos.z)), 0.2 * Math.hypot(cp.pos.x - tf.x, cp.pos.z - tf.y)) : 1.5;
+      p.near = pil ? 0.15 : Math.max(0.15, Math.min(1.5, close));
+      p.far = p.near < 1 ? 1600 : Math.max(3000, cp.pos.y * 4);
       // câmera de trás: o painel dos pilotos cobre a parte de baixo e escondia o carro seguido; a imagem
       // sobe metade do que ele cobre (o carro fica no meio do que sobra, como no 2D)
       const cover = kind === "tv" ? (tf.cover ?? 0) * 0.5 : 0;

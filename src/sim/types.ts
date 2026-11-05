@@ -97,12 +97,29 @@ export interface PlannedStop {
   fuel: number;
 }
 
-/** risk = chance de erro de pilotagem (passar reto) */
-export const PACE: Record<PaceMode, { label: string; offset: number; wear: number; fuel: number; risk: number }> = {
-  push: { label: "Atacar", offset: -0.4, wear: 1.5, fuel: 1.08, risk: 8 },
-  normal: { label: "Normal", offset: 0, wear: 1, fuel: 1, risk: 1 },
-  conserve: { label: "Poupar", offset: 0.65, wear: 0.62, fuel: 0.94, risk: 0.35 },
+/** ritmo = tempo x pneu (só isso: o combustível é do Motor e o risco é da briga, ATACAR/DEFENDER) */
+export const PACE: Record<PaceMode, { label: string; offset: number; wear: number }> = {
+  push: { label: "Atacar", offset: -0.4, wear: 1.5 },
+  normal: { label: "Normal", offset: 0, wear: 1 },
+  conserve: { label: "Poupar", offset: 0.65, wear: 0.62 },
 };
+
+/** briga com o carro da frente/de trás por FIGHT_LAPS voltas: atacar arrisca erro e toque, defender fecha a porta e fica um pouco mais lento */
+export type FightMode = "atk" | "def";
+export const FIGHT_LAPS = 3;
+export const FIGHT: Record<FightMode, { label: string; offset: number; risk: number }> = {
+  atk: { label: "Atacar", offset: -0.15, risk: 3 },
+  def: { label: "Defender", offset: 0.1, risk: 1.3 },
+};
+/** modo ultrapassagem (bateria, não gasta combustível): cargas por corrida; cada uma = OT_SECS segundos de potência
+ * extra, a OT_OFFSET s por volta enquanto dura (~0,3 s no total numa volta de 80 s); só a partir da volta 2 */
+export const OT_CHARGES = 6;
+export const OT_OFFSET = -2.4;
+export const OT_SECS = 10;
+/** humor: começa aqui; abaixo de MOOD_BAD fica bravo (erra mais), acima de MOOD_GOOD fica feliz (um pouco mais rápido) */
+export const MOOD_START = 0.6;
+export const MOOD_BAD = 0.3;
+export const MOOD_GOOD = 0.75;
 
 export const ENGINE: Record<EngineMode, { label: string; offset: number; fuel: number }> = {
   rich: { label: "Rica", offset: -0.3, fuel: 1.18 },
@@ -133,6 +150,14 @@ export type Command =
   | { type: "repair"; carId: string; parts: Partial<Record<"fw" | "suspF" | "rw" | "suspR", boolean>> }
   | { type: "engineSave"; carId: string; on: boolean }
   | { type: "order"; carId: string; mode: TeamOrder }
+  /** briga por FIGHT_LAPS voltas (null encerra) */
+  | { type: "fight"; carId: string; mode: FightMode | null }
+  /** gasta uma carga do modo ultrapassagem agora */
+  | { type: "ot"; carId: string }
+  /** modo ultrapassagem: o piloto decide (auto) ou só quando o jogador aperta */
+    /** reclamar na direção de prova do último toque */
+  | { type: "complain"; carId: string }
+| { type: "otAuto"; carId: string; on: boolean }
   /** abandonar: o carro entra no box e vai pra garagem */
   | { type: "retire"; carId: string; on: boolean };
 
@@ -238,11 +263,32 @@ export interface CarState {
   damage: number;
   /** disputa na freada: quem perdeu alivia até esse instante */
   yieldTill: number;
+  /** susto: tira o pé até essa velocidade (m/s) até o instante `till` — freando, não de uma vez */
+  scare?: { till: number; v: number };
+  /** rebolando e não vai segurar: em `at` a rodada (ou a batida) começa, já com o bico `yaw` (rad) de lado e girando `w` (rad/s) */
+  pend?: { at: number; kind: "rodada" | "batida"; yaw: number; w: number };
+  /** laboratório (src/sim/lab.ts) controla a lateral até esse instante (o traçado normal não puxa de volta) */
+  labLat?: number;
+  /** laboratório, cena "lance": o carro segue o que foi desenhado no editor (Race.stepScript); k = próximo quadro */
+  script?: { t0: number; k: number; f: import("./lab").ScriptFrame[] };
   /** não decide outra freada antes dessa distância */
   duelAt: number;
   /** defendendo a posição: fica nessa lateral até esse instante */
   defendTill: number;
   defendLat: number;
+  /** briga ligada (ATACAR/DEFENDER) até essa distância percorrida (m) */
+  fight: FightMode | null;
+  fightTill: number;
+  /** modo ultrapassagem: cargas que sobram, ligado até essa distância (m), o piloto decide sozinho? e a última volta em que ele pensou em usar */
+  ot: number;
+  otTill: number;
+  otAuto: boolean;
+  otTried?: number;
+  /** último toque com outro carro (pra reclamar na direção de prova): com quem, quando e a chance de ele ser o culpado */
+  incident?: { with: string; t: number; fault: number } | null;
+  /** humor do piloto na corrida (0 bravo .. 1 feliz; começa em MOOD_START): ordens de equipe, ultrapassagens e
+   * reclamações mexem; bravo erra mais e pede pra sair do "Manter", feliz anda um pouco mais */
+  mood: number;
   /** ultrapassando: de que lado do traçado ideal (m, relativo a ele) */
   otOff?: number;
   /** rodando (> 0 enquanto o carro está solto numa rodada) */
@@ -256,7 +302,7 @@ export interface CarState {
    * solto (src/sim/slidePhysics.ts): rumo da velocidade (psi) e do bico (yaw) em relação à pista, giro (rad/s);
    * `wreck` = já bateu forte e só desliza até parar (o motivo do abandono); `scraped` = já raspou na barreira
    */
-  slide?: { mode: "spin" | "off" | "crash" | "rejoin"; psi: number; yaw: number; yawRate: number; stop: number; smoke?: boolean; wreck?: string; scraped?: boolean } | null;
+  slide?: { mode: "spin" | "off" | "crash" | "rejoin"; psi: number; yaw: number; yawRate: number; stop: number; smoke?: boolean; wreck?: string; scraped?: boolean; under?: boolean; build?: number; buildT?: number; age?: number } | null;
   /** batidas na barreira (pra tela soltar faísca, pedaço e som na hora certa): quantas, a velocidade contra ela (m/s), se destruiu o carro, de que lado */
   impact?: { n: number; v: number; crash: boolean; side: number } | null;
   /** fora da corrida e parado: como ficou virado (rad, em relação à pista) */
@@ -315,4 +361,38 @@ export interface RaceEvent {
   lap?: number;
   /** carro envolvido (a câmera do replay segue ele) */
   carId?: string;
+  /** susto: tamanho, zigue-zagues e tempo (o desenho rebola igual à corrida: src/sim/moment.ts) */
+  moment?: import("./moment").Moment;
+}
+
+/** paradas do plano: cada uma pelo menos MIN_STINT voltas depois da anterior, no máximo na penúltima volta
+ * (com 4 paradas em 18 voltas dava pra pôr a 2ª, 3ª e 4ª todas na volta 17) */
+export const MIN_STINT = 2;
+/** no máximo 5 paradas no plano (a sala corta o resto) */
+export const MAX_STOPS = 5;
+
+/** limites da volta da parada i, pelo resto do plano (`from` = primeira volta possível) */
+export function stopLapRange(stops: { lap: number }[], i: number, from: number, laps: number): [number, number] {
+  const lo = i > 0 ? stops[i - 1].lap + MIN_STINT : from;
+  const hi = i < stops.length - 1 ? stops[i + 1].lap - MIN_STINT : laps - 1;
+  return [lo, Math.max(lo, hi)];
+}
+
+/** volta pra uma parada nova no fim do plano (ou null se não cabe mais nenhuma) */
+export function nextStopLap(stops: { lap: number }[], from: number, laps: number): number | null {
+  const last = stops.length ? stops[stops.length - 1].lap : null;
+  const min = last === null ? from : last + MIN_STINT;
+  const lap = Math.min(laps - 1, Math.max(min, (last ?? from) + Math.max(MIN_STINT, Math.round(laps * 0.25))));
+  return lap >= min ? lap : null;
+}
+
+/** o plano válido: em ordem, cada parada a MIN_STINT voltas da anterior, depois de `after` e antes da última volta */
+export function cleanStops<T extends { lap: number }>(stops: T[], after: number, laps: number): T[] {
+  const out: T[] = [];
+  for (const s of [...stops].sort((a, b) => a.lap - b.lap)) {
+    if (s.lap <= after || s.lap >= laps) continue;
+    if (out.length && s.lap - out[out.length - 1].lap < MIN_STINT) continue;
+    out.push(s);
+  }
+  return out;
 }

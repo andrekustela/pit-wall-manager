@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Construtor da sede</title>
+<style>
+  :root { --bg: #0c0e14; --bar: #141822; --line: #2a2f3c; --red: #e10600; --txt: #f2f3f5; --dim: #9aa3b2; --on: #39d0ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt); font: 500 14px/1.35 "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; }
+  #cena { position: fixed; inset: 0; }
+  header { position: fixed; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bar); border-bottom: 1px solid var(--line); z-index: 5; }
+  header b { letter-spacing: .05em; margin-right: 8px; }
+  .sp { flex: 1; }
+  button { background: #1d2230; color: var(--txt); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font: 600 13px "Segoe UI", sans-serif; cursor: pointer; }
+  button:hover { border-color: #4a5266; }
+  button.on { border-color: var(--on); box-shadow: inset 0 0 0 1px var(--on); color: #fff; }
+  button.red { background: var(--red); border-color: var(--red); }
+  aside { position: fixed; top: 52px; left: 0; bottom: 0; width: 250px; background: #10141df2; border-right: 1px solid var(--line); z-index: 4; display: flex; flex-direction: column; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; border-bottom: 1px solid var(--line); }
+  .opts { flex: 1; overflow-y: auto; padding: 10px; }
+  .opts h4 { margin: 10px 0 6px; font-size: 12px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .sw { display: flex; align-items: center; gap: 8px; text-align: left; }
+  .sw i { width: 18px; height: 18px; border-radius: 4px; flex: none; border: 1px solid #0006; }
+  #dica { position: fixed; left: 262px; bottom: 12px; z-index: 4; color: var(--dim); background: #0b0d12cc; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+  #andar { display: flex; gap: 4px; align-items: center; }
+</style>
+</head>
+<body>
+<div id="cena"></div>
+<header>
+  <b>CONSTRUTOR DA SEDE</b>
+  <span id="andar"></span>
+  <button id="baixas" title="Paredes do andar ativo baixinhas, pra ver dentro (T)">Paredes baixas</button>
+  <button id="drone" title="Voar por dentro da construção (F)">🚁 Drone</button>
+  <span class="sp"></span>
+  <button id="modelo">Modelo pronto</button>
+  <button id="limpar">Limpar</button>
+  <button id="abrir">Abrir arquivo</button>
+  <button id="salvar" class="red">Salvar</button>
+</header>
+<aside>
+  <div class="tools" id="tools"></div>
+  <div class="opts" id="opts"></div>
+</aside>
+<div id="dica"></div>
+<script type="module" src="./construtor.ts"></script>
+</body>
+</html>

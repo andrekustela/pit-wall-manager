@@ -435,6 +435,12 @@ export function previewCanvas(team: Team, fallback: () => HTMLCanvasElement): HT
   return (car3dPref.on && car3dPreview(team)) || fallback();
 }
 
+/** encaixe da imagem de car3dPreview (null = ainda carregando): o ponto (x, y) do desenho do carro 2D (m, bico em
+ *  +2,4) fica no pixel (W/2 + (0,25 + 1,02x)·px, cy + y·px) — o mesmo da pintura em tintMaps */
+export function car3dFrame(): { W: number; px: number; cy: number } | null {
+  return assets ? { W: assets.W, px: assets.info.pxPerM, cy: assets.bodyCy } : null;
+}
+
 /** carro inteiro numa imagem (prévias: editor de pintura, lobby) */
 export function car3dPreview(team: Team): HTMLCanvasElement | null {
   if (!car3dReady() || !assets) return null;

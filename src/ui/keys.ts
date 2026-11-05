@@ -5,9 +5,9 @@ import { storeGet, storeSet } from "./common";
 
 export type Action =
   | "pausa" | "vel1" | "vel2" | "vel3" | "vel4" | "vel5"
-  | "cam1" | "cam2" | "cam3" | "cam4" | "cam5"
+  | "cam1" | "cam2" | "cam3" | "cam4" | "cam5" | "drone" | "foto"
   | "painel" | "tabela" | "tv" | "trocarCarro"
-  | "box" | "ritmoAtacar" | "ritmoNormal" | "ritmoPoupar" | "motorRica" | "motorNormal" | "motorPobre"
+  | "box" | "ritmoAtacar" | "ritmoNormal" | "ritmoPoupar" | "motorRica" | "motorNormal" | "motorPobre" | "ultrapassagem" | "atacar" | "defender"
   | "musica" | "microfone" | "telaCheia";
 
 export const ACTIONS: { id: Action; label: string; group: string; def: string }[] = [
@@ -22,18 +22,23 @@ export const ACTIONS: { id: Action; label: string; group: string; def: string }[
   { id: "cam3", label: "Câmera atrás do carro", group: "Câmeras (carros 3D)", def: "Digit3" },
   { id: "cam4", label: "Câmera piloto", group: "Câmeras (carros 3D)", def: "Digit4" },
   { id: "cam5", label: "Câmera TV (MultiCam)", group: "Câmeras (carros 3D)", def: "Digit5" },
+  { id: "drone", label: "Câmera drone (setas andam, Page Up/Down sobem, botão direito olha, Shift rápido)", group: "Câmeras (carros 3D)", def: "Digit8" },
+  { id: "foto", label: "Fotografia (salva a tela e copia pra colar)", group: "Câmeras (carros 3D)", def: "Digit9" },
   { id: "painel", label: "Painel dos pilotos (completo / compacto / só nomes)", group: "Tela", def: "KeyM" },
   { id: "tabela", label: "Tabela de posições menor", group: "Tela", def: "KeyP" },
   { id: "tv", label: "Modo TV", group: "Tela", def: "KeyT" },
   { id: "trocarCarro", label: "Seguir o outro carro da equipe", group: "Tela", def: "Tab" },
   { id: "telaCheia", label: "Tela cheia", group: "Tela", def: "KeyF" },
-  { id: "box", label: "Chamar pro box / cancelar", group: "Piloto seguido", def: "KeyB" },
+  { id: "box", label: "Chamar para o box / cancelar", group: "Piloto seguido", def: "KeyB" },
   { id: "ritmoAtacar", label: "Ritmo: atacar", group: "Piloto seguido", def: "KeyQ" },
   { id: "ritmoNormal", label: "Ritmo: normal", group: "Piloto seguido", def: "KeyW" },
   { id: "ritmoPoupar", label: "Ritmo: poupar", group: "Piloto seguido", def: "KeyE" },
   { id: "motorRica", label: "Motor: rica", group: "Piloto seguido", def: "KeyZ" },
   { id: "motorNormal", label: "Motor: normal", group: "Piloto seguido", def: "KeyX" },
   { id: "motorPobre", label: "Motor: pobre", group: "Piloto seguido", def: "KeyC" },
+  { id: "ultrapassagem", label: "Modo ultrapassagem (usa uma carga)", group: "Piloto seguido", def: "KeyR" },
+  { id: "atacar", label: "Briga: ATACAR o da frente (liga/desliga)", group: "Piloto seguido", def: "KeyA" },
+  { id: "defender", label: "Briga: DEFENDER do de trás (liga/desliga)", group: "Piloto seguido", def: "KeyD" },
   { id: "musica", label: "Próxima música (com Shift: a anterior)", group: "Som", def: "KeyN" },
   { id: "microfone", label: "Falar no rádio (segurar)", group: "Som", def: "KeyV" },
 ];

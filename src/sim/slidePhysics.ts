@@ -87,3 +87,51 @@ export function wallImpulse(b: SlideBody, side: number, rx: number, reach: numbe
   b.w = w;
   return pvn;
 }
+
+/**
+ * pancada: impulso por massa (jx ao longo da pista, jy de lado, em m/s) no ponto (px, py) do carro em relação ao
+ * centro (eixos da pista). Muda a velocidade e o giro como num corpo rígido
+ */
+export function hitBody(b: SlideBody, px: number, py: number, jx: number, jy: number) {
+  const vx = b.v * Math.cos(b.psi) + jx, vy = b.v * Math.sin(b.psi) + jy;
+  b.w += (px * jy - py * jx) / GYR2;
+  b.v = Math.hypot(vx, vy);
+  if (b.v > 1e-4) b.psi = Math.atan2(vy, vx);
+}
+
+/** quanto cada eixo escorrega (rad): o ângulo entre pra onde a roda aponta e pra onde ela está indo */
+export function axleSlip(b: SlideBody): { front: number; rear: number } {
+  const rel = b.psi - b.yaw, u = Math.max(1, Math.abs(b.v * Math.cos(rel))), lat = b.v * Math.sin(rel);
+  return { front: Math.atan2(lat + b.w * AX_F, u), rear: Math.atan2(lat - b.w * AX_R, u) };
+}
+
+export type HitResult = "segue" | "susto" | "escapada" | "rodada";
+/**
+ * o que o piloto consegue segurar depois da pancada: pneu escorregando pouco segura sozinho; até ~11° ele
+ * corrige (susto); passou disso a traseira vai (rodada) ou a frente lava (escapada)
+ * shortcut: limites 3,5° e 11,5° chutados pelo pico de aderência de pneu de corrida; ajustar pelo banco/laboratório
+ */
+export function hitResult(b: SlideBody): HitResult {
+  const { front, rear } = axleSlip(b);
+  const f = Math.abs(front), r = Math.abs(rear), m = Math.max(f, r);
+  if (m < 0.06) return "segue";
+  if (m < 0.2) return "susto";
+  return r >= f ? "rodada" : "escapada";
+}
+
+/** onde a pancada pega e de que direção (graus: 0 = empurrado pra frente, de trás; 90 = de lado, pra +lateral) */
+export interface HitSpec {
+  ang: number;
+  forca: number;
+  ponto: "traseira" | "meio" | "dianteira";
+}
+/** a pancada no carro andando reto (rumo da pista) a `v` m/s: o corpo logo depois e o desfecho */
+export function hitCar(v: number, h: HitSpec, hl = 2.4, hw = 0.95): { body: SlideBody; result: HitResult } {
+  const a = (h.ang * Math.PI) / 180, jx = h.forca * Math.cos(a), jy = h.forca * Math.sin(a);
+  const px = h.ponto === "traseira" ? -hl : h.ponto === "dianteira" ? hl : 0;
+  // (pega do lado de onde vem: empurrado pra +lateral, a pancada é no lado -lateral do carro)
+  const py = Math.abs(jy) > 1e-6 ? -Math.sign(jy) * hw : 0;
+  const body: SlideBody = { v, psi: 0, yaw: 0, w: 0 };
+  hitBody(body, px, py, jx, jy);
+  return { body, result: hitResult(body) };
+}

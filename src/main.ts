@@ -53,9 +53,11 @@ import { sound } from "./audio/sound";
 import { music } from "./audio/music";
 import { HelpWidget, reportFrame, type HelpTab } from "./ui/help";
 import { LocalConnection, WsConnection, type Connection } from "./net/connection";
+import { Room } from "./net/room";
 import type { LobbyState, Phase, ServerMsg } from "./net/protocol";
 import { Minimap, Renderer, currentCam3d, setCam3d } from "./render/renderer";
-import { Race, setChaos, type RaceOptions } from "./sim/race";
+import { Race, setChaos, setNoSc, type RaceOptions } from "./sim/race";
+import { labFromParams, lanceToScript, setLab } from "./sim/lab";
 import { COMPOUNDS, ENGINE, PACE, type EngineMode, type PaceMode } from "./sim/types";
 import type { QualiResult } from "./sim/weekend";
 import { storeSet, toast, updateWaitBar } from "./ui/common";
@@ -105,8 +107,32 @@ const AUTO = params.has("auto");
 const HOLD = params.get("hold");
 // teste: ?caos = muito mais rodadas, saídas de pista e batidas (pra ver o guindaste e o safety car)
 if (params.has("caos")) setChaos(40);
+if (params.has("semsc")) setNoSc(true);
+// teste: &replays segura o fim da corrida na tela com a lista de LANCES (em vez de ir pro pódio)
+if (params.has("replays")) Room.holdEnd = true;
+// teste: ?lab=<cena> força o acidente a cada ~15 s num carro do pelotão (src/sim/lab.ts; sem safety car)
+const labCfg = labFromParams(params);
+// (cena "lance": o que o usuário desenhou no editor de lance, guardado neste navegador)
+if (labCfg?.scene === "lance")
+  try {
+    labCfg.lance = lanceToScript(JSON.parse(localStorage.getItem("pwm.lance") ?? "null"));
+  } catch {
+    labCfg.lance = null;
+  }
+if (labCfg) {
+  setLab(labCfg);
+  setNoSc(true);
+}
 // teste: ?chuva = a corrida inteira com chuva forte (pra ver spray, pneus de chuva e a pista molhada)
 if (params.has("chuva")) setForceRain(true);
+// teste: ?editor=carro3d|carro2d abre direto o CRIAR MEU CARRO, por cima do editor de pintura (salvar é por lá); ?editor=lance abre o EDITOR DE LANCE
+const EDITOR = params.get("editor");
+if (EDITOR === "lance") void import("./ui/crashEditor").then((m) => m.showCrashEditor());
+if (EDITOR === "carro3d" || EDITOR === "carro2d")
+  void Promise.all([import("./ui/liveryEditor"), import("./ui/common")]).then(([{ editMyLivery }, { storeGet }]) => {
+    editMyLivery(storeGet("pwm.lastTeam") || "", "");
+    document.querySelector<HTMLElement>(`[data-stickers="${EDITOR.slice(5)}"]`)?.click();
+  });
 
 class App {
   private conn: Connection | null = null;
@@ -549,11 +575,14 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       if (race.time - tvSwitch < 7) return;
       const order = race.ordered().filter((c) => !c.retired && !c.finished && c.pit === "none");
       const gapOf = (i: number) => (race.dist(order[i - 1]) - race.dist(order[i])) / Math.max(25, order[i].v);
-      // a atual ainda está brigando: fica nela
+      // a atual ainda está brigando: fica nela — mas no máximo ~20 s (no pelotão a briga do seu carro nunca acabava e a
+      // TV ficava presa nele); ao ligar a TV ou passado o tempo, corta pra OUTRA briga
       const cur = order.findIndex((c) => c.id === view.follow);
-      if (cur > 0 && gapOf(cur) < 1.3) return;
+      const stale = race.time - tvSwitch > 20;
+      if (cur > 0 && gapOf(cur) < 1.3 && !stale) return;
       let best = -1, score = Infinity;
       for (let i = 1; i < order.length; i++) {
+        if (stale && (i === cur || i === cur + 1)) continue;
         const g = gapOf(i);
         if (g < 1.2 && g + i * 0.04 < score) {
           score = g + i * 0.04;
@@ -604,7 +633,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         resume: () => {
           if (before !== 0) setSpeed(before);
         },
-        settings: () => showSettings(),
+        settings: () => showSettings(() => view.hud.setMultiCam(currentCam3d() === "multicam")),
         leave: () => this.exitToMenu(),
       });
     });
@@ -652,6 +681,11 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       // (teclas de Configurações > ATALHOS; Ctrl/Alt fica pro navegador)
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       const act = actionOf(e);
+      // player (⏪ REVER): espaço toca/para e ← → andam 5 s; Esc volta ao vivo (abaixo)
+      if (view.renderer.playerKey(act, e.key)) {
+        e.preventDefault();
+        return;
+      }
       // replay da batida passando: Esc ou a pausa pulam (e a corrida volta)
       if (view.renderer.replaying() && (act === "pausa" || e.key === "Escape")) {
         e.preventDefault();
@@ -677,6 +711,7 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
         // (carros 2D ou 2D estilizado: só a câmera de cima)
         if (car3dPref.style !== "real") toast("Câmeras: só com os carros em 3D (Configurações > Gráficos)");
         else if (camKey !== currentCam3d()) {
+          if ((camKey as string) === "multicam") camBefore = currentCam3d() as typeof camBefore;
           setCam3d(camKey);
           view.hud.setMultiCam((camKey as string) === "multicam");
           toast(`Câmera: ${{ cima: "de cima", lado: "de lado (botão direito gira)", tras: "atrás do carro", piloto: "piloto (botão direito gira)", multicam: "TV (MultiCam): troca sozinha" }[camKey]}`);
@@ -684,17 +719,30 @@ Ou encerre pra todos: a sala inteira volta pro lobby (o resultado não vale).` :
       }
       if (e.key === "+" || e.key === "=") view.renderer.zoomIn();
       if (e.key === "-" || e.key === "_") view.renderer.zoomOut();
-      // atalhos do piloto seguido: box, ritmo e motor
-      const slot = teamVoice.drivers().findIndex((d) => d.id === view.follow);
-      const fc = race.cars.find((c) => c.id === view.follow);
+      // atalhos do piloto seguido (seguindo outro carro: o 1º da equipe); com Shift valem pro OUTRO carro da equipe
+      const drv = teamVoice.drivers();
+      let slot = Math.max(0, drv.findIndex((d) => d.id === view.follow));
+      if (e.shiftKey && drv.length > 1) slot = 1 - slot;
+      const fc = race.cars.find((c) => c.id === drv[slot]?.id);
       if (slot >= 0 && fc && act) {
         if (act === "box") this.act(view, { kind: fc.boxRequest ? "cancelBox" : "box", slot }, slot);
         const pace = ({ ritmoAtacar: "push", ritmoNormal: "normal", ritmoPoupar: "conserve" } as Record<string, PaceMode>)[act];
         if (pace) this.act(view, { kind: "pace", slot, mode: pace }, slot);
         const eng = ({ motorRica: "rich", motorNormal: "normal", motorPobre: "lean" } as Record<string, EngineMode>)[act];
         if (eng) this.act(view, { kind: "engine", slot, mode: eng }, slot);
+        if (act === "ultrapassagem") document.querySelector<HTMLButtonElement>(`.driver.panel[data-id="${fc.id}"] .otgo`)?.click();
+        if (act === "atacar" || act === "defender") document.querySelector<HTMLButtonElement>(`.driver.panel[data-id="${fc.id}"] [data-fight="${act === "atacar" ? "atk" : "def"}"]`)?.click();
       }
       if (act === "tv") view.hud.setTv(toggleTv());
+      if (act === "drone") {
+        e.preventDefault();
+        if (!view.renderer.toggleDrone()) toast("Drone: só com os carros em 3D (Configurações > Gráficos)");
+        else toast(view.renderer.droneOn() ? "🚁 Drone: setas andam, Page Up/Down (ou a roda) sobem, botão direito olha, Shift rápido. 8 sai" : "🚁 Drone desligado");
+      }
+      if (act === "foto") {
+        e.preventDefault();
+        view.renderer.photo((copied) => toast(copied ? "📸 Foto salva em Downloads e copiada: é só colar (Ctrl+V)" : "📸 Foto salva em Downloads"));
+      }
       if (act === "trocarCarro" && mine.length) {
         e.preventDefault();
         const i = mine.findIndex((c) => c.id === view.follow);

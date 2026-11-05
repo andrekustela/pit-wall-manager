@@ -1,28 +1,40 @@
 import { confirmDialog } from "./confirm";
-import { keyName } from "./keys";
-import { fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
+import { keyName, type Action } from "./keys";
+import { COMPLAIN_SECS, fmtLap, fuelPerLap, tyreTempLabel, type Race } from "../sim/race";
 import { mountWavingFlag } from "./checkerFlag";
 import {
   ALL_COMPOUNDS,
   COMPOUNDS,
   ENGINE,
   FAULTS,
+  FIGHT_LAPS,
+  OT_CHARGES,
+  OT_SECS,
+  MOOD_START,
+  MOOD_BAD,
+  MOOD_GOOD,
   FUEL_MAX,
   PACE,
   type CarState,
   type Command,
   type Compound,
   type EngineMode,
+  type FightMode,
   type PaceMode,
   type PlannedStop,
+  MAX_STOPS,
+  nextStopLap,
+  stopLapRange,
   type TeamOrder,
 } from "../sim/types";
 import { forecastText } from "../sim/weather";
 import { OnboardCam } from "../render/onboard";
 import { gfx } from "../render/gfx";
 import { sound } from "../audio/sound";
-import { bindParts, partsListHtml, statusSvg, updateStatus } from "./carStatus";
+import { bindParts, carIssues, dmgIcon, partsListHtml, statusSvg, updateStatus, type Severity } from "./carStatus";
 import { esc, storeGet, storeSet, tyreIcon, wetLabel } from "./common";
+import { icon } from "./icons";
+import { loadStrat, runStrat, saveStrat, STRAT_RULES, stratHtml, type StratState } from "./strategies";
 
 export const SPEEDS = [1, 2, 4, 8, 16];
 
@@ -51,7 +63,13 @@ interface CardState {
   planSig: string;
   dueApplied: boolean;
   /** aba do card: pilotagem (ritmo, motor, ordens) ou box (pneu, combustível, peças, plano) */
-  tab: "race" | "box";
+  tab: "race" | "info" | "car" | "box" | "strat";
+  /** 1º ou 2º carro da equipe (as estratégias ficam salvas por posição) */
+  slot: number;
+  /** aba ESTRATÉGIA: regras ligadas e seus números */
+  strat: StratState;
+  /** se parar agora, volta em que posição (pra faixa de aviso) */
+  rejoin?: number | null;
 }
 
 export class Hud {
@@ -110,9 +128,9 @@ export class Hud {
       <div class="topbar panel"></div>
       <div class="banner"></div>
       <div class="checkered"><canvas class="flag"></canvas><div class="txt">BANDEIRA QUADRICULADA</div></div>
-      <div class="raceinfo panel"><div class="head">CORRIDA</div><div class="body"></div></div>
-      <div class="feed"></div>
-      <div class="teamwrap"><button class="btn small teamtoggle" title="Minimizar/expandir (tecla M)"></button><div class="team"></div></div>
+      <div class="raceinfo panel"><div class="head"><span>CORRIDA</span><button class="infomin" title="Resumir/expandir o quadro da corrida"></button></div><div class="body"></div></div>
+      <div class="feed"></div><button class="feedmin" title="Resumir/expandir as mensagens"></button>
+      <div class="teamwrap"><div class="team"></div><div class="seg teamtoggle" title="Tamanho do painel (tecla M troca)"><button data-lv="0">COMPLETO</button><button data-lv="1">COMPACTO</button><button data-lv="2">MÍNIMO</button><button data-lv="3">OCULTO</button></div></div>
       <div class="mini panel"><canvas width="230" height="160"></canvas><div class="spd"></div></div>`;
     root.appendChild(this.el);
     this.board = this.el.querySelector(".board .rows")!;
@@ -130,6 +148,29 @@ export class Hud {
       if (this.race.sc.active && this.race.sc.onTrack) this.hooks.setFollow("SC");
     });
     this.el.querySelector(".boardmin")!.addEventListener("click", () => this.toggleBoard());
+    // CORRIDA e mensagens: resumir numa linha (fica guardado)
+    const setMini = () => {
+      this.el.querySelector(".raceinfo")!.classList.toggle("resumo", this.infoMini);
+      this.feed.classList.toggle("resumo", this.feedMini);
+      this.el.querySelector(".infomin")!.textContent = this.infoMini ? "▸" : "◂";
+      this.el.querySelector(".feedmin")!.textContent = this.feedMini ? "▾" : "▴";
+      this.feedCount = -1;
+    };
+    this.el.querySelector(".infomin")!.addEventListener("click", () => {
+      this.infoMini = !this.infoMini;
+      storeSet("pwm.infomini", this.infoMini ? "1" : "0");
+      setMini();
+      this.update();
+      this.el.querySelector(".raceinfo .body")!.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" });
+    });
+    this.el.querySelector(".feedmin")!.addEventListener("click", () => {
+      this.feedMini = !this.feedMini;
+      storeSet("pwm.feedmini", this.feedMini ? "1" : "0");
+      setMini();
+      this.update();
+      this.feed.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" });
+    });
+    setMini();
     this.applyBoard();
     // pointerdown: a tabela é redesenhada várias vezes por segundo e o "click" se perdia
     this.board.addEventListener("pointerdown", (e) => {
@@ -140,14 +181,20 @@ export class Hud {
 
     this.buildTopbar();
     this.buildCards();
-    const toggle = this.el.querySelector<HTMLButtonElement>(".teamtoggle")!;
-    toggle.addEventListener("click", () => this.toggleCompact());
+    this.el.querySelector(".teamtoggle")!.addEventListener("click", (e) => {
+      const lv = (e.target as HTMLElement).closest<HTMLElement>("[data-lv]")?.dataset.lv;
+      if (lv !== undefined && Number(lv) !== this.level) this.setLevel(Number(lv));
+    });
     this.applyCompact();
   }
 
-  /** painel dos pilotos (tecla M): 0 completo, 1 compacto (com a onboard e os botões), 2 só o nome (posição, nome, frente/atrás) */
-  private level = Math.max(0, Math.min(2, Number(storeGet("pwm.compact")) || 0));
+  /** painel dos pilotos (tecla M): 0 completo, 1 compacto (abas com botões curtos), 2 mínimo (nome + botões rápidos), 3 oculto */
+  /** o modo fica guardado POR TELA (notebook e monitor grande podem ter modos diferentes) */
+  private levelKey = `pwm.compact.${screen.width}x${screen.height}`;
+  private level = Math.max(0, Math.min(3, Number(storeGet(this.levelKey) || storeGet("pwm.compact")) || 0));
   private boardMini = storeGet("pwm.boardmini") === "1";
+  private infoMini = storeGet("pwm.infomini") === "1";
+  private feedMini = storeGet("pwm.feedmini") === "1";
 
   /** tabela de posições minimizada: só posição, sigla e gap */
   toggleBoard() {
@@ -181,21 +228,100 @@ export class Hud {
     b.textContent = this.boardMini ? "▸" : "◂";
   }
 
+  /** tecla M: troca rápida (atalho de teclado não espera animação: só um fade curto) */
   toggleCompact() {
-    this.level = (this.level + 1) % 3;
+    this.setLevel((this.level + 1) % 4, true);
+  }
+
+  private setLevel(lv: number, quick = false) {
+    this.level = lv;
+    storeSet(this.levelKey, String(this.level));
     storeSet("pwm.compact", String(this.level));
-    this.applyCompact(true);
+    this.applyCompact(true, quick);
   }
 
   /** minimiza/expande o painel. Troca na hora e só anima transparência e posição (mexer na altura a
    * cada quadro fazia o navegador recalcular a página inteira e a corrida engasgava) */
-  private applyCompact(animate = false) {
+  /** a bolinha do seletor COMPLETO · COMPACTO · MÍNIMO · OCULTO desliza até o modo escolhido */
+  private movePill(animate: boolean) {
+    const seg = this.el.querySelector<HTMLElement>(".teamtoggle")!, on = seg.querySelector<HTMLElement>(`[data-lv="${this.level}"]`);
+    let pill = seg.querySelector<HTMLElement>(".pill");
+    if (!pill) {
+      pill = document.createElement("i");
+      pill.className = "pill";
+      seg.prepend(pill);
+    }
+    if (!on) return;
+    pill.style.transition = animate ? "" : "none";
+    pill.style.width = `${on.offsetWidth}px`;
+    pill.style.transform = `translateX(${on.offsetLeft}px)`;
+  }
+
+  private applyCompact(animate = false, quick = false) {
     const team = this.el.querySelector<HTMLElement>(".team")!;
-    this.el.querySelector(".teamtoggle")!.textContent = ["▼ MINIMIZAR PAINEL (M)", "▼ SÓ OS NOMES (M)", "▲ EXPANDIR PAINEL (M)"][this.level];
-    team.classList.toggle("compact", this.level === 1);
-    team.classList.toggle("names", this.level === 2);
-    if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-      team.animate([{ opacity: 0.25, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(.23, 1, .32, 1)" });
+    const cards = [...team.querySelectorAll<HTMLElement>(".driver.panel")];
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // animação anterior ainda rodando (clicou rápido): para onde está e mede dali (o retângulo já inclui o deslocamento)
+    for (const c of cards) for (const a of c.getAnimations({ subtree: true })) if (a.id === "modo") a.cancel();
+    const before = cards.map((c) => c.getBoundingClientRect());
+    const wasHidden = team.classList.contains("hid");
+    this.el.querySelectorAll<HTMLElement>(".teamtoggle [data-lv]").forEach((b) => b.classList.toggle("on", Number(b.dataset.lv) === this.level));
+    this.movePill(animate);
+    const set = () => {
+      team.classList.toggle("compact", this.level === 1);
+      team.classList.toggle("names", this.level === 2);
+      team.classList.toggle("hid", this.level === 3);
+      if (this.level !== 2) cards.forEach((c) => c.classList.remove("pop"));
+    };
+    const ease = "cubic-bezier(0.23, 1, 0.32, 1)", morph = "cubic-bezier(0.77, 0, 0.175, 1)";
+    // OCULTO: os cards SAEM descendo (o mesmo caminho por onde voltam) e só depois somem
+    if (this.level === 3) {
+      if (!animate || wasHidden || reduce) return set();
+      const outs = cards.map((c, i) => {
+        const a = c.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(16px)" }], { duration: 180, easing: ease, delay: i * 30, fill: "forwards" });
+        a.id = "modo";
+        return a;
+      });
+      void Promise.all(outs.map((a) => a.finished)).then(() => {
+        if (this.level !== 3) return;
+        set();
+        outs.forEach((a) => a.cancel());
+      }).catch(() => {});
+      return;
+    }
+    set();
+    if (!animate) return;
+    const run = (el: Element, k: Keyframe[], o: KeyframeAnimationOptions) => (el.animate(k, o).id = "modo");
+    // tecla M ou "reduzir movimento": só um fade curto, sem mexer em tamanho e lugar
+    if (quick || reduce) {
+      cards.forEach((c) => run(c, [{ opacity: 0.4 }, { opacity: 1 }], { duration: 150, easing: ease }));
+      return;
+    }
+    const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hud-zoom")) || 1;
+    cards.forEach((c, i) => {
+      const a = c.getBoundingClientRect(), b = before[i], delay = i * 40;
+      if (wasHidden || !b.width) {
+        run(c, [{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: ease, delay, fill: "backwards" });
+        return;
+      }
+      // FLIP: o card começa com o tamanho e o lugar antigos (recorte do que cresceu + deslocamento) e se transforma
+      // no novo com curva de "morph" (ease-in-out forte); o que diminuiu é revelado no fim pelo fade do conteúdo
+      const top = Math.max(0, a.height - b.height) / z, side = Math.max(0, a.width - b.width) / 2 / z;
+      const dx = (b.left + b.width / 2 - (a.left + a.width / 2)) / z, dy = (b.bottom - a.bottom) / z;
+      const sy = Math.max(0.94, Math.min(1, b.height / a.height));
+      run(
+        c,
+        [
+          { clipPath: `inset(${top.toFixed(1)}px ${(side - 12).toFixed(1)}px -12px ${(side - 12).toFixed(1)}px)`, transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)` },
+          { clipPath: "inset(-44px -12px -12px -12px)", transform: "none" },
+        ],
+        { duration: 280, easing: morph, delay },
+      );
+      // o conteúdo: some rápido e volta em cascata de cima pra baixo, depois que a forma já andou metade
+      [...c.querySelectorAll<HTMLElement>(":scope > *")].forEach((k, n) =>
+        run(k, [{ opacity: 0, transform: `translateY(${(4 * sy).toFixed(1)}px)` }, { opacity: 1, transform: "none" }], { duration: 200, easing: ease, delay: delay + 110 + Math.min(n, 6) * 18, fill: "backwards" }),
+      );
+    });
   }
 
   /** quanto da tela (de baixo pra cima) o painel cobre agora, em px */
@@ -353,47 +479,64 @@ export class Hud {
 
   private buildCards() {
     const wrap = this.el.querySelector(".team")!;
-    for (const c of this.mine()) {
-      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, tab: "race" });
+    for (const [slot, c] of this.mine().entries()) {
+      this.cardState.set(c.id, { next: c.compound === "H" ? "M" : "H", fuelLaps: null, planOpen: false, planSig: "", dueApplied: false, tab: "race", slot, strat: loadStrat(slot) });
       const card = document.createElement("div");
       card.className = "driver panel";
       card.dataset.id = c.id;
       card.style.borderTopColor = c.team.color;
       card.innerHTML = `
-        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}<div class="stats colstats"><div>Última<b class="last"></b></div><div>Melhor<b class="best"></b></div></div>${partsListHtml()}<button class="btn small retirebtn" data-retire title="O carro entra no box e vai pra garagem (sai da corrida)">🏳 ABANDONAR</button></div>
+        <div class="statuscol"><div class="onbox" data-onboard title="Câmera onboard: clique pra tela cheia"><canvas></canvas><span>ONBOARD</span><i>⛶</i></div>${statusSvg()}<div class="uc"><span class="uct"></span><span class="ucf"></span><span class="ucd"></span></div><div class="stats colstats"><div>Última<b class="last"></b></div><div>Melhor<b class="best"></b></div></div>${partsListHtml()}</div>
         <div class="top">
           <div class="p"></div>
-          <div class="nm" title="Clique no card pra seguir esse piloto">${esc(c.driver.name)}<small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
+          <div class="nm" title="Clique no card pra seguir esse piloto">${esc(c.driver.name)}<span class="mood"></span><small>${esc(c.team.name)} · <span class="lapn"></span></small></div>
           <div class="gapsbox" title="Distância pro carro da frente e pro de trás"><div><span>FRENTE</span><b class="gf"></b></div><div><span>ATRÁS</span><b class="gb"></b></div></div>
         </div>
         <div class="mini-line chips"></div>
         <div class="calert" hidden></div>
-        <div class="ctabs"><button data-tab="race" title="Ritmo, motor e ordens de equipe: atacar, defender, poupar">⚔ PILOTAGEM</button><button data-tab="box" title="Pneu, combustível, peças e plano de paradas">🔧 BOX</button></div>
+        <div class="battle idle"><span class="bt-s bt-a" title="Carro da frente"></span><button data-fight="atk" title="Atacar o da frente por ${FIGHT_LAPS} voltas: mais chance de passar, mas arrisca erro e toque (tecla ${keyName("atacar")})">ATACAR</button><span class="bt-s bt-b" title="Carro de trás"></span><button data-fight="def" title="Defender a posição por ${FIGHT_LAPS} voltas: fecha a porta, fica um pouco mais lento e arrisca toque (tecla ${keyName("defender")})">DEFENDER</button><button class="otb" data-ot title="Modo ultrapassagem: potência extra da bateria por alguns segundos (tecla ${keyName("ultrapassagem")})">⚡ <span class="otn"></span></button></div>
+        <div class="ctabs"><button data-tab="race" title="Ritmo, motor, ultrapassagem e ordens de equipe">${icon("piloto")}<span class="tl">PILOTO</span></button><button data-tab="box" title="Pneu, combustível e plano de paradas">${icon("box")}<span class="tl">BOX</span></button><button data-tab="car" title="Danos, problemas mecânicos e motor (e abandonar)">${icon("carro")}<span class="tl">CARRO</span></button><button data-tab="info" title="Ritmo comparado com os rivais, pneus deles e chuva chegando">${icon("info")}<span class="tl">INFO</span></button><button data-tab="strat" title="Regras que o piloto segue sozinho (liga/desliga)">${icon("estrategia")}<span class="tl">ESTRATÉGIA</span></button></div>
+        <div class="cpane" data-cpane="race">
+          <div class="cq"><span class="cl" title="Ritmo: Atacar (mais rápido, gasta mais pneu) · Normal · Poupar (mais lento, poupa pneu)">Rit</span><span class="seg cseg">${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Ritmo: ${PACE[m].label} (${["mais rápido, gasta mais pneu", "equilíbrio", "mais lento, poupa pneu"][i]})">${"ANP"[i]}</button>`).join("")}</span>
+            <span class="cl" title="Motor (mistura): Rica (mais rápido, gasta mais combustível) · Normal · Pobre (mais lento, economiza)">Mot</span><span class="seg cseg">${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Motor: ${ENGINE[m].label} (${["mais rápido, gasta mais combustível", "equilíbrio", "mais lento, economiza combustível"][i]})">${"RNP"[i]}</button>`).join("")}</span>
+            <span class="cl" title="Modo ultrapassagem: Auto (o piloto usa as cargas) · Manual (só quando você aperta o ⚡)">Ult</span><span class="seg cseg"><button data-otauto="1" title="Ultrapassagem: o piloto decide">Au</button><button data-otauto="0" title="Ultrapassagem: só quando você aperta o ⚡">Ma</button></span></div>
+          <div class="cq"><span class="cl" title="Ordem de equipe: deixar o companheiro passar, manter as posições ou livre pra brigar">Eqp</span><span class="seg cseg"><button data-order="letPass" title="Deixar o companheiro passar">Deixar</button><button data-order="hold" title="Manter as posições">Manter</button><button data-order="none" title="Livre pra brigar">Livre</button></span></div>
+        </div>
+        <div class="cpane" data-cpane="box">
+          <div class="cq"><span class="seg cseg next">${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${tyreIcon(t, COMPOUNDS[t].label)}</button>`).join("")}</span>
+            <span class="stepper">${icon("fuel")}<button data-fuel="-1">−</button><b class="fval"></b><button data-fuel="1">+</button></span></div>
+          <div class="cq"><span class="plansum"></span></div>
+        </div>
+        <div class="pane" data-pane="strat"><div class="stratlist">${stratHtml()}</div></div>
+        <div class="pane" data-pane="info"><div class="infolist"></div></div>
+        <div class="pane" data-pane="car"><div class="carlist"></div><button class="btn small retirebtn" data-retire title="O carro entra no box e vai pra garagem (sai da corrida)">🏳 ABANDONAR</button></div>
         <div class="pane" data-pane="race">
-        <div class="row2"><span class="lbl">Ritmo</span><div class="seg pace">
-          ${(["push", "normal", "conserve"] as PaceMode[]).map((m, i) => `<button data-pace="${m}" title="Atalho: ${keyName((["ritmoAtacar", "ritmoNormal", "ritmoPoupar"] as const)[i])} (no piloto seguido)">${PACE[m].label}<kbd>${keyName((["ritmoAtacar", "ritmoNormal", "ritmoPoupar"] as const)[i])}</kbd></button>`).join("")}
-        </div></div>
-        <div class="row2"><span class="lbl">Motor</span><div class="seg engine">
-          ${(["rich", "normal", "lean"] as EngineMode[]).map((m, i) => `<button data-engine="${m}" title="Atalho: ${keyName((["motorRica", "motorNormal", "motorPobre"] as const)[i])} (no piloto seguido)">${ENGINE[m].label}<kbd>${keyName((["motorRica", "motorNormal", "motorPobre"] as const)[i])}</kbd></button>`).join("")}
-        </div></div>
+        <div class="trio">
+          ${dialHtml("pace", "Ritmo", "Ritmo = tempo × pneu", (["push", "normal", "conserve"] as PaceMode[]).map((m, i) => [m, PACE[m].label, (["ritmoAtacar", "ritmoNormal", "ritmoPoupar"] as const)[i]]))}
+          ${dialHtml("engine", "Motor", "Motor = tempo × combustível", (["rich", "normal", "lean"] as EngineMode[]).map((m, i) => [m, ENGINE[m].label, (["motorRica", "motorNormal", "motorPobre"] as const)[i]]))}
+          <div class="otcell"><div class="dial two otctl"><div class="opts"><i class="otring"></i><i class="thumb"></i><span class="pips"></span><button data-otauto="1" title="O piloto decide quando usar as cargas (colado no da frente, a menos de 0,6 s)">Auto</button><button data-otauto="0" title="Só quando você aperta o ⚡ (embaixo do botão)">Manual</button><button class="otgo" data-ot>⚡</button></div><span class="cl">Ultrapassagem</span></div></div>
+        </div>
         <div class="row2"><span class="lbl">Equipe</span><div class="seg order">
           <button data-order="letPass" title="Este carro abre espaço e deixa o companheiro de equipe passar">Deixar passar</button><button data-order="hold" title="Os dois carros da equipe não brigam entre si">Manter</button><button data-order="none" title="Os dois podem brigar normalmente">Livre</button>
         </div></div>
         </div>
         <div class="pane" data-pane="box">
         <div class="row2"><span class="lbl">Pneu</span><div class="seg next">
-          ${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${t}</button>`).join("")}
+          ${ALL_COMPOUNDS.map((t) => `<button class="t${t}" data-next="${t}" title="${COMPOUNDS[t].label}">${tyreIcon(t, COMPOUNDS[t].label)}</button>`).join("")}
         </div></div>
         <div class="fuelrow"><span class="lbl" style="width:46px">Comb.</span>
           <span class="stepper"><button data-fuel="-1">−</button><b class="fval"></b><button data-fuel="1">+</button></span>
           <button class="btn small" data-fuelauto>até o fim</button>
         </div>
-        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--muted)">
-          <span class="plansum"></span><button class="btn small" data-plantoggle>editar plano</button>
+        <div class="pwin" title="Janela de parada: em verde as voltas boas pra parar (pelo desgaste do pneu e o combustível); traço branco = agora, amarelo = parada planejada"><span class="lbl">${icon("tempo")}Janela</span><div class="pwbar"><i class="pw-w"></i><i class="pw-p"></i><i class="pw-n"></i></div><small class="pwtxt"></small></div>
+        <div class="rejoin"></div>
+        <div class="planhead" style="display:flex;justify-content:space-between;align-items:center;margin-top:3px;font-size:12px;color:var(--muted)">
+          <span class="plansum"></span><span class="pb"><button class="btn small" data-pb="-2" title="Plano B: antecipar a próxima parada 2 voltas (responder ao undercut)">◀ 2</button><button class="btn small" data-pb="2" title="Plano B: esticar a próxima parada 2 voltas">2 ▶</button></span><button class="btn small" data-plantoggle>editar</button>
         </div>
         <div class="planedit" style="display:none"></div>
         </div>
         <div class="boxrow"><button class="boxbtn"></button></div>
+        <div class="quick"><button data-fight="atk" title="Atacar o da frente (tecla ${keyName("atacar")})">ATK</button><button data-fight="def" title="Defender (tecla ${keyName("defender")})">DEF</button><button class="otb" data-ot title="Modo ultrapassagem">⚡ <span class="otn"></span></button><button data-pacecycle title="Ritmo: clique pra trocar (Atacar, Normal, Poupar)">Rit <b class="pcur"></b></button><button data-boxq title="Chamar para o box / cancelar">BOX</button></div>
         <div hidden><div class="wlabel"></div><div class="wear"><i></i></div><div class="flabel"></div><div class="faultlabel"></div></div>`;
       const cs = this.cardState.get(c.id)!;
       bindParts(card, c.id, (cmd) => this.hooks.send(cmd));
@@ -409,14 +552,67 @@ export class Hud {
       };
       // clicar em qualquer lugar do card (fora dos botões) segue o piloto
       card.addEventListener("click", (e) => {
-        if ((e.target as HTMLElement).closest("button, input, label")) return;
+        if ((e.target as HTMLElement).closest("button, input, label, .dial")) return;
         this.hooks.setFollow(c.id);
       });
+      // MÍNIMO: o Ritmo alterna Atacar → Normal → Poupar; o BOX rápido usa o botão de box de verdade
+      card.querySelector("[data-pacecycle]")!.addEventListener("click", () => {
+        const seq: PaceMode[] = ["push", "normal", "conserve"];
+        this.hooks.send({ type: "pace", carId: c.id, mode: seq[(seq.indexOf(c.pace) + 1) % 3] });
+      });
+      card.querySelector("[data-boxq]")!.addEventListener("click", () => card.querySelector<HTMLButtonElement>(".boxbtn")!.click());
       card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) =>
         b.addEventListener("click", () => this.hooks.send({ type: "pace", carId: c.id, mode: b.dataset.pace as PaceMode })),
       );
       card.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) =>
         b.addEventListener("click", () => this.hooks.send({ type: "engine", carId: c.id, mode: b.dataset.engine as EngineMode })),
+      );
+      // botões giratórios: clicar ou arrastar em qualquer lugar do botão escolhe a posição pela direção a partir
+      // do centro (não só em cima do texto); clica no botão da posição, então atalhos/voz seguem iguais
+      card.querySelectorAll<HTMLElement>(".dial .opts").forEach((o) => {
+        let cur = -1;
+        const pick = (e: PointerEvent) => {
+          const r = o.getBoundingClientRect();
+          const a = (Math.atan2(e.clientX - (r.left + r.width / 2), r.top + (39 / o.offsetHeight) * r.height - e.clientY) * 180) / Math.PI;
+          const bs = [...o.querySelectorAll<HTMLButtonElement>("button:not(.otgo)")];
+          const angs = bs.length === 2 ? [-50, 50] : [-62, 0, 62];
+          const i = angs.reduce((best, x, k) => (Math.abs(a - x) < Math.abs(a - angs[best]) ? k : best), 0);
+          if (i === cur || bs[i].disabled) return;
+          cur = i;
+          bs[i].click();
+        };
+        o.addEventListener("pointerdown", (e) => {
+          if (e.button !== 0 || (e.target as HTMLElement).closest(".otgo")) return;
+          e.preventDefault();
+          try {
+            o.setPointerCapture(e.pointerId);
+          } catch {
+            /* ponteiro sintético (teste) */
+          }
+          cur = [...o.querySelectorAll("button:not(.otgo)")].findIndex((b) => b.classList.contains("on"));
+          pick(e);
+          o.onpointermove = (ev) => {
+            if (o.hasPointerCapture(ev.pointerId)) pick(ev);
+          };
+        });
+        // (o clique em cima do texto já foi tratado no pointerdown)
+        o.addEventListener("click", (e) => e.target !== o && e.detail > 0 && !(e.target as HTMLElement).closest(".otgo") && e.stopPropagation(), true);
+      });
+      card.querySelectorAll<HTMLButtonElement>("[data-fight]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const m = b.dataset.fight as FightMode;
+          this.hooks.send({ type: "fight", carId: c.id, mode: c.fight === m ? null : m });
+          this.update();
+        }),
+      );
+      card.querySelectorAll<HTMLButtonElement>("[data-ot]").forEach((b) =>
+        b.addEventListener("click", () => {
+          this.hooks.send({ type: "ot", carId: c.id });
+          this.update();
+        }),
+      );
+      card.querySelectorAll<HTMLButtonElement>("[data-otauto]").forEach((b) =>
+        b.addEventListener("click", () => this.hooks.send({ type: "otAuto", carId: c.id, on: b.dataset.otauto === "1" })),
       );
       card.querySelectorAll<HTMLButtonElement>("[data-order]").forEach((b) =>
         b.addEventListener("click", () => this.hooks.send({ type: "order", carId: c.id, mode: b.dataset.order as TeamOrder })),
@@ -464,7 +660,15 @@ export class Hud {
         cs.tab = t;
         this.applyTab(card, cs);
       };
-      card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab as CardState["tab"])));
+      // (no MÍNIMO a aba abre num balão em cima do card, sem mudar o tamanho dele; clicar de novo fecha)
+      card.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const t = b.dataset.tab as CardState["tab"];
+          if (this.level === 2) card.classList.toggle("pop", !(card.classList.contains("pop") && cs.tab === t));
+          setTab(t);
+        }),
+      );
+      card.querySelector(".ucd")!.addEventListener("click", () => setTab("car"));
       this.applyTab(card, cs);
       // botão do alerta: a ação certa pro problema mais urgente
       card.querySelector(".calert")!.addEventListener("click", (e) => {
@@ -472,12 +676,47 @@ export class Hud {
         if (!b) return;
         const a = b.dataset.act;
         if (a === "box" && c.pit === "none" && !c.boxRequest) this.hooks.send({ type: "box", carId: c.id, compound: cs.next, fuel: this.fuelFor(c) });
-        if (a === "save") {
-          this.hooks.send({ type: "engine", carId: c.id, mode: "lean" });
-          this.hooks.send({ type: "pace", carId: c.id, mode: "conserve" });
-        }
+        // (o ritmo não mexe no combustível: só a mistura pobre economiza)
+        if (a === "save") this.hooks.send({ type: "engine", carId: c.id, mode: "lean" });
+        if (a === "complain") this.hooks.send({ type: "complain", carId: c.id });
         if (a === "cool") this.hooks.send({ type: "pace", carId: c.id, mode: "conserve" });
         if (a === "push") this.hooks.send({ type: "pace", carId: c.id, mode: "push" });
+        this.update();
+      });
+      // Plano B: antecipa/estica a próxima parada sem abrir o editor
+      card.querySelectorAll<HTMLButtonElement>("[data-pb]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const plan: PlannedStop[] = c.plan.slice(c.planIdx).map((s) => ({ ...s }));
+          if (!plan[0]) return;
+          const [lo, hi] = stopLapRange(plan, 0, c.lap + 1, this.race.laps);
+          plan[0].lap = Math.max(lo, Math.min(hi, plan[0].lap + Number(b.dataset.pb)));
+          this.hooks.send({ type: "plan", carId: c.id, plan });
+          c.plan = plan.filter((s) => s.lap > c.lap).sort((a, b2) => a.lap - b2.lap);
+          c.planIdx = 0;
+          cs.planSig = "";
+          this.update();
+        }),
+      );
+      // ESTRATÉGIA: liga/desliga e o número de cada regra (fica salvo pro carro)
+      card.querySelector(".stratlist")!.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
+        if (!b) return;
+        const on = b.dataset.stOn, vId = b.dataset.stV;
+        if (on && cs.strat[on]) {
+          cs.strat[on].on = !cs.strat[on].on;
+          cs.strat[on].fired = false;
+        }
+        const p = vId ? STRAT_RULES.find((r) => r.id === vId)?.param : undefined;
+        if (vId && p) cs.strat[vId].v = Math.max(p.min, Math.min(p.max, cs.strat[vId].v + Number(b.dataset.d) * p.step));
+        saveStrat(cs.slot, cs.strat);
+        this.update();
+      });
+      // INFO: chuva chegando → box pro intermediário
+      card.querySelector(".infolist")!.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-inter]");
+        if (!b || c.pit !== "none" || c.boxRequest) return;
+        cs.next = "I";
+        this.hooks.send({ type: "box", carId: c.id, compound: "I", fuel: this.fuelFor(c) });
         this.update();
       });
       card.querySelector("[data-plantoggle]")!.addEventListener("click", () => {
@@ -492,14 +731,23 @@ export class Hud {
         const plan: PlannedStop[] = c.plan.slice(c.planIdx).map((s) => ({ ...s }));
         const i = Number(b.dataset.i);
         const st = plan[i];
-        if (b.dataset.act === "lap" && st) st.lap = Math.max(c.lap + 1, Math.min(this.race.laps - 1, st.lap + Number(b.dataset.d)));
+        if (b.dataset.act === "lap" && st) {
+          const [lo, hi] = stopLapRange(plan, i, c.lap + 1, this.race.laps);
+          st.lap = Math.max(lo, Math.min(hi, st.lap + Number(b.dataset.d)));
+        }
         if (b.dataset.act === "fuel" && st) st.fuel = this.kg(Math.max(0, this.laps(st.fuel) + Number(b.dataset.d)));
         if (b.dataset.act === "tyre" && st) st.compound = b.dataset.c as Compound;
+        if (b.dataset.act === "close") {
+          cs.planOpen = false;
+          cs.planSig = "";
+          this.update();
+          return;
+        }
         if (b.dataset.act === "del") plan.splice(i, 1);
         if (b.dataset.act === "add") {
-          const last = plan[plan.length - 1]?.lap ?? c.lap + 1;
-          const lap = Math.min(this.race.laps - 1, Math.max(c.lap + 2, last + Math.max(2, Math.round(this.race.laps * 0.25))));
-          plan.push({ lap, compound: cs.next, fuel: this.kg(this.race.laps - lap) });
+          // (só se couber: cada parada a MIN_STINT voltas da anterior, antes da última volta)
+          const lap = nextStopLap(plan, c.lap + 1, this.race.laps);
+          if (lap !== null && plan.length < MAX_STOPS) plan.push({ lap, compound: cs.next, fuel: this.kg(this.race.laps - lap) });
         }
         this.hooks.send({ type: "plan", carId: c.id, plan });
         // mostra na hora, sem esperar o servidor
@@ -530,6 +778,9 @@ export class Hud {
     };
     const num = (x: number) => x.toFixed(1).replace(".", ",");
     set(".lapn", c.finished ? "🏁" : `volta ${Math.min(race.laps, Math.max(1, c.lap + 1))}/${race.laps}`);
+    // humor do piloto (bravo erra mais e pede pra sair do "Manter"; feliz anda um pouco mais)
+    const md = c.mood ?? MOOD_START, face = md < MOOD_BAD ? "bravo" : md > MOOD_GOOD ? "feliz" : "normal";
+    set(".mood", `<span class="md-${face}" title="Humor: ${face === "bravo" ? "irritado (erra mais)" : face === "feliz" ? "feliz (anda um pouco mais)" : "normal"}">${icon(face)}</span>`);
     // diferença pro da frente e pro de trás (verde/amarelo = a menos de 1 s, zona de DRS)
     const gapTo = (i: number, j: number) => {
       const a = gaps[i], b = gaps[j];
@@ -553,17 +804,80 @@ export class Hud {
     const fuelOk = fuelLaps >= need || c.finished;
     const fCol = fuelOk ? "var(--ok)" : fuelLaps < 3 ? "var(--soft)" : "var(--warn)";
     const fault = c.fault && !c.retired ? FAULTS[c.fault] : null;
-    const dmgChip = fault
-      ? `<span class="chip bad" title="${esc(fault.fix)}">⚠ ${esc(fault.label.toUpperCase())}</span>`
-      : c.damage > 0.05
-        ? `<span class="chip bad" title="Estimativa de quanto o dano custa por volta: depende da pista (travada sofre mais com asa quebrada), da chuva e do ritmo (atacando perde menos, mas erra mais). Cada volta varia">DANO ~${num(race.damageLoss(c))} s/V</span>`
-        : `<span class="chip good">SEM DANOS</span>`;
+    // dano: um ícone por cor que existir (verde = tudo certo); a lista fica na aba 🩺 CARRO
+    const issues = carIssues(c, race);
+    const sevs = [...new Set(issues.map((x) => x.sev))].sort((a, b) => a - b) as Severity[];
+    const dmgTip = issues.length ? issues.map((x) => x.t).join(" · ") : "Carro sem problemas";
+    const dmgIcons = `<span class="dmgs" title="${esc(dmgTip)} (detalhes na aba CARRO)">${(sevs.length ? sevs : [0 as Severity]).map((s) => dmgIcon(s)).join("")}</span>`;
+    // embaixo do carro: um triângulo por problema (3 amarelos = 3 triângulos), do mais grave pro mais leve
+    const dmgAll = `<span class="dmgs all" title="${esc(dmgTip)} (detalhes na aba CARRO)">${(issues.length ? issues.map((x) => x.sev) : [0 as Severity]).map((s) => dmgIcon(s)).join("")}</span>`;
+    // temperatura do pneu (azul frio, verde ideal, vermelho quente)
+    const tLab = tyreTempLabel(c.tyreTemp ?? 0.6), tTemp = `<span class="ttemp ${tLab}" title="Pneu ${tLab} (${Math.round((c.tyreTemp ?? 0.6) * 100)}%)">${icon("temp")}</span>`;
     set(
       ".chips",
-      `<span class="chip" title="${esc(COMPOUNDS[c.compound].label)} · ${c.tyreLaps} voltas · ${rubber}% de borracha">${tyreIcon(c.compound)}${esc(COMPOUNDS[c.compound].label.toUpperCase())} · ${c.tyreLaps} V <span class="cbar"><i style="width:${rubber}%;background:${tCol}"></i></span>${rubber}%</span>` +
-        `<span class="chip" title="Combustível pra ${num(fuelLaps)} voltas · ${next && need < left ? `próxima parada em ${num(need)}` : `faltam ${num(left)}`}">⛽ ${num(fuelLaps)} V <span class="cbar"><i style="width:${Math.min(100, (fuelLaps / Math.max(1, need)) * 100)}%;background:${fCol}"></i></span></span>` +
-        dmgChip,
+      `<span class="chip" title="${esc(COMPOUNDS[c.compound].label)} · ${c.tyreLaps} voltas · ${rubber}% de borracha">${tyreIcon(c.compound)}${esc(COMPOUNDS[c.compound].label.toUpperCase())} · ${c.tyreLaps} V <span class="cbar"><i style="width:${rubber}%;background:${tCol}"></i></span>${rubber}%${tTemp}</span>` +
+        `<span class="chip" title="Combustível pra ${num(fuelLaps)} voltas · ${next && need < left ? `próxima parada em ${num(need)}` : `faltam ${num(left)}`}">${icon("fuel")} ${num(fuelLaps)} V <span class="cbar"><i style="width:${Math.min(100, (fuelLaps / Math.max(1, need)) * 100)}%;background:${fCol}"></i></span></span>` +
+        `<span class="chip">${dmgIcons}</span>`,
     );
+    // embaixo do carro (completo): ícone do pneu + %, combustível em voltas e o dano
+    set(".uct", `${tyreIcon(c.compound, `${COMPOUNDS[c.compound].label} · ${c.tyreLaps} voltas · ${rubber}% de borracha`)}<b style="color:${tCol}">${rubber}%</b>${tTemp}`);
+    set(".ucf", `<span title="Combustível pra ${num(fuelLaps)} voltas">${icon("fuel")}</span><b style="color:${fCol}">${num(fuelLaps)} V</b>`);
+    set(".ucd", dmgAll);
+    set(
+      ".carlist",
+      (issues.length ? issues : [{ sev: 0 as Severity, t: "Tudo certo com o carro", sub: "Sem danos, sem problemas mecânicos" }])
+        .map((x) => `<div class="crow">${dmgIcon(x.sev)}<span><b>${esc(x.t)}</b><small>${esc(x.sub)}</small></span></div>`)
+        .join("") +
+        `<div class="crow info">${icon("temp")}<span><b>Pneu ${tyreTempLabel(c.tyreTemp ?? 0.6)} (${Math.round((c.tyreTemp ?? 0.6) * 100)}%)</b><small>Frio: pouca aderência · quente: gasta mais</small></span></div>` +
+        `<div class="crow info">${icon("vento")}<span><b>${c.dirtyAir && !c.finished ? "Ar sujo" : "Ar limpo"}</b><small>${c.dirtyAir && !c.finished ? "Colado atrás de outro: perde aderência nas curvas e esquenta o pneu" : "Sem carro colado na frente"}</small></span></div>`,
+    );
+
+    // briga: a faixa fica sempre no lugar (o card não muda de tamanho); acende com alguém a menos de 1 s
+    // ou com ATACAR/DEFENDER ligado
+    const racing = live && !c.finished && c.pit === "none" && race.phase === "racing" && !race.sc.active;
+    const ga = ahead && close(idx - 1, idx) ? gaps[idx].seconds - gaps[idx - 1].seconds : 99;
+    const gb = behind && close(idx, idx + 1) ? gaps[idx + 1].seconds - gaps[idx].seconds : 99;
+    const bt = card.querySelector<HTMLElement>(".battle")!;
+    // cada lado fixo: o da frente junto do ATACAR, o de trás junto do DEFENDER (nada troca de lugar)
+    const nearA = racing && ga < 1, nearB = racing && gb < 1;
+    const showBt = nearA || nearB || (racing && !!c.fight);
+    bt.classList.toggle("idle", !showBt);
+    const fLeft = Math.max(1, Math.ceil((c.fightTill - race.dist(c)) / race.track.L));
+    set(".bt-a", nearA ? `▲ ${esc(ahead!.driver.short)} <b>${num(ga)}</b>` : "▲ —");
+    set(".bt-b", nearB ? `▼ ${esc(behind!.driver.short)} <b>${num(gb)}</b>` : "▼ —");
+    card.querySelector(".bt-a")!.classList.toggle("off", !nearA);
+    card.querySelector(".bt-b")!.classList.toggle("off", !nearB);
+    bt.classList.toggle("pulse", showBt && !c.fight);
+    card.querySelectorAll<HTMLButtonElement>("[data-fight]").forEach((b) => {
+      const m = b.dataset.fight, on = c.fight === m;
+      // sem carro daquele lado o botão apaga (a não ser que a briga já esteja ligada: aí dá pra desligar)
+      b.disabled = !racing || (!on && !(m === "atk" ? nearA : nearB));
+      b.classList.toggle("on", on);
+      // (voltas que faltam num selo no canto: o botão não muda de largura)
+      const l = on ? `${fLeft}V` : "";
+      if (b.dataset.l !== l) b.dataset.l = l;
+    });
+    // modo ultrapassagem
+    const otOn = race.otOn(c);
+    card.querySelectorAll(".otn").forEach((e) => (e.textContent = String(c.ot)));
+    // MÍNIMO: ritmo atual no botão que alterna e o BOX armado
+    set(".pcur", "ANP"[["push", "normal", "conserve"].indexOf(c.pace)] ?? "N");
+    card.querySelector("[data-boxq]")!.classList.toggle("armed", !!c.boxRequest);
+    // (no AUTO quem aciona é o piloto: o ⚡ só aperta no MANUAL; a carga é bateria, não gasta combustível)
+    const otTip = otOn ? `Ultrapassagem ligada: ${OT_SECS} s com a bateria` : c.ot <= 0 ? "Sem cargas de bateria" : c.lap < 1 && !c.otAuto ? "Libera na volta 2" : c.otAuto ? "No AUTO o piloto usa sozinho: passe pro MANUAL pra apertar" : `Usar uma carga da bateria agora: ${OT_SECS} s de potência extra, não gasta combustível (tecla ${keyName("ultrapassagem")})`;
+    card.querySelectorAll<HTMLButtonElement>("[data-ot]").forEach((b) => {
+      b.disabled = c.otAuto || (!otOn && (c.ot <= 0 || !racing || c.lap < 1));
+      b.classList.toggle("live", otOn);
+      if (b.title !== otTip) b.title = otTip;
+    });
+    // as cargas em arco embaixo do botão, metade de cada lado do ⚡ (apagam da direita pra esquerda)
+    set(".pips", Array.from({ length: OT_CHARGES }, (_, n) => { const h = OT_CHARGES / 2, a = ((n < h ? -(85 + n * 25) : 85 + (OT_CHARGES - 1 - n) * 25) * Math.PI) / 180; return `<i class="${n < c.ot ? "" : n === c.ot ? "used just" : "used"}" style="left:${(46 + 26 * Math.sin(a) - 4.5).toFixed(1)}px;top:${(39 - 26 * Math.cos(a) - 2).toFixed(1)}px;--r:${((a * 180) / Math.PI).toFixed(0)}deg"></i>`; }).join(""));
+    // a borda amarela do botão = o que sobra da volta de impulso (vai se consumindo)
+    const otc = card.querySelector<HTMLElement>(".otctl")!;
+    otc.classList.toggle("on", otOn);
+    otc.style.setProperty("--otp", otOn ? Math.max(0, Math.min(1, (c.otTill - race.time) / OT_SECS)).toFixed(3) : "0");
+    setDial(card.querySelector<HTMLElement>(".otctl")!, c.otAuto ? "auto" : "manual", c.otAuto ? 0 : 1);
+    card.querySelectorAll<HTMLButtonElement>("[data-otauto]").forEach((b) => b.classList.toggle("on", (b.dataset.otauto === "1") === c.otAuto));
 
     // um alerta por vez: o mais urgente, já com o botão certo
     const canBox = c.pit === "none" && !c.boxRequest && !c.finished && !c.retired;
@@ -585,12 +899,17 @@ export class Hud {
             : `Estimado, varia por volta. Atacar perde menos, mas escapa mais`;
       al = { lvl: "bad", t: `⚠ Carro danificado: ~${num(race.damageLoss(c))} s por volta`, sub, act: "box", btn: "BOX AGORA" };
     }
+    else if (c.incident && race.time - c.incident.t < COMPLAIN_SECS && !c.retired) {
+      // toque com outro carro: dá pra reclamar na direção de prova (por pouco tempo)
+      const o = race.cars.find((x) => x.id === c.incident!.with);
+      al = { lvl: "info", t: `Toque com ${o?.driver.short ?? "outro carro"}: reclamar?`, sub: `Se ele causou, leva 5 s · ${Math.ceil(COMPLAIN_SECS - (race.time - c.incident.t))} s pra decidir`, act: "complain", btn: "RECLAMAR" };
+    }
     else if (!fuelOk && fuelLaps < need - 0.3) {
       const saving = c.engine === "lean";
       al = {
         lvl: fuelLaps < 3 ? "bad" : "warn",
         t: `⛽ Falta combustível pra ${num(need - fuelLaps)} voltas${need < left ? " (até a parada)" : ""}`,
-        sub: saving ? "Já está poupando: talvez precise parar" : "Mistura pobre e ritmo de poupar economizam",
+        sub: saving ? "Já está poupando: talvez precise parar" : "Mistura pobre economiza combustível",
         act: saving ? (canBox ? "box" : undefined) : "save",
         btn: saving ? "BOX AGORA" : "POUPAR",
       };
@@ -614,8 +933,8 @@ export class Hud {
               : c.pit !== "none"
                 ? "No pit lane"
                 : upc
-                  ? `✓ Tudo certo · plano: box na volta ${upc.lap} (${COMPOUNDS[upc.compound].label})`
-                  : "✓ Tudo certo · sem parada planejada";
+                  ? `✓ Parada em ${upc.lap - c.lap <= 1 ? "1 volta" : `${upc.lap - c.lap} voltas`} (${COMPOUNDS[upc.compound].label})${cs.rejoin ? ` · parando agora: P${cs.rejoin}` : ""}`
+                  : `✓ Sem parada planejada${cs.rejoin ? ` · parando agora: P${cs.rejoin}` : ""}`;
       al = { lvl: "calm", t };
     }
     const box = card.querySelector<HTMLElement>(".calert")!;
@@ -625,46 +944,188 @@ export class Hud {
       if (box.className !== cls) box.className = cls;
       const tip = al.sub ? `${al.t} · ${al.sub}` : al.t;
       if (box.title !== tip) box.title = tip;
+      // (MÍNIMO: sem a faixa, o card pinta a borda na cor do aviso e o texto aparece no mouse)
+      if (card.dataset.alert !== al.lvl) card.dataset.alert = al.lvl;
+      const ctip = al.lvl === "calm" ? "" : tip;
+      if (card.title !== ctip) card.title = ctip;
       set(".calert", `<div class="t">${esc(al.t)}${al.sub ? `<small>${esc(al.sub)}</small>` : ""}</div>${al.act ? `<button data-act="${al.act}">${al.btn}</button>` : ""}`);
     }
   }
 
   /** troca a aba de dentro do card (o card não muda de tamanho) */
   private applyTab(card: HTMLElement, cs: CardState) {
+    const was = card.dataset.tab;
     card.querySelectorAll<HTMLElement>(".pane").forEach((f) => (f.hidden = f.dataset.pane !== cs.tab));
     card.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === cs.tab));
     card.classList.toggle("tabbox", cs.tab === "box");
+    card.dataset.tab = cs.tab;
+    if (was && was !== cs.tab && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      for (const el of [card.querySelector<HTMLElement>(`.pane[data-pane="${cs.tab}"]`), card.querySelector<HTMLElement>(`.cpane[data-cpane="${cs.tab}"]`), card.querySelector<HTMLElement>(".statuscol")])
+        el?.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" });
+  }
+
+  private lapHist = new Map<string, { last: number | null; laps: number[] }>();
+
+  /** ritmo recente (média das últimas voltas limpas; volta de box/safety car fica de fora) */
+  private pace(c: CarState): number | null {
+    const laps = this.lapHist.get(c.id)?.laps ?? [];
+    if (!laps.length) return null;
+    const best = Math.min(...laps), clean = laps.filter((t) => t < best * 1.04).slice(-3);
+    return clean.reduce((a, b) => a + b, 0) / clean.length;
+  }
+
+  /** aba INFO (rivais, ritmo comparado, chuva) e a parte de estratégia do BOX (janela, onde volta, Plano B) */
+  private renderStrategy(c: CarState, card: HTMLElement, cs: CardState, idx: number, order: CarState[], gaps: { laps: number; seconds: number }[]) {
+    const race = this.race;
+    const set = (sel: string, html: string) => {
+      const el = card.querySelector<HTMLElement>(sel)!;
+      if (el.innerHTML !== html) el.innerHTML = html;
+    };
+    const num = (x: number) => x.toFixed(1).replace(".", ",");
+    const live = !c.retired && !c.finished && idx >= 0 && race.phase !== "lights";
+    const my = this.pace(c);
+    const lapT = my ?? c.lastLap ?? c.targetLap;
+    const total = (i: number) => gaps[i].laps * lapT + gaps[i].seconds;
+
+    // ---- INFO: o da frente e o de trás (pneu, distância, quem ganha tempo e quando alcança) ----
+    const rival = (o: CarState | undefined, j: number, front: boolean) => {
+      if (!live || !o || o.retired) return `<div class="irow off">${front ? "▲" : "▼"} —</div>`;
+      const gap = Math.abs(total(j) - total(idx)), op = this.pace(o);
+      let trend = `<small>ritmo: falta 1 volta</small>`;
+      if (race.sc.active) trend = `<small>safety car</small>`;
+      else if (my !== null && op !== null) {
+        const d = op - my; // > 0: eu sou mais rápido
+        // previsão em faixas (o número exato pulava: distância ÷ diferença pequena), só com diferença que conta
+        const when = (closing: number) =>
+          gap < 0.6 ? "colado" : (() => {
+            const n = gap / closing;
+            return n > race.lapsLeft(c) ? (front ? "não pega" : "não chega") : `${front ? "pega" : "chega"} em ${n <= 2 ? "1–2" : n <= 5 ? "3–5" : "6+"} V`;
+          })();
+        trend =
+          Math.abs(d) < 0.15
+            ? `<b>mesmo ritmo</b>`
+            : front
+              ? d > 0
+                ? `<b class="good">ganha ${num(d)}/v</b><small>${when(d)}</small>`
+                : `<b class="bad">perde ${num(-d)}/v</b>`
+              : d < 0
+                ? `<b class="bad">ele ganha ${num(-d)}/v</b><small>${when(-d)}</small>`
+                : `<b class="good">abre ${num(d)}/v</b>`;
+      }
+      return `<div class="irow"><span class="iw">${front ? "▲" : "▼"} ${esc(o.driver.short)}</span>${tyreIcon(o.compound, `${COMPOUNDS[o.compound].label} · ${o.tyreLaps} voltas`)}<span class="it">${o.tyreLaps}V</span><span class="ig">${num(gap)} s</span>${trend}</div>`;
+    };
+    const f = race.weather.forecast, nowLap = race.currentLap();
+    const dry = c.compound === "S" || c.compound === "M" || c.compound === "H";
+    const rainTxt =
+      race.rain > 0
+        ? `Chovendo · pista ${Math.round(race.wet * 100)}% molhada`
+        : f && f.to >= nowLap
+          ? f.from > nowLap
+            ? `Chuva em ~${f.from - nowLap} voltas (${f.chance}%)`
+            : `Chuva pode chegar a qualquer volta (${f.chance}%)`
+          : race.wet > 0.05
+            ? `Secando · pista ${Math.round(race.wet * 100)}% molhada`
+            : "Sem chuva prevista";
+    const interBtn = live && dry && (race.rain > 0.2 || race.wet > 0.3) && c.pit === "none" && !c.boxRequest ? `<button data-inter title="Chama pro box e põe intermediário">BOX INTER</button>` : "";
+    set(
+      ".infolist",
+      rival(idx > 0 ? order[idx - 1] : undefined, idx - 1, true) +
+        rival(idx < order.length - 1 ? order[idx + 1] : undefined, idx + 1, false) +
+        `<div class="irow you"><span class="iw">${icon("tempo")}Você</span><span>${my !== null ? `ritmo ${fmtLap(my)}` : "ritmo: falta 1 volta"}</span></div>` +
+        `<div class="irow rain">${icon("chuva")}<span>${rainTxt}</span>${interBtn}</div>`,
+    );
+
+    // ---- BOX: janela de parada (desgaste e combustível) ----
+    const L = race.laps, pct = (lap: number) => `${Math.max(0, Math.min(100, (lap / L) * 100)).toFixed(1)}%`;
+    const rate = c.tyreLaps > 0 ? c.wear / c.tyreLaps : 0;
+    const fuelEnd = c.lap + c.fuel / race.consumption(c);
+    const at = (w: number) => (rate > 0 ? c.lap + Math.max(0, (w - c.wear) / rate) : L);
+    const w0 = Math.min(L, at(0.6)), w1 = Math.min(L, at(0.8), fuelEnd);
+    const wEl = card.querySelector<HTMLElement>(".pw-w")!;
+    wEl.style.left = pct(Math.min(w0, w1));
+    wEl.style.width = `${Math.max(1.5, ((Math.max(w1, w0) - Math.min(w0, w1)) / L) * 100).toFixed(1)}%`;
+    card.querySelector<HTMLElement>(".pw-n")!.style.left = pct(c.lap);
+    const next = upcomingStop(c);
+    const pEl = card.querySelector<HTMLElement>(".pw-p")!;
+    pEl.hidden = !next;
+    if (next) pEl.style.left = pct(next.lap);
+    set(".pwtxt", !live ? "" : rate <= 0 ? "falta 1 volta" : w0 >= L && fuelEnd >= L ? "vai até o fim" : `V${Math.ceil(Math.min(w0, w1))}–${Math.max(Math.ceil(Math.min(w0, w1)), Math.floor(Math.max(w0, w1)))}`);
+
+    // ---- BOX: se parar agora, onde volta ----
+    let rj = "";
+    cs.rejoin = null;
+    if (live && c.pit === "none") {
+      const loss = race.pitLossEstimate(c, this.fuelFor(c));
+      const mine = total(idx) + loss;
+      let pos = 1, fT = -Infinity;
+      let front = null as CarState | null;
+      order.forEach((o, j) => {
+        if (o === c || o.retired || o.finished) return;
+        const t = total(j);
+        if (t < mine) {
+          pos++;
+          if (t > fT) [fT, front] = [t, o];
+        }
+      });
+      cs.rejoin = pos;
+      rj = `Se parar agora: volta em <b>P${pos}</b>${front ? `, atrás do ${esc(front.driver.short)}` : ""} <small>(perde ~${Math.round(loss)} s)</small>`;
+    }
+    set(".rejoin", rj);
+    card.querySelectorAll<HTMLButtonElement>("[data-pb]").forEach((b) => (b.disabled = !next || !live));
+  }
+
+  /** aba ESTRATÉGIA: mostra as regras e executa as ligadas (mesmos comandos dos botões) */
+  private renderStrat(c: CarState, card: HTMLElement, cs: CardState, idx: number, order: CarState[], gaps: { laps: number; seconds: number }[]) {
+    const race = this.race;
+    for (const r of STRAT_RULES) {
+      const row = card.querySelector<HTMLElement>(`[data-sr="${r.id}"]`)!, s = cs.strat[r.id];
+      row.classList.toggle("on", s.on);
+      const t = r.text(s.v), el = row.querySelector<HTMLElement>(".st")!;
+      if (el.innerHTML !== t) el.innerHTML = t;
+      const sh = r.short(s.v), es = row.querySelector<HTMLElement>(".ss")!;
+      if (es.innerHTML !== sh) es.innerHTML = sh;
+    }
+    if (idx < 0) return;
+    const near = (i: number, j: number) => (gaps[i] && gaps[j] && gaps[i].laps === gaps[j].laps ? Math.abs(gaps[j].seconds - gaps[i].seconds) : 99);
+    const ga = idx > 0 && !order[idx - 1].retired ? near(idx - 1, idx) : 99;
+    const gb = idx < order.length - 1 && !order[idx + 1].retired ? near(idx, idx + 1) : 99;
+    const left = race.lapsLeft(c), fuelLaps = c.fuel / race.consumption(c), next = upcomingStop(c);
+    const need = next ? Math.min(left, Math.max(0.5, left - (race.laps - next.lap))) : left;
+    const { cmds, note } = runStrat(cs.strat, { race, c, ga, gb, fuelShort: fuelLaps < need - 0.3, fuelFor: this.fuelFor(c), nextStop: next });
+    for (const cmd of cmds) this.hooks.send(cmd);
+    for (const n of note) this.note(`Estratégia · ${c.driver.short}: ${n}`);
   }
 
   private renderPlan(c: CarState, card: HTMLElement, cs: CardState) {
     const upcoming = c.plan.slice(c.planIdx);
     const next = upcoming[0];
-    card.querySelector(".plansum")!.textContent = next
-      ? `Plano: box na volta ${next.lap} · ${COMPOUNDS[next.compound].label} · comb. p/ ${this.laps(next.fuel)} voltas${upcoming.length > 1 ? ` (+${upcoming.length - 1})` : ""}`
-      : "Plano: sem paradas planejadas";
-    card.querySelector<HTMLElement>("[data-plantoggle]")!.textContent = cs.planOpen ? "fechar" : "editar plano";
+    const sum = next
+      ? `Box V${next.lap} · ${COMPOUNDS[next.compound].label} · ${this.laps(next.fuel)}V comb.${upcoming.length > 1 ? ` (+${upcoming.length - 1})` : ""}`
+      : "Sem paradas planejadas";
+    card.querySelectorAll(".plansum").forEach((e) => (e.textContent = sum));
+    card.querySelector<HTMLElement>("[data-plantoggle]")!.textContent = cs.planOpen ? "fechar" : "editar";
     const box = card.querySelector<HTMLElement>(".planedit")!;
     box.style.display = cs.planOpen ? "" : "none";
     const sig = JSON.stringify([upcoming, cs.planOpen, c.lap]);
     if (!cs.planOpen || sig === cs.planSig) return;
     cs.planSig = sig;
+    // (abre por cima das informações do BOX, no lugar delas; cada parada a MIN_STINT voltas da anterior)
+    const canAdd = upcoming.length < MAX_STOPS && nextStopLap(upcoming, c.lap + 1, this.race.laps) !== null;
     box.innerHTML =
-      `<div class="stops" style="margin-top:4px">` +
+      `<div class="pehead"><b>Plano de paradas</b><span><button class="btn small" data-act="add" ${canAdd ? "" : 'disabled title="Não cabe mais parada: no máximo 5, e cada uma pelo menos 2 voltas depois da anterior"'}>+ PARADA</button><button class="btn small" data-act="close">✓ pronto</button></span></div><div class="stops">` +
       upcoming
-        .map(
-          (s, i) => `<div class="stop" style="grid-template-columns:auto 1fr;padding:6px">
-            <b>Parada ${i + 1}</b>
-            <span style="display:flex;justify-content:space-between;align-items:center">
-              <span>volta <span class="stepper"><button data-act="lap" data-i="${i}" data-d="-1">−</button><b>${s.lap}</b><button data-act="lap" data-i="${i}" data-d="1">+</button></span></span>
-              <button class="btn small" data-act="del" data-i="${i}">cancelar</button></span>
-            <span>Pneu</span><div class="seg">${ALL_COMPOUNDS.map(
-              (t) => `<button class="t${t} ${t === s.compound ? "on" : ""}" data-act="tyre" data-i="${i}" data-c="${t}">${t}</button>`,
-            ).join("")}</div>
-            <span>Comb.</span><span class="stepper"><button data-act="fuel" data-i="${i}" data-d="-1">−</button><b>${this.laps(s.fuel)} voltas</b><button data-act="fuel" data-i="${i}" data-d="1">+</button></span>
-          </div>`,
-        )
+        .map((s, i) => {
+          const [lo, hi] = stopLapRange(upcoming, i, c.lap + 1, this.race.laps);
+          return `<div class="stop pe">
+            <b title="Parada ${i + 1}">${i + 1}ª</b>
+            <span class="stepper"><button data-act="lap" data-i="${i}" data-d="-1" ${s.lap <= lo ? "disabled" : ""}>−</button><b>V${s.lap}</b><button data-act="lap" data-i="${i}" data-d="1" ${s.lap >= hi ? "disabled" : ""}>+</button></span>
+            <div class="seg pet">${ALL_COMPOUNDS.map((t) => `<button class="t${t} ${t === s.compound ? "on" : ""}" data-act="tyre" data-i="${i}" data-c="${t}" title="${COMPOUNDS[t].label}">${tyreIcon(t, COMPOUNDS[t].label)}</button>`).join("")}</div>
+            <span class="stepper">${icon("fuel")}<button data-act="fuel" data-i="${i}" data-d="-1">−</button><b>${this.laps(s.fuel)}V</b><button data-act="fuel" data-i="${i}" data-d="1">+</button></span>
+            <button class="btn small" data-act="del" data-i="${i}" title="Cancelar esta parada">✕</button>
+          </div>`;
+        })
         .join("") +
-      `</div><button class="btn small" data-act="add" style="margin-top:6px">+ ADICIONAR PARADA</button>`;
+      `</div>`;
   }
 
   update() {
@@ -774,6 +1235,8 @@ export class Hud {
           if (c.team.id === my && race.phase === "racing") {
             if (!calm) el.animate([{ transform: `translateY(${dy}px) scale(1)` }, { transform: "translateY(0) scale(1.06)", offset: 0.55 }, { transform: "translateY(0) scale(1)" }], { duration: 520, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)", composite: "replace" });
             sound.position(gained);
+            // o card do piloto pisca: verde passou, vermelho foi passado ("reduzir flashes": mais fraco)
+            this.cards.get(c.id)?.animate([{ boxShadow: `inset 0 0 0 2px rgba(${col},${calm ? 0.45 : 0.95}), 0 0 ${calm ? 6 : 18}px rgba(${col},${calm ? 0.25 : 0.6})` }, { boxShadow: "inset 0 0 0 2px rgba(0,0,0,0), 0 0 0 rgba(0,0,0,0)" }], { duration: 700, easing: "ease-out" });
           }
           // carro da sua equipe ganhou posição: o "P" do painel dele dá um pulinho
           if (gained && c.team.id === my) {
@@ -790,7 +1253,9 @@ export class Hud {
     const fc = race.cars.find((c) => c.id === follow);
     const flCar = fl ? race.cars.find((c) => c.id === fl.carId) : null;
     const rainTxt = race.rain > 0.6 ? "🌧 Chuva forte" : race.rain > 0 ? "🌦 Chuva" : race.wet > 0.05 ? "☁ Secando" : "☀ Seco";
-    this.info.innerHTML = `
+    // (resumido: uma linha só, volta · tempo · clima)
+    if (this.infoMini) this.info.innerHTML = `<span class="oneline">V ${race.currentLap()}/${race.laps} · ${race.phase === "lights" ? "--" : fmtClock(race.time)} · ${rainTxt}${race.wet > 0.05 ? ` ${Math.round(race.wet * 100)}%` : ""}</span>`;
+    else this.info.innerHTML = `
       <span>Volta</span><span>${race.currentLap()} / ${race.laps}</span>
       <span>Tempo</span><span>${race.phase === "lights" ? "--" : fmtClock(race.time)}</span>
       <span>Melhor</span><span>${fl && flCar ? `${flCar.driver.short} ${fmtLap(fl.time)}` : "--"}</span>
@@ -809,16 +1274,27 @@ export class Hud {
     }
     if (race.events.length !== this.feedCount) {
       this.feedCount = race.events.length;
-      const mine = [...this.notes].reverse().map((n) => `<div class="me">${esc(n.text)}</div>`);
+      // (resumido: só a última mensagem, numa linha)
+      const mine = (this.feedMini ? [] : [...this.notes].reverse()).map((n) => `<div class="me">${esc(n.text)}</div>`);
       this.feed.innerHTML =
         (this.pinned ? `<div class="me pin">${esc(this.pinned)}</div>` : "") +
         mine.join("") +
         race.events
           .filter((e) => !e.teamId || e.teamId === my)
-          .slice(-(6 - mine.length))
+          .slice(-((this.feedMini ? 1 : 6) - Math.min(mine.length, this.feedMini ? 0 : mine.length)))
           .reverse()
           .map((e) => `<div class="${e.important ? "imp" : ""}">${esc(e.text)}</div>`)
           .join("");
+    }
+
+    // últimas voltas de cada carro (pro ritmo comparado da aba INFO; o cliente não recebe a telemetria)
+    for (const c of race.cars) {
+      const h = this.lapHist.get(c.id) ?? { last: null, laps: [] };
+      if (c.lastLap !== null && c.lastLap !== h.last) {
+        h.laps = [...h.laps, c.lastLap].slice(-4);
+        h.last = c.lastLap;
+      }
+      this.lapHist.set(c.id, h);
     }
 
     // ---- cards do jogador ----
@@ -868,13 +1344,19 @@ export class Hud {
       card.querySelectorAll<HTMLButtonElement>("[data-pace]").forEach((b) => {
         b.classList.toggle("on", b.dataset.pace === c.pace);
         b.disabled = !!c.engineSave && b.dataset.pace === "push";
-        b.title = b.disabled ? "Desligado enquanto poupa o motor" : "";
+        // (a dica original fica guardada; desligado, explica por quê)
+        b.dataset.tip ??= b.title;
+        b.title = b.disabled ? "Desligado enquanto poupa o motor" : b.dataset.tip;
       });
       card.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => {
         b.classList.toggle("on", b.dataset.engine === c.engine);
         b.disabled = !!c.engineSave && b.dataset.engine === "rich";
-        b.title = b.disabled ? "Desligado enquanto poupa o motor" : "";
+        // (a dica original fica guardada; desligado, explica por quê)
+        b.dataset.tip ??= b.title;
+        b.title = b.disabled ? "Desligado enquanto poupa o motor" : b.dataset.tip;
       });
+      setDial(card.querySelector<HTMLElement>('[data-dial="pace"]')!, c.pace, ["push", "normal", "conserve"].indexOf(c.pace));
+      setDial(card.querySelector<HTMLElement>('[data-dial="engine"]')!, c.engine, ["rich", "normal", "lean"].indexOf(c.engine));
       const mate = race.cars.find((o) => o !== c && o.team.id === c.team.id);
       const mateBehind = !!mate && !mate.retired && !mate.finished && race.dist(mate) < race.dist(c);
       card.querySelectorAll<HTMLButtonElement>("[data-order]").forEach((b) => {
@@ -885,9 +1367,11 @@ export class Hud {
       const next = c.boxRequest ?? cs.next;
       card.querySelectorAll<HTMLButtonElement>("[data-next]").forEach((b) => b.classList.toggle("on", b.dataset.next === next));
       const fuelShown = c.boxRequest ? c.boxFuel : this.fuelFor(c);
-      card.querySelector(".fval")!.textContent = `p/ ${this.laps(fuelShown)} v`;
+      card.querySelectorAll(".fval").forEach((e) => (e.textContent = `p/ ${this.laps(fuelShown)} v`));
       card.querySelector<HTMLElement>("[data-fuelauto]")!.classList.toggle("primary", cs.fuelLaps === null);
       this.renderPlan(c, card, cs);
+      this.renderStrategy(c, card, cs, idx, order, gaps);
+      this.renderStrat(c, card, cs, idx, order, gaps);
 
       const rb = card.querySelector<HTMLButtonElement>("[data-retire]")!;
       rb.hidden = c.retired || c.finished;
@@ -895,6 +1379,7 @@ export class Hud {
       rb.classList.toggle("primary", !!c.retireAtBox);
       const box = card.querySelector<HTMLButtonElement>(".boxbtn")!;
       box.className = "boxbtn";
+      box.title = "";
       box.disabled = false;
       if (c.retireAtBox && !c.retired) {
         box.textContent = "🏳 ABANDONANDO: INDO PRO BOX";
@@ -912,16 +1397,35 @@ export class Hud {
         box.textContent = "NO PIT LANE";
         box.classList.add("inpit");
       } else if (c.boxRequest) {
-        box.textContent = `BOX, BOX! ${COMPOUNDS[c.boxRequest].label} · comb. p/ ${this.laps(c.boxFuel)} v · cancelar`;
+        // (curto: pneu e combustível em ícone, cabe no botão da coluna do carro; clicar de novo cancela)
+        const h = `BOX, BOX! ${tyreIcon(c.boxRequest, COMPOUNDS[c.boxRequest].label)}${icon("fuel")}${this.laps(c.boxFuel)}V`;
+        if (box.innerHTML !== h) box.innerHTML = h;
+        box.title = `Box chamado: ${COMPOUNDS[c.boxRequest].label}, combustível pra ${this.laps(c.boxFuel)} voltas. Clique pra cancelar`;
         box.classList.add("armed");
       } else if (c.planDue) {
-        box.textContent = `PLANO: PARAR NESTA VOLTA? (${COMPOUNDS[cs.next].label}, comb. p/ ${this.laps(this.fuelFor(c))} v)`;
+        const h = `PLANO: BOX AGORA? ${tyreIcon(cs.next, COMPOUNDS[cs.next].label)}${icon("fuel")}${this.laps(this.fuelFor(c))}V`;
+        if (box.innerHTML !== h) box.innerHTML = h;
+        box.title = `O plano era parar nesta volta: ${COMPOUNDS[cs.next].label}, combustível pra ${this.laps(this.fuelFor(c))} voltas`;
         box.classList.add("suggest");
       } else {
-        box.textContent = "CHAMAR PRO BOX";
+        box.textContent = "BOX";
       }
     }
   }
+}
+
+/** botão giratório de 3 posições (Ritmo/Motor): os botões continuam data-pace/data-engine (atalhos e voz clicam neles) */
+function dialHtml(key: "pace" | "engine", label: string, tip: string, opts: [string, string, Action][]): string {
+  return `<div class="dial" data-dial="${key}" title="${tip}"><div class="opts"><i class="thumb"></i>${opts
+    .map(([m, l, a]) => `<button data-${key}="${m}" title="${label}: ${l} (tecla ${keyName(a)} no piloto seguido)">${l}</button>`)
+    .join("")}</div><span class="cl">${label}</span></div>`;
+}
+
+/** posição do botão giratório (índice do ponteiro e o valor, que pinta o ponteiro) */
+function setDial(el: HTMLElement, v: string, idx: number) {
+  if (el.dataset.v === v) return;
+  el.dataset.v = v;
+  el.querySelector<HTMLElement>(".opts")!.style.setProperty("--idx", String(idx));
 }
 
 /** próxima parada planejada (ou null) */

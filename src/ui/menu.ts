@@ -10,7 +10,7 @@ function keysHtml(wait: Action | null = null) {
     return `${head}<div class="sndline"><span>${a.label}</span><button class="btn small ${wait === a.id ? "primary" : ""}" data-key="${a.id}" style="min-width:110px">${wait === a.id ? "aperte a tecla..." : keyName(a.id)}</button></div>`;
   }).join("")}
     <div class="row-btns" style="margin-top:8px"><button class="btn small" data-keyreset>RESTAURAR O PADRÃO</button></div>
-    <p class="hint">Clique na tecla e aperte a nova (Esc cancela). Se outra ação usava a mesma tecla, as duas trocam. Muda na hora.</p>
+    <p class="hint">As teclas de "Piloto seguido" valem pro carro que a câmera segue (ou o 1º da equipe); <b>com Shift</b>, valem pro outro carro da equipe. Clique na tecla e aperte a nova (Esc cancela). Se outra ação usava a mesma tecla, as duas trocam. Muda na hora.</p>
   </div>`;
 }
 
@@ -26,6 +26,8 @@ function displayHtml() {
     ${row("contraste", "Contraste", 50, 150, "%", "Diferença entre o claro e o escuro.")}
     ${row("saturacao", "Saturação", 0, 200, "%", "Cores mais vivas ou mais apagadas (0 = preto e branco).")}
     ${row("tom", "Tom de cor", -100, 100, "", "Negativo: mais frio (azulado). Positivo: mais quente (alaranjado).")}
+    ${row("escala", "Escala da interface", 70, 150, "%", "Como a resolução dos jogos: o jogo já se ajusta ao tamanho da tela; aumente se estiver pequeno, diminua se estiver grande.")}
+    ${row("painel", "Tamanho do painel dos pilotos", 70, 150, "%", "Ajuste extra só dos cards da corrida (diminua se cobrir a pista).")}
     <div class="row-btns" style="margin-top:6px"><button class="btn small" data-telareset>RESTAURAR O PADRÃO</button></div>
     <p class="hint">Vale pros desenhos do jogo (corrida, 3D, onboard, pódio); os textos e botões ficam iguais. Muda na hora.</p>
   </div>`;
@@ -52,7 +54,7 @@ import { mountTrackPicker } from "./trackPicker";
 import { backdropMemo, mountMenuBackdrop, releaseStripe, type StripeLock } from "./menuBg";
 import { showFriends } from "./friends";
 import { coverScreen, isCovered } from "./transition";
-import { PRESETS, gfx, setGfx, type CarStyle, type Cam3d, type Gfx, type Lv, type SceneQ } from "../render/gfx";
+import { MULTICAM_SHOTS, PRESETS, gfx, setGfx, type CarStyle, type Cam3d, type Gfx, type Lv, type SceneQ } from "../render/gfx";
 import { startLogoFx } from "./logoFx";
 import { getRecPrefs, loadRecords, setRecPrefs, type RecMode, type RecScope, type TrackRecord } from "./records";
 import { fmtLap } from "../sim/race";
@@ -591,16 +593,29 @@ function applyPreset(m: HTMLElement, k: keyof typeof PRESETS) {
 }
 
 /** Configurações: abas GRÁFICOS e SONS (outras seções entram aqui depois) */
-export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "sons" | "tela" | "atalhos" = "graficos") {
+/** aba MULTICAM: cada tomada da câmera TV com a sua marcação */
+function multicamHtml() {
+  const off = gfx().camOff ?? [];
+  return (
+    `<p class="hint">As tomadas que a câmera TV (MultiCam) pode usar. Desmarcada, ela não aparece mais. Vale na hora.</p>` +
+    MULTICAM_SHOTS.map(
+      ([id, t, d]) =>
+        `<label class="toggle m2tog"><input type="checkbox" data-cam="${id}" ${off.includes(id) ? "" : "checked"}><span><b>${t}</b><br><span class="hint" style="margin:0">${d}</span></span></label>`,
+    ).join("")
+  );
+}
+
+export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "sons" | "tela" | "atalhos" | "multicam" = "graficos") {
   const m = document.createElement("div");
   m.className = "helpmodal";
   m.innerHTML = `<div class="helpbox panel profbox setbox">
       <div class="helphead"><b>⚙ CONFIGURAÇÕES</b><button class="btn small" data-x>✕</button></div>
-      <div class="seg settabs"><button data-tab="graficos" class="${tab === "graficos" ? "on" : ""}">GRÁFICOS</button><button data-tab="sons" class="${tab === "sons" ? "on" : ""}">SONS</button><button data-tab="tela" class="${tab === "tela" ? "on" : ""}">TELA</button><button data-tab="atalhos" class="${tab === "atalhos" ? "on" : ""}">ATALHOS</button></div>
+      <div class="seg settabs"><button data-tab="graficos" class="${tab === "graficos" ? "on" : ""}">GRÁFICOS</button><button data-tab="sons" class="${tab === "sons" ? "on" : ""}">SONS</button><button data-tab="tela" class="${tab === "tela" ? "on" : ""}">TELA</button><button data-tab="atalhos" class="${tab === "atalhos" ? "on" : ""}">ATALHOS</button><button data-tab="multicam" class="${tab === "multicam" ? "on" : ""}">MULTICAM</button></div>
       <div class="setpane" data-pane="graficos" ${tab === "graficos" ? "" : "hidden"}>${gfxHtml()}<p class="hint">Algumas mudanças (como o modo dos carros) valem a partir da próxima corrida.</p></div>
       <div class="setpane" data-pane="sons" ${tab === "sons" ? "" : "hidden"}></div>
       <div class="setpane" data-pane="tela" ${tab === "tela" ? "" : "hidden"}>${displayHtml()}</div>
       <div class="setpane" data-pane="atalhos" ${tab === "atalhos" ? "" : "hidden"}>${keysHtml()}</div>
+      <div class="setpane" data-pane="multicam" ${tab === "multicam" ? "" : "hidden"}>${multicamHtml()}</div>
       <div class="row-btns" style="justify-content:flex-end;margin-top:14px"><button class="btn" data-x>CANCELAR</button><button class="btn primary" data-save>SALVAR</button></div>
     </div>`;
   document.body.appendChild(m);
@@ -624,6 +639,9 @@ export function showSettings(onDone: () => void = () => {}, tab: "graficos" | "s
     setDisplay({ ...DISPLAY_DEF });
     tela.innerHTML = displayHtml();
   });
+  m.querySelector('[data-pane="multicam"]')!.addEventListener("change", () =>
+    setGfx({ camOff: [...m.querySelectorAll<HTMLInputElement>("[data-cam]")].filter((i) => !i.checked).map((i) => i.dataset.cam!) }),
+  );
   // atalhos: esperando a tecla nova de uma ação
   const kp = m.querySelector<HTMLElement>('[data-pane="atalhos"]')!;
   let waitKey: Action | null = null;

@@ -44,7 +44,35 @@ export interface Gfx {
   fpsCap: number;
   /** acessibilidade: sem tremor de câmera, câmera lenta, tela cinza nem piscadas fortes */
   calm?: boolean;
+  /** tomadas da TV (MultiCam) desligadas em Configurações > MULTICAM (as novas entram ligadas) */
+  camOff?: string[];
 }
+
+/** tomadas da TV (MultiCam): id, nome e o que mostra (Configurações > MULTICAM liga e desliga cada uma) */
+export const MULTICAM_SHOTS: [string, string, string][] = [
+  ["largada", "Largada", "De frente pro grid, nas luzes"],
+  ["chegada", "Bandeirada", "Na linha de chegada, na última volta"],
+  ["baixa", "Beira da pista, baixa", "Parada na beira, lente fechada, o carro vindo"],
+  ["alta", "Beira da pista, alta", "Num poste de 10 a 20 m"],
+  ["grua", "Grua", "De 6 a 10 m de altura, perto da pista"],
+  ["frontal", "De frente, de longe", "Teleobjetiva lá na frente, o carro vindo de longe"],
+  ["torre", "Torre na curva", "Bem alta, do lado de dentro da curva que vem"],
+  ["apice", "Ápice da curva", "Baixa, do lado de dentro, no ponto mais fechado da curva"],
+  ["chao", "No chão", "Rente à zebra: o carro passa raspando"],
+  ["heli", "Helicóptero", "De 40 a 70 m de altura, acompanhando"],
+  ["persegue", "Perseguição", "Atrás do carro, andando junto"],
+  ["lateral", "Lateral", "Do lado do carro, andando junto"],
+  ["drone", "Drone na frente", "Na frente do carro, filmando ele chegar"],
+  ["frente", "Na frente, rente ao chão", "Bem baixa, na frente do bico, olhando o carro"],
+  ["roda", "Na roda", "Presa do lado da roda de trás, olhando pra frente"],
+  ["asa", "Na asa traseira", "Olhando quem vem atrás"],
+  ["tcam", "Em cima do carro (T-cam)", "Em cima da entrada de ar, olhando a pista"],
+  ["orbita", "Girando em volta", "Dá a volta no carro"],
+  ["onboard", "Piloto", "Da cabeça do piloto"],
+  ["lado", "De lado", "A câmera de lado, num ângulo sorteado"],
+  ["cima", "De cima", "Vista de cima"],
+  ["muro", "Muro do box", "Na parada, do muro do pit, vendo os mecânicos"],
+];
 
 export const PRESETS: Record<"minimo" | "baixo" | "medio" | "alto", Gfx> = {
   minimo: { cam3d: "cima", track3d: false, carStyle: "2d", aa: false, shadows: "off", sparks: "off", smoke: "off", rain: "off", skids: "off", onboard: false, onboard3d: false, carQ: "baixo", sceneQ: "baixa", podium3d: false, fpsCap: 30 },
@@ -73,10 +101,11 @@ function read(): Gfx {
   if (saved.quality === "qualidade") g.aa = true;
   const pa = lv(saved.particles);
   if (pa) g.sparks = g.smoke = pa;
-  for (const k of ["carStyle", "aa", "onboard", "onboard3d", "carQ", "sceneQ", "podium3d", "fpsCap", "track3d", "cam3d", "calm"] as const) if (saved[k] !== undefined) (g as unknown as Record<string, unknown>)[k] = saved[k];
+  for (const k of ["carStyle", "aa", "onboard", "onboard3d", "carQ", "sceneQ", "podium3d", "fpsCap", "track3d", "cam3d", "calm", "camOff"] as const) if (saved[k] !== undefined) (g as unknown as Record<string, unknown>)[k] = saved[k];
   for (const k of ["shadows", "sparks", "smoke", "rain", "skids"] as const) g[k] = lv(saved[k]) ?? g[k];
   if (!["2d", "sprite", "real"].includes(g.carStyle)) g.carStyle = DEF.carStyle;
-  if (!["cima", "lado", "tras", "piloto"].includes(g.cam3d)) g.cam3d = "cima";
+  if (!["cima", "lado", "tras", "piloto", "multicam"].includes(g.cam3d)) g.cam3d = "cima";
+  if (!Array.isArray(g.camOff)) g.camOff = [];
   if (typeof g.onboard3d !== "boolean") g.onboard3d = true;
   if (!["baixo", "medio", "alto"].includes(g.carQ)) g.carQ = "medio";
   if (!["baixa", "media", "top"].includes(g.sceneQ)) g.sceneQ = "top";

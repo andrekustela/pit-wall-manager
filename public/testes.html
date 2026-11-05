@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pit Wall · Testes</title>
+<style>
+  :root { --bg: #0c0e14; --card: #1a1e28; --line: #2a2f3c; --red: #e10600; --txt: #f2f3f5; --dim: #9aa3b2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt); font: 500 16px/1.4 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 26px; border-left: 5px solid var(--red); padding-left: 12px; }
+  p.sub { margin: 0 0 24px 17px; color: var(--dim); }
+  h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 26px 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  a.t { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; color: var(--txt); text-decoration: none; transition: border-color .15s, transform .15s; }
+  a.t:hover { border-color: var(--red); transform: translateY(-1px); }
+  a.t:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  a.t b { display: block; font-size: 17px; margin-bottom: 3px; }
+  a.t span { color: var(--dim); font-size: 14px; }
+  a.big { border-left: 4px solid var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pit Wall · Testes</h1>
+  <p class="sub">Tudo roda na versão de teste do seu PC: o que eu corrijo aparece aqui na hora (dê F5).</p>
+
+  <h2>Mostrar como deve ser</h2>
+  <div class="grid">
+    <a class="t big" href="/?editor=lance"><b>🎬 Editor de lance</b><span>Monte o acidente quadro a quadro, com adversários, e copie pra conversa.</span></a>
+    <a class="t" href="/prototipos/sede.html"><b>🏢 Sede nova (protótipo)</b><span>A sede em 3D pelo seu desenho: clique nas salas. Troque a equipe no canto pra ver as cores.</span></a>
+    <a class="t" href="/prototipos/sede3.html"><b>🏢 Sede nova 3 (gente andando)</b><span>Mecânicos 3D andando, treino de pit stop, elevador subindo, engenheiro na escada.</span></a>
+    <a class="t big" href="/prototipos/construtor.html"><b>🧱 Construtor da sede</b><span>Monte a sede: piso, parede, porta, janela, vidro, objetos, escada, 3 andares. Salva no navegador e em arquivo.</span></a>
+  </div>
+
+  <h2>Laboratório de acidentes</h2>
+  <div class="grid">
+    <a class="t big" href="/?auto&lab=misto&gap=12&replays&tv&carros=3d&camera=tv"><b>🧪 Todos os tipos</b><span>Um tipo de acidente a cada 12 s, em ordem. ⏪ REVER › 📋 LANCES pra rever cada um.</span></a>
+    <a class="t" href="/?auto&lab=susto&gap=10&replays&tv&carros=3d&camera=tv"><b>Susto</b><span>A traseira rebola e o piloto segura.</span></a>
+    <a class="t" href="/?auto&lab=rodada&gap=10&replays&tv&carros=3d&camera=tv"><b>Rodada</b><span>Muitas vezes começa rebolando e o piloto não segura.</span></a>
+    <a class="t" href="/?auto&lab=batida&gap=12&replays&tv&carros=3d&camera=tv"><b>Batida</b><span>Rodando ou de frente no muro.</span></a>
+    <a class="t" href="/?auto&lab=escapada&gap=12&replays&tv&carros=3d&camera=tv"><b>Escapada de frente</b><span>A frente não vira e o carro sai da curva.</span></a>
+    <a class="t" href="/?auto&lab=passou-reto&gap=12&replays&tv&carros=3d&camera=tv"><b>Passou reto</b><span>Freia tarde e volta rolando.</span></a>
+    <a class="t" href="/?auto&lab=toque&gap=12&replays&tv&carros=3d&camera=tv"><b>Toque</b><span>Fecha a porta no carro do lado.</span></a>
+    <a class="t" href="/?auto&lab=fisica&vel=200&ang=90&forca=4&ponto=traseira&replays&tv&carros=3d&camera=tv"><b>Pancada calculada</b><span>200 km/h, de lado, na traseira (mude vel, ang, forca e ponto no endereço).</span></a>
+  </div>
+
+  <h2>Corrida</h2>
+  <div class="grid">
+    <a class="t big" href="/?auto&caos&semsc&replays&tv&carros=3d&camera=tv"><b>Caos sem safety car</b><span>Muitos acidentes de verdade, com replay e a lista de lances.</span></a>
+    <a class="t" href="/?auto&caos&semsc&replays&muros&tv&carros=3d&camera=tv"><b>Caos + muros da corrida</b><span>Linha vermelha = onde a corrida acha que o muro está.</span></a>
+    <a class="t" href="/"><b>Jogo normal</b><span>O menu do jogo, como sempre.</span></a>
+  </div>
+</main>
+</body>
+</html>

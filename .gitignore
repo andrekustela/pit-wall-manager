@@ -5,3 +5,8 @@ dist
 desktop/release*/
 
 plus-codigos.txt
+
+# material de trabalho do usuário (Blender, imagens de referência)
+objetos3d/
+testes/
+*.blend1

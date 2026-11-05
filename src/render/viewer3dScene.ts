@@ -1,16 +1,17 @@
 // "VER EM 3D" do editor de pintura: o carro detalhado com a pintura e o piloto em pé com o uniforme (capacete
 // e macacão com o desenho), girando devagar, em luz de estúdio (reflexo do ambiente, sombra macia). Arrastar
 // gira, roda aproxima. Mostra inclusive o que ainda é prévia do Plus.
-// Também a VISTA DE CIMA do carro 3D (renderTop) pro editor de adesivos (CRIAR MEU CARRO) e o PILOTO EM PÉ
-// (renderPilot) pra prévia da aba PILOTO do editor de pintura.
+// No modo `edit` (CRIAR MEU CARRO 3D) é só o carro, parado, e dá pra achar o ponto da carroceria embaixo do
+// ponteiro (`hit`) e trocar os adesivos na hora (`decals`).
+// Também o PILOTO EM PÉ (renderPilot) pra prévia da aba PILOTO do editor de pintura.
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Team } from "../sim/types";
-import { defaultLivery } from "../sim/livery";
-import { GLOVE_T0, HELMET_UPRIGHT, gloveByWheel, paintAxis, paintMaterial, paintUV, seatBody, shoeMaterial, smoothDirs, uniformMaterial, upBox } from "./cars3dReal";
+import { defaultLivery, type Livery } from "../sim/livery";
+import { GLOVE_T0, HELMET_UPRIGHT, carFrame, decalFrames, gloveByWheel, paintMaterial, paintUV, setDecals, seatBody, shoeMaterial, smoothDirs, uniformMaterial, upBox } from "./cars3dReal";
 
 const loader = new GLTFLoader();
 loader.setMeshoptDecoder(MeshoptDecoder);
@@ -339,8 +340,17 @@ function dressPilot(g: THREE.Object3D, team: Team): THREE.Material[] {
   return made;
 }
 
-/** monta a cena no `host` e devolve a função que desmonta */
-export async function mountViewer(host: HTMLElement, team: Team): Promise<() => void> {
+export interface Viewer3d {
+  stop(): void;
+  /** o ponto da carroceria pintada embaixo do ponteiro (px da tela), no espaço do carro (Decal), e `under` = o
+   *  adesivo 3D que já está ali (o de cima; -1 = nenhum). null = fora da carroceria */
+  hit(clientX: number, clientY: number): { p: [number, number, number]; n: [number, number, number]; under: number } | null;
+  /** troca os adesivos 3D na hora (sel = o escolhido, com contorno) */
+  decals(lv: Livery, sel: number): void;
+}
+
+/** monta a cena no `host` (edit: CRIAR MEU CARRO 3D, só o carro e parado) */
+export async function mountViewer(host: HTMLElement, team: Team, edit = false): Promise<Viewer3d> {
   const W = host.clientWidth || 760, H = host.clientHeight || 460;
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
@@ -376,11 +386,22 @@ export async function mountViewer(host: HTMLElement, team: Team): Promise<() => 
   floor.receiveShadow = true;
   scene.add(floor);
   const cam = new THREE.PerspectiveCamera(36, W / H, 0.1, 100);
-  cam.position.set(5.5, 3, 6.5);
+  // (no editor, mais perto: o carro grande na tela)
+  if (edit) cam.position.set(3.4, 1.9, 4.0);
+  else cam.position.set(5.5, 3, 6.5);
+  // acompanha o tamanho do `host` (o editor é tela cheia: a janela muda)
+  const ro = new ResizeObserver(() => {
+    const w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h);
+    cam.aspect = w / h;
+    cam.updateProjectionMatrix();
+  });
+  ro.observe(host);
   const ctl = new OrbitControls(cam, renderer.domElement);
-  ctl.target.set(0.6, 0.55, 0);
+  ctl.target.set(edit ? 0 : 0.6, edit ? 0.4 : 0.55, 0);
   ctl.enableDamping = true;
-  ctl.autoRotate = true;
+  ctl.autoRotate = !edit;
   ctl.autoRotateSpeed = 1.2;
   ctl.minDistance = 1.6;
   ctl.maxDistance = 14;
@@ -404,16 +425,41 @@ export async function mountViewer(host: HTMLElement, team: Team): Promise<() => 
   (window as unknown as { __v3d?: unknown }).__v3d = test;
 
   // ---- piloto em pé, ao lado do carro ----
-  try {
-    const pilot = await buildPilot();
-    made.push(...dressPilot(pilot, team));
-    pilot.position.set(2.2, 0, 0.6);
-    pilot.rotation.y = -0.5;
-    scene.add(pilot);
-    Object.assign(test, { pilot, helmet: pilot.userData.helmet, fit: pilot.userData.fit });
-  } catch {
-    /* sem o piloto: só o carro */
-  }
+  if (!edit)
+    try {
+      const pilot = await buildPilot();
+      made.push(...dressPilot(pilot, team));
+      pilot.position.set(2.2, 0, 0.6);
+      pilot.rotation.y = -0.5;
+      scene.add(pilot);
+      Object.assign(test, { pilot, helmet: pilot.userData.helmet, fit: pilot.userData.fit });
+    } catch {
+      /* sem o piloto: só o carro */
+    }
+
+  // ---- adesivos 3D (editor) ----
+  const paints = made.filter((m) => m.name === "pintura");
+  let decLv = team.livery;
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const hit: Viewer3d["hit"] = (x, y) => {
+    const r = renderer.domElement.getBoundingClientRect();
+    ray.setFromCamera(ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), cam);
+    // (o primeiro que o raio pega: roda, asa ou piloto na frente tapam a carroceria)
+    const h = ray.intersectObject(car, true)[0];
+    const mt = h && (h.object as THREE.Mesh).material, m = Array.isArray(mt) ? mt[h.face?.materialIndex ?? 0] : mt;
+    if (!h?.face || m?.name !== "pintura") return null;
+    const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    if (n.dot(ray.ray.direction) > 0) n.negate();
+    const p = carFrame(car.userData.carFrame, car.worldToLocal(h.point.clone()));
+    // o adesivo que já está ali: o mesmo teste do shader da pintura (o de cima ganha)
+    let under = -1;
+    for (const f of decalFrames(decLv)) {
+      if (decLv?.decals?.[f.i]?.l) continue;
+      const d = p.clone().sub(f.c);
+      if (Math.abs(d.dot(f.u)) <= f.s / 2 && Math.abs(d.dot(f.v)) <= f.s / 2 && Math.abs(d.dot(f.n)) <= f.s && n.dot(f.n) > 0.15) under = Math.max(under, f.i);
+    }
+    return { p: p.toArray(), n: n.toArray(), under };
+  };
 
   let alive = true;
   const loop = () => {
@@ -423,17 +469,25 @@ export async function mountViewer(host: HTMLElement, team: Team): Promise<() => 
     requestAnimationFrame(loop);
   };
   loop();
-  return () => {
-    alive = false;
-    ctl.dispose();
-    freeMats(made);
-    env.dispose();
-    renderer.dispose();
-    renderer.domElement.remove();
+  return {
+    stop: () => {
+      ro.disconnect();
+      alive = false;
+      ctl.dispose();
+      freeMats(made);
+      env.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+    },
+    hit,
+    decals: (lv, sel) => {
+      decLv = lv;
+      for (const m of paints) setDecals(m, lv, sel);
+    },
   };
 }
 
-// ---------------- imagens pros editores (vista de cima do carro, piloto em pé) ----------------
+// ---------------- imagens pros editores (piloto em pé) ----------------
 
 /** um WebGL só pras imagens dos editores (fundo transparente; a imagem é copiada logo depois de desenhar) */
 let offR: THREE.WebGLRenderer | null = null;
@@ -447,48 +501,6 @@ const offscreen = () => {
   offR.setClearColor(0x000000, 0);
   return offR;
 };
-
-let top: { scene: THREE.Scene; car: THREE.Object3D; made: THREE.Material[] } | null = null;
-
-/** carrega o carro pra vista de cima (chamar antes de renderTop) */
-export async function prepareTop() {
-  if (top) return;
-  const base = await loadCar();
-  const scene = new THREE.Scene();
-  studio(offscreen(), scene);
-  scene.environmentIntensity = 0.25;
-  scene.add(new THREE.HemisphereLight("#ffffff", "#30343c", 0.8));
-  const sun = new THREE.DirectionalLight("#ffffff", 2.2);
-  sun.position.set(0.6, 10, 0.4);
-  scene.add(sun);
-  top = { scene, car: tiltHelmet(base.clone(true)), made: [] };
-  scene.add(top.car);
-}
-
-/**
- * o carro 3D visto de cima, deitado com a frente pra direita, numa tela W x H (px de CSS).
- * Devolve a imagem e `k` (px por metro): o ponto (x, y) do desenho da pintura (metros, frente +x, direita +y)
- * fica em (W/2 + (0,25 + 1,02x)·k, H/2 + y·k) — o mesmo encaixe da textura (paintTexture)
- */
-export function renderTop(team: Team, W: number, H: number, dpr: number): { canvas: HTMLCanvasElement; k: number } | null {
-  if (!top) return null;
-  const ax = paintAxis();
-  if (!ax) return null;
-  const renderer = offscreen(), { scene, car } = top;
-  freeMats(top.made);
-  top.made = dressCar(car, team);
-  renderer.setPixelRatio(dpr);
-  renderer.setSize(W, H, false);
-  const k = Math.min((W * 0.94) / 5.7, (H * 0.94) / 2.25);
-  const cam = new THREE.OrthographicCamera(-W / 2 / k, W / 2 / k, H / 2 / k, -H / 2 / k, 0.1, 30);
-  // (olhando reto pra baixo, com a direita da tela ao longo do eixo do carro; o lado direito do carro é -X)
-  const n = Math.hypot(1, ax.slope);
-  cam.up.set(1 / n, 0, -ax.slope / n);
-  cam.position.set(ax.cx, 12, ax.cz);
-  cam.lookAt(ax.cx, 0, ax.cz);
-  renderer.render(scene, cam);
-  return { canvas: renderer.domElement, k };
-}
 
 let pil: { scene: THREE.Scene; pilot: THREE.Group; ground: THREE.Mesh; made: THREE.Material[] } | null = null;
 

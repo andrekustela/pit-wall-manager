@@ -114,6 +114,8 @@ export class Room {
   onSave: ((s: ChampSave | null) => void) | null = null;
   /** barreiras do autódromo da pista (o servidor lê o .pecas.json; no solo quem põe é o autódromo 3D) */
   static wallsFor: ((trackName: string) => [number, number][] | null) | null = null;
+  /** teste (&replays no solo): no fim da corrida fica na tela da corrida (o player abre com a lista de lances) em vez do pódio */
+  static holdEnd = false;
   /** solo: as barreiras que o autódromo 3D montou, por pista (setWalls) */
   private static localWalls = new Map<string, [number, number][]>();
   /**
@@ -338,7 +340,7 @@ export class Room {
         if (!isHost || this.phase !== "lobby") return;
         if (msg.laps !== undefined && LAP_OPTIONS.includes(msg.laps)) this.laps = msg.laps;
         // (pista feita no editor só no solo: o servidor do online não tem ela)
-        if (msg.trackIndex !== undefined && CIRCUITS[msg.trackIndex] && (this.solo || !CIRCUITS[msg.trackIndex].mod)) this.trackIndex = msg.trackIndex;
+        if (Number.isInteger(msg.trackIndex) && CIRCUITS[msg.trackIndex!] && (this.solo || !CIRCUITS[msg.trackIndex!].mod)) this.trackIndex = msg.trackIndex!;
         if (msg.champPool === "oficiais" || msg.champPool === "mods" || msg.champPool === "todas") this.champPool = msg.champPool;
         if (msg.equalCars !== undefined) this.equalCars = !!msg.equalCars;
         if (msg.champ !== undefined) this.champMode = !!msg.champ;
@@ -762,7 +764,21 @@ export class Room {
 
     this.lastTick = Date.now();
     this.simDebt = 0;
-    this.timer = setInterval(() => this.tick(), TICK_MS);
+    this.timer = setInterval(() => {
+      try {
+        this.tick();
+      } catch (e) {
+        this.crashed(e);
+      }
+    }, TICK_MS);
+  }
+
+  /** erro dentro da corrida: para só esta sala, avisa os jogadores e fica no log */
+  private crashed(e: unknown) {
+    console.error(`sala ${this.code ?? ""}: erro na corrida`, e);
+    this.dispose();
+    this.race = null;
+    for (const id of this.players.keys()) this.send(id, { t: "error", msg: "Deu um erro nesta corrida e ela foi encerrada. Desculpe! Volte pro menu e crie a sala de novo." });
   }
 
   private tick() {
@@ -785,6 +801,10 @@ export class Room {
     if (this.solo || this.ticks % 2 === 0 || done) {
       this.broadcast({ t: "snap", snap: race.snapshot(this.sentEvents), speed: this.speed });
       this.sentEvents = race.events.length;
+    }
+    if (done && Room.holdEnd && this.solo) {
+      this.dispose();
+      return;
     }
     if (done) {
       if (this.champ) {

@@ -32,7 +32,7 @@ export async function showViewer3d(team: Team) {
   try {
     const { mountViewer } = await import("../render/viewer3dScene");
     const host = m.querySelector<HTMLElement>(".v3dhost")!;
-    const stop = await mountViewer(host, team);
+    const { stop } = await mountViewer(host, team);
     m.querySelector("[data-wait]")?.remove();
     if (closed) stop();
     else off = stop;

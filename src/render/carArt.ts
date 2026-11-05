@@ -407,11 +407,73 @@ export function patternShapes(g: CanvasRenderingContext2D, lv: Livery) {
       for (const s of [-1, 1])
         poly([[2.3, 0.06 * s], [1.0, 0.2 * s], [0.6, 0.62 * s], [0.25, 0.3 * s], [-0.3, 0.7 * s], [-0.5, 0.35 * s], [-1.2, 0.62 * s], [-1.1, 0.18 * s], [-1.8, 0.38 * s], [-1.3, 0.04 * s]]);
       break;
+    case "tres":
+      for (const y of [-0.22, 0, 0.22]) g.fillRect(-2.5, y - 0.035, 5, 0.07);
+      break;
+    case "metade":
+      // o lado esquerdo inteiro na cor dos detalhes
+      g.fillRect(-2.5, -1, 5, 1);
+      break;
+    case "bico":
+      poly([[2.5, -0.4], [0.9, -0.4], [0.3, -0.75], [0.1, -0.75], [0.7, -0.18], [0.7, 0.18], [0.1, 0.75], [0.3, 0.75], [0.9, 0.4], [2.5, 0.4]]);
+      break;
+    // ---- pacote Plus ----
+    case "zigue":
+      for (const s of [-1, 1]) {
+        g.beginPath();
+        for (let x = -2.4; x <= 2.41; x += 0.3) g.lineTo(x, (0.42 + (Math.round((x + 2.4) / 0.3) % 2 ? 0.12 : -0.12)) * s);
+        for (let x = 2.4; x >= -2.41; x -= 0.3) g.lineTo(x, (0.42 + (Math.round((x + 2.4) / 0.3) % 2 ? 0.12 : -0.12) + 0.09) * s);
+        g.closePath();
+        g.fill();
+      }
+      break;
+    case "colmeia":
+      // grade de hexágonos vazados, sumindo pra frente
+      g.strokeStyle = c;
+      g.lineWidth = 0.035;
+      for (let i = 0; i < 18; i++)
+        for (let j = -4; j <= 4; j++) {
+          const x = -2.4 + i * 0.27, y = j * 0.18 + (i % 2) * 0.09;
+          if ((x + 2.4) / 4.8 > 0.75 - Math.abs(y) * 0.2) continue;
+          g.beginPath();
+          for (let k = 0; k < 6; k++) g.lineTo(x + Math.cos((k * Math.PI) / 3) * 0.1, y + Math.sin((k * Math.PI) / 3) * 0.1);
+          g.closePath();
+          g.stroke();
+        }
+      break;
+    case "triangulos":
+      // triângulos que diminuem da traseira pro bico
+      for (let i = 0; i < 9; i++) {
+        const x = -2.3 + i * 0.5, r = 0.28 * (1 - i / 11);
+        for (const y of [-0.42, 0.42]) poly([[x - r, y - r * (i % 2 ? 1 : -1)], [x + r, y - r * (i % 2 ? 1 : -1)], [x, y + r * (i % 2 ? 1 : -1)]]);
+      }
+      break;
+    case "onca": {
+      // rosetas de onça (anéis abertos com miolo), sempre o mesmo desenho
+      let h = 5;
+      const rnd = () => ((h = (h * 16807) % 2147483647) / 2147483647);
+      g.strokeStyle = c;
+      g.lineWidth = 0.045;
+      for (let k = 0; k < 30; k++) {
+        const x = -2.3 + rnd() * 4.6, y = -0.75 + rnd() * 1.5, r = 0.07 + rnd() * 0.06, a = rnd() * 6;
+        g.beginPath();
+        g.ellipse(x, y, r * 1.3, r, a, 0.4, Math.PI * 2 - 0.3);
+        g.stroke();
+        g.beginPath();
+        g.ellipse(x, y, r * 0.45, r * 0.35, a, 0, Math.PI * 2);
+        g.fill();
+      }
+      break;
+    }
+    case "velocidade":
+      // linhas de velocidade saindo da traseira, finas na frente
+      for (const [y, x1] of [[0.18, 0.8], [0.34, 1.6], [0.5, 0.4], [0.64, -0.3]]) for (const s of [-1, 1]) poly([[-2.5, (y - 0.05) * s], [-2.5, (y + 0.05) * s], [x1, y * s]]);
+      break;
   }
 }
 
-/** um adesivo no lugar dele (centro em 0,0, tamanho 1 = o `s` do adesivo) */
-function stickerShape(g: CanvasRenderingContext2D, st: Sticker, lv: Livery) {
+/** um adesivo no lugar dele (centro em 0,0, tamanho 1 = o `s` do adesivo; cabe todo em -0,5..0,5) */
+export function stickerShape(g: CanvasRenderingContext2D, st: Pick<Sticker, "k" | "t">, lv: Livery) {
   const poly = (pts: number[][]) => {
     g.beginPath();
     pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
@@ -486,6 +548,81 @@ function stickerShape(g: CanvasRenderingContext2D, st: Sticker, lv: Livery) {
       g.fillText(txt, 0, 4);
       break;
     }
+    case "losango":
+      poly([[0.5, 0], [0, -0.32], [-0.5, 0], [0, 0.32]]);
+      break;
+    case "hexagono":
+      poly([0, 1, 2, 3, 4, 5].map((k) => [Math.cos((k * Math.PI) / 3) * 0.5, Math.sin((k * Math.PI) / 3) * 0.5]));
+      break;
+    case "brilho":
+      // estrela de 4 pontas fininhas
+      poly([0, 1, 2, 3, 4, 5, 6, 7].map((k) => { const a = (k * Math.PI) / 4, r = k % 2 ? 0.1 : 0.5; return [Math.cos(a) * r, Math.sin(a) * r]; }));
+      break;
+    case "lua":
+      g.beginPath();
+      g.arc(0, 0, 0.5, 0, Math.PI * 2);
+      g.arc(0.2, -0.08, 0.4, 0, Math.PI * 2, true);
+      g.fill("evenodd");
+      break;
+    case "sol":
+      g.beginPath();
+      g.arc(0, 0, 0.24, 0, Math.PI * 2);
+      g.fill();
+      for (let k = 0; k < 12; k++) {
+        const a = (k * Math.PI) / 6, b = 0.09;
+        poly([[Math.cos(a - b) * 0.3, Math.sin(a - b) * 0.3], [Math.cos(a) * 0.5, Math.sin(a) * 0.5], [Math.cos(a + b) * 0.3, Math.sin(a + b) * 0.3]]);
+      }
+      break;
+    case "gota":
+      g.beginPath();
+      g.moveTo(0.5, 0);
+      g.bezierCurveTo(0.15, -0.18, -0.05, -0.32, -0.25, -0.25);
+      g.arc(-0.22, 0, 0.25, -Math.PI / 2, Math.PI / 2, true);
+      g.bezierCurveTo(-0.05, 0.32, 0.15, 0.18, 0.5, 0);
+      g.fill();
+      break;
+    case "folha":
+      g.beginPath();
+      g.moveTo(0.5, 0);
+      g.quadraticCurveTo(0, -0.5, -0.5, 0);
+      g.quadraticCurveTo(0, 0.5, 0.5, 0);
+      g.fill();
+      break;
+    case "chevron":
+      for (const dx of [0, -0.4]) poly([[0.1 + dx, -0.45], [0.5 + dx, 0], [0.1 + dx, 0.45], [-0.08 + dx, 0.45], [0.3 + dx, 0], [-0.08 + dx, -0.45]]);
+      break;
+    case "velocidade":
+      // linhas de velocidade, finas na ponta de trás
+      for (const [y, x0] of [[-0.3, -0.2], [-0.1, -0.5], [0.1, -0.35], [0.3, -0.1]]) poly([[0.5, y - 0.05], [0.5, y + 0.05], [x0, y]]);
+      break;
+    case "pata":
+      g.beginPath();
+      g.ellipse(-0.12, 0, 0.2, 0.24, 0, 0, Math.PI * 2);
+      g.fill();
+      for (const [x, y] of [[0.2, -0.3], [0.32, -0.1], [0.32, 0.1], [0.2, 0.3]]) {
+        g.beginPath();
+        g.ellipse(x, y, 0.09, 0.08, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+      break;
+    case "garra":
+      for (const y of [-0.28, 0, 0.28]) poly([[0.5, y - 0.12], [0.42, y - 0.05], [-0.5, y + 0.12], [-0.3, y + 0.02]]);
+      break;
+    case "alvo":
+      g.beginPath();
+      for (const r of [0.5, 0.38, 0.26, 0.14]) g.arc(0, 0, r, 0, Math.PI * 2, r === 0.38 || r === 0.14);
+      g.fill();
+      break;
+    case "mais":
+      g.fillRect(-0.5, -0.14, 1, 0.28);
+      g.fillRect(-0.14, -0.5, 0.28, 1);
+      break;
+    case "zigue":
+      g.beginPath();
+      for (let k = 0; k <= 6; k++) g.lineTo(-0.5 + k / 6, (k % 2 ? 0.25 : -0.25) - 0.06);
+      for (let k = 6; k >= 0; k--) g.lineTo(-0.5 + k / 6, (k % 2 ? 0.25 : -0.25) + 0.06);
+      g.fill();
+      break;
   }
 }
 
@@ -494,12 +631,14 @@ function stickerShape(g: CanvasRenderingContext2D, st: Sticker, lv: Livery) {
 export function drawStickers(g: CanvasRenderingContext2D, lv: Livery | undefined, squashX = 1) {
   if (!lv?.stickers?.length) return;
   for (const st of lv.stickers)
-    for (const my of st.m ? [1, -1] : [1]) {
+    for (const my of st.h ? [] : st.m ? [1, -1] : [1]) {
       g.save();
       g.translate(st.x, st.y * my);
       if (squashX !== 1) g.scale(1 / squashX, 1);
-      g.rotate(st.r * my);
-      g.scale(st.s, st.s * my);
+      // (a cópia do outro lado: desenho = reflexo; texto e número = girado meia volta, legível de quem está daquele lado)
+      const text = my < 0 && (st.k === "texto" || st.k === "numero");
+      g.rotate(st.r * my + (text ? Math.PI : 0));
+      g.scale(st.fx ? -st.s : st.s, st.s * (text ? 1 : my) * (st.fy ? -1 : 1));
       g.fillStyle = st.c;
       stickerShape(g, st, lv);
       g.restore();

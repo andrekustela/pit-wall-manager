@@ -3,7 +3,7 @@ import type { LobbyState } from "../net/protocol";
 
 import { fuelPerLap } from "../sim/race";
 import { CIRCUITS } from "../sim/track";
-import { ALL_COMPOUNDS, COMPOUNDS, DRY, FUEL_MAX, bestForWet, isWetTyre, type CarSetup, type Compound } from "../sim/types";
+import { ALL_COMPOUNDS, COMPOUNDS, DRY, FUEL_MAX, bestForWet, isWetTyre, nextStopLap, stopLapRange, type CarSetup, type Compound } from "../sim/types";
 import type { QualiResult } from "../sim/weekend";
 import { conditionsBar } from "./practice";
 import { backButtonHtml, bindBackButton, champLabel, esc, teamDrivers, tyreIcon, updateWaitBar } from "./common";
@@ -234,14 +234,18 @@ No seco é obrigatório usar 2 tipos de pneu diferentes.`,
         switch (b.dataset.act) {
           case "tyre": s.tyre = b.dataset.c as Compound; break;
           case "fuel": s.fuelLaps = clamp(s.fuelLaps + d, 1, Math.min(this.maxLaps, this.laps)); break;
-          case "lap": s.stops[i].lap = clamp(s.stops[i].lap + d, 1, this.laps - 1); break;
+          case "lap": {
+            const [lo, hi] = stopLapRange(s.stops, i, 1, this.laps);
+            s.stops[i].lap = clamp(s.stops[i].lap + d, lo, hi);
+            break;
+          }
           case "stopTyre": s.stops[i].compound = b.dataset.c as Compound; break;
           case "stopFuel": s.stops[i].fuelLaps = clamp(s.stops[i].fuelLaps + d, 0, Math.min(this.maxLaps, this.laps)); break;
           case "del": s.stops.splice(i, 1); break;
           case "add": {
-            const last = s.stops[s.stops.length - 1]?.lap ?? 0;
-            const lap = Math.min(this.laps - 1, last + Math.max(2, Math.round(this.laps * 0.3)));
-            s.stops.push({ lap, compound: s.tyre === "M" ? "H" : "M", fuelLaps: this.laps - lap });
+            // (só se couber: cada parada a MIN_STINT voltas da anterior, antes da última volta)
+            const lap = nextStopLap(s.stops, 1, this.laps);
+            if (lap !== null) s.stops.push({ lap, compound: s.tyre === "M" ? "H" : "M", fuelLaps: this.laps - lap });
             break;
           }
         }

@@ -50,7 +50,7 @@ export function showEditor(onDone: () => void) {
     if (tab === "pistas") {
       // todas as pistas, por grupo; cada uma com os botões dela (traçado, 3D, nome e, se for mod, baixar)
       const GROUPS: [ReturnType<typeof trackGroup>, string][] = [["oficial", "PISTAS OFICIAIS"], ["real", "MODS · PISTAS REAIS"], ["mod", "MODS · INSTALADOS E FEITOS POR VOCÊ"]];
-      const head = `<div class="edtrkbar"><button class="btn small primary" data-install>⬆ INSTALAR MODS</button><button class="btn small" data-newtrack>+ CRIAR PISTA</button><button class="btn small" data-howto>? COMO CRIAR UMA PISTA</button><input type="file" accept=".json" multiple data-modfile hidden></div>`;
+      const head = `<div class="edtrkbar"><button class="btn small primary" data-install>⬆ INSTALAR MODS</button><button class="btn small" data-newtrack>+ CRIAR PISTA</button><button class="btn small" data-howto>? COMO CRIAR UMA PISTA</button><button class="btn small" data-lance title="mostre quadro a quadro como um acidente deve ser">🎬 EDITOR DE LANCE</button><input type="file" accept=".json" multiple data-modfile hidden></div>`;
       return head + GROUPS.map(([g, title]) => {
         const list = ACTIVE_TRACKS.filter((i) => trackGroup(i) === g)
           .map((i) => ({ i, o: originalTrackName(i) }))
@@ -194,6 +194,7 @@ export function showEditor(onDone: () => void) {
       return openLayout();
     }
     if (t.closest("[data-howto]")) return showHowto();
+    if (t.closest("[data-lance]")) return void import("./crashEditor").then((m) => m.showCrashEditor());
     if (t.closest("[data-install]")) return m.querySelector<HTMLInputElement>("[data-modfile]")!.click();
     const tb = t.closest<HTMLElement>("[data-tab]");
     if (tb) {

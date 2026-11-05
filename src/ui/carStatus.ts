@@ -3,7 +3,7 @@
 // (asas, suspensões, motor) com 4 estados e a opção de trocar na próxima parada.
 import { ENGINE_LEVELS, ENGINE_SAVE, LEVELS, PARTS, engineLevel, partLevel, type PartId } from "../sim/parts";
 import type { Race } from "../sim/race";
-import type { CarState, Command } from "../sim/types";
+import { FAULTS, type CarState, type Command, type FaultKind } from "../sim/types";
 
 /** desgaste aproximado de cada pneu (os da frente sofrem um pouco mais) */
 const TYRE_LOAD = { fl: 1.06, fr: 1.0, rl: 0.95, rr: 0.9 };
@@ -11,6 +11,7 @@ const LEVEL_COLOR = ["#3bd16f", "#ffd23b", "#ff8a1c", "#ff3b3b"];
 const OK = "#8a93a6";
 
 export function statusSvg(): string {
+  // (o % de cada pneu fica do LADO da roda, fora do desenho: o svg deixa vazar)
   // F1 atual visto de cima (frente pra cima): asa dianteira larga e curva, bico fino, halo,
   // sidepods largos afinando até a traseira (garrafa de coca), assoalho, barbatana, beam wing
   return `<svg class="carstatus" viewBox="0 0 64 132" aria-label="Estado do carro">
@@ -41,10 +42,10 @@ export function statusSvg(): string {
     </g>
     <rect x="29" y="72" width="6" height="22" rx="1.5" class="fuelbg" />
     <rect x="29" y="72" width="6" height="22" rx="1.5" class="fuel" data-fuel />
-    <text data-t="fl" x="9.5" y="52" class="tlabel"></text>
-    <text data-t="fr" x="54.5" y="52" class="tlabel"></text>
-    <text data-t="rl" x="9" y="93.5" class="tlabel"></text>
-    <text data-t="rr" x="55" y="93.5" class="tlabel"></text>
+    <text data-t="fl" x="1" y="37.5" class="tlabel side l"></text>
+    <text data-t="fr" x="63" y="37.5" class="tlabel side r"></text>
+    <text data-t="rl" x="0" y="111" class="tlabel side l"></text>
+    <text data-t="rr" x="64" y="111" class="tlabel side r"></text>
   </svg>`;
 }
 
@@ -176,4 +177,36 @@ export function updateStatus(root: Element, c: CarState, race: Race) {
     fuelBar.style.fill = short ? (laps < 2 ? "#ff3b3b" : "#ffb02e") : "#3bd16f";
   }
   svg.classList.toggle("retired", c.retired);
+}
+
+/** gravidade de um problema: 0 tudo certo (verde), 1 perda pequena (amarelo), 2 peça perdida ou ritmo caindo muito
+ * (laranja), 3 pode não terminar ou perda enorme (vermelho) */
+export type Severity = 0 | 1 | 2 | 3;
+export const SEV_COLOR = ["#3bd16f", "#ffd23b", "#ff8a1c", "#ff3b3b"] as const;
+const FAULT_SEV: Record<FaultKind, Severity> = { brakes: 1, puncture: 2, power: 2, gearbox: 3, hydraulics: 3 };
+
+/** o ícone de dano (triângulo desenhado: o emoji ⚠️ não troca de cor) */
+export function dmgIcon(sev: Severity, title = ""): string {
+  return `<svg class="dmgi" viewBox="0 0 16 14" aria-hidden="${title ? "false" : "true"}">${title ? `<title>${title}</title>` : ""}<path d="M8 1 15.2 13H.8z" fill="${SEV_COLOR[sev]}" stroke="#000" stroke-width="1" stroke-linejoin="round"/>${
+    sev ? `<rect x="7.2" y="4.6" width="1.6" height="4.6" fill="#111"/><rect x="7.2" y="10.2" width="1.6" height="1.6" fill="#111"/>` : `<path d="M5 8.6 7.2 10.6 11 6" fill="none" stroke="#111" stroke-width="1.6"/>`
+  }</svg>`;
+}
+
+/** tudo o que está errado no carro, do mais grave pro mais leve */
+export function carIssues(c: CarState, race: Race): { sev: Severity; t: string; sub: string }[] {
+  const out: { sev: Severity; t: string; sub: string }[] = [];
+  if (c.fault && !c.retired) {
+    const f = FAULTS[c.fault];
+    out.push({ sev: FAULT_SEV[c.fault], t: f.label, sub: `+${c.faultPen.toFixed(1)} s por volta · ${f.fix}` });
+  }
+  for (const p of PARTS) {
+    const sec = c.dmg?.[p.id] ?? 0;
+    const lvl = partLevel(sec);
+    if (!lvl) continue;
+    const loss = race.partLossSec(p.id, sec);
+    out.push({ sev: lvl === 3 ? 2 : 1, t: `${p.label}: ${["", "leve", "danificada", "destruída"][lvl]}`, sub: `~${loss.toFixed(1)} s por volta · troca no box ~${Math.round((p.repair[0] + p.repair[1]) / 2)} s` });
+  }
+  const el = engineLevel(c.engineHealth ?? 1);
+  if (el) out.push({ sev: el as Severity, t: `Motor ${ENGINE_LEVELS[el].toLowerCase()} (${Math.round((c.engineHealth ?? 1) * 100)}%)`, sub: el === 3 ? "Pode quebrar: poupe o motor ou abandone" : el === 2 ? "Perde potência e corre risco de quebrar" : "Desgaste normal de corrida" });
+  return out.sort((a, b) => b.sev - a.sev);
 }

@@ -276,10 +276,13 @@ label.fld span { display: block; margin-bottom: 4px; }
 /* painel do jogador minimizável */
 .teamwrap { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 4; }
 .teamwrap .team { position: static; transform: none; }
-.teamtoggle { box-shadow: 0 0 0 2px #000; }
+.teamtoggle { flex: none; box-shadow: 0 0 0 2px #000; }
+.teamtoggle button { padding: 4px 10px; font-size: 11px; white-space: nowrap; }
+/* compacto: os tempos vão pra linha dos chips (a coluna do desenho do carro tem 34 px) */
+.team.compact .driver .colstats { display: none; }
 .mini-line { display: none; font-size: 13px; align-items: center; gap: 6px; }
 .team.compact .driver { width: 300px; padding: 6px 8px; }
-.team.compact .driver > *:not(.top):not(.mini-line):not(.boxrow):not(.calert):not(.statuscol):not(.reqbox) { display: none !important; }
+.team.compact .driver > *:not(.top):not(.mini-line):not(.boxrow):not(.calert):not(.statuscol):not(.reqbox):not(.battle):not(.leds):not(.ctabs):not(.cpane):not(.pane) { display: none !important; }
 .team.compact .driver .top { margin-bottom: 4px; }
 .team.compact .mini-line { display: flex; margin-bottom: 4px; }
 .team.compact .boxbtn { margin-top: 2px; padding: 4px; font-size: 11px; }
@@ -571,7 +574,7 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .team:not(.compact) .seg button { padding: 2px 0; font-size: 11px; }
 .team:not(.compact) .boxbtn { padding: 4px; margin-top: 2px; }
 .team:not(.compact) .fuelrow { margin-bottom: 2px; }
-@media (max-height: 1080px) { .teamwrap { zoom: .9; } }
+.teamwrap { zoom: var(--hud-zoom, 1); }
 
 /* "hidden" sempre esconde (o display dos componentes passava por cima) */
 [hidden] { display: none !important; }
@@ -1025,14 +1028,27 @@ input, textarea, [contenteditable] { -webkit-user-select: text; user-select: tex
 .ttags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .ttag { font-style: normal; font-family: var(--pix); font-size: 10px; letter-spacing: .07em; padding: 1px 5px; border: 1px solid currentColor; color: #aab3c5; white-space: nowrap; }
 .ttag.mod { color: #4fd1ff; }
-/* CRIAR MEU CARRO (adesivos, Premium) */
-.stkbox { width: min(1000px, 100%); }
-.stkgrid { display: grid; grid-template-columns: 1fr 260px; gap: 12px; }
-.stkcv { width: 100%; height: min(340px, 42vh); background: #2b2f38; cursor: grab; touch-action: none; }
-.stkcv:active { cursor: grabbing; }
-.stkpal { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.stkside .sndrow { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
-@media (max-width: 760px) { .stkgrid { grid-template-columns: 1fr; } }
+/* CRIAR MEU CARRO: tela cheia, como o editor do autódromo */
+.stked { position: fixed; inset: 0; z-index: 265; background: #161a24; user-select: none; }
+.stked .stkcv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.stked .stkcv:active { cursor: grabbing; }
+.stked .stkwait { position: absolute; inset: auto 0 50% 0; text-align: center; }
+.stked .stkbar { position: absolute; top: 10px; left: 290px; right: 290px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; }
+.stked .stkleft, .stked .stkright { position: absolute; top: 10px; width: 270px; max-height: calc(100% - 20px); overflow: auto; padding: 10px; box-sizing: border-box; }
+.stked .stkleft { left: 10px; }
+.stked .stkright { right: 10px; }
+.stked .stktabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 8px; }
+.stked .stkpal { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.stked .stkright .sndrow { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
+.stked .stkhint { position: absolute; left: 290px; right: 290px; bottom: 10px; font-size: 12px; opacity: 0.85; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.stklayers { margin-top: 4px; }
+.stklayer { display: flex; align-items: center; gap: 6px; padding: 3px 4px; margin: 2px 0; background: #1b2030; cursor: grab; font-size: 13px; }
+.stklayer.on { outline: 1px solid #ffd21a; }
+.stklayer.off span { opacity: 0.45; text-decoration: line-through; }
+.stklayer i { width: 12px; height: 12px; flex: none; border: 1px solid #0006; }
+.stklayer span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stklayer .btn.small { padding: 1px 6px; min-width: 0; }
+
 .livpat.plus span, .livstyles .plus { color: #ffd23b; }
 /* aba PILOTO: cada desenho com a miniatura da peça (capacete, macacão, luva, tênis) */
 .seg.livstyles { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 4px; }
@@ -1568,8 +1584,446 @@ body.inrace .helpbtns { display: none; }
 
 /* painel dos pilotos só com os nomes (tecla M): a linha de cima (posição, nome, frente/atrás) */
 .team.names .driver { display: block; width: 330px; padding: 6px 8px; }
-.team.names .driver > *:not(.top) { display: none !important; }
+.team.names .driver > *:not(.top):not(.leds):not(.quick):not(.ctabs) { display: none !important; }
 .team.names .driver .top { margin: 0; }
 
 /* na corrida o aviso desce: em cima ficam os botões de velocidade */
 body.inrace .toast { top: 70px; }
+
+/* ---- M1 (2026-11-04): botões giratórios de Ritmo/Motor/Ultrapassagem, faixa da briga, luzes de marcha,
+   pneu/combustível/dano embaixo do carro; a onboard sai do COMPLETO e o seletor fica embaixo ---- */
+.driver.panel { position: relative; }
+.driver .onbox { display: none !important; }
+.team:not(.compact):not(.names) .driver .chips { display: none; }
+.uc { display: grid; gap: 3px; margin: 4px 0 2px; font-size: 11px; text-align: center; }
+.uc > span { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.uc b { font-variant-numeric: tabular-nums; }
+
+
+.team.compact .uc, .driver.tabbox .uc { display: none; }
+.driver .leds { position: absolute; top: -4px; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; z-index: 2; pointer-events: none; }
+.driver .leds i { width: 12px; height: 5px; border-radius: 3px; background: #1c2029; box-shadow: 0 0 0 1px #000; transition: background .15s, box-shadow .15s; }
+.driver .leds i.lit:nth-child(-n+4) { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+.driver .leds i.lit:nth-child(n+5):nth-child(-n+7) { background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+.driver .leds i.lit:nth-child(n+8) { background: #3b82ff; box-shadow: 0 0 6px #3b82ff; }
+.battle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 5px; padding: 4px 6px; background: rgba(232,32,42,.12); border: 1px solid rgba(232,32,42,.55); }
+.battle[hidden] { display: none !important; }
+.battle .bt-t { flex: 1 1 0; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.battle button { font-size: 10.5px; padding: 3px 7px; background: #1b2130; color: var(--text, #fff); border: 1px solid var(--line); cursor: pointer; transition: background .2s, transform .12s; }
+.battle button:active, .otgo:active { transform: scale(.97); }
+.battle button.on { background: #e9edf5; color: #111; }
+.battle .otb.live { background: var(--accent); color: #fff; }
+.battle button[disabled] { opacity: .45; cursor: default; }
+.battle.pulse { animation: btpulse 1.6s ease-in-out infinite; }
+@keyframes btpulse { 50% { border-color: rgba(232,32,42,.95); } }
+.trio { display: grid; grid-template-columns: repeat(3, 1fr); align-items: start; gap: 2px; margin-bottom: 2px; }
+.dial { display: grid; justify-items: center; gap: 1px; }
+.dial .cl { font-size: 11px; color: var(--muted); }
+.dial .opts { position: relative; width: 92px; height: 62px; }
+.dial .opts::before { content: ""; position: absolute; left: 50%; top: 20px; width: 38px; height: 38px; margin-left: -19px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, inset 0 0 0 2px #2a2c31, 0 0 0 2px #e8202a55; }
+.dial .thumb { position: absolute; z-index: 2; left: 50%; top: 22px; width: 3px; height: 17px; margin-left: -1.5px; border-radius: 2px; background: #e9edf5; transform-origin: 50% 17px; transform: rotate(calc(-62deg + var(--idx, 1) * 62deg)); transition: transform .32s cubic-bezier(.23, 1, .32, 1), background .3s; }
+.dial[data-v="push"] .thumb, .dial[data-v="rich"] .thumb { background: #ff3b30; }
+.dial[data-v="conserve"] .thumb, .dial[data-v="lean"] .thumb { background: #2f8cff; }
+.dial .opts button { position: absolute; background: none; border: 0; padding: 1px 2px; font-size: 10px; color: var(--muted); cursor: pointer; white-space: nowrap; transition: color .2s; }
+.dial .opts button:hover { color: #fff; }
+.dial .opts button.on { color: #fff; font-weight: 700; }
+.dial .opts button[disabled] { opacity: .35; cursor: default; }
+.dial .opts button:nth-of-type(1) { left: -4px; top: 12px; }
+.dial .opts button:nth-of-type(2) { left: 50%; top: 0; transform: translateX(-50%); }
+.dial .opts button:nth-of-type(3) { right: -4px; top: 12px; }
+.dial.two .thumb { transform: rotate(calc(-50deg + var(--idx, 0) * 100deg)); }
+.dial.two .opts button:nth-of-type(1) { left: -2px; top: 8px; }
+.dial.two .opts button:nth-of-type(2) { left: auto; right: -2px; top: 8px; transform: none; }
+.otcell { min-width: 0; }
+.otpush { display: flex; align-items: center; gap: 6px; justify-content: center; margin-top: 2px; }
+.otpush small { display: block; font-size: 9.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
+.otgo { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; cursor: pointer; font-size: 14px; color: #fff; background: radial-gradient(circle at 40% 35%, #3a3d44, #121316 70%); box-shadow: 0 2px 0 #000, 0 0 0 2px #2a2c31; transition: transform .12s, box-shadow .2s, color .2s; }
+.otgo.live { color: #ffd23b; box-shadow: 0 2px 0 #000, 0 0 0 2px #ffd23b, 0 0 12px #ffd23b; }
+.otgo[disabled] { opacity: .4; cursor: default; }
+.pips { display: inline-flex; gap: 3px; }
+.pips i { width: 7px; height: 7px; border-radius: 50%; background: #ffd23b; transition: background .3s, transform .3s; }
+.pips i.used { background: var(--line); transform: scale(.8); }
+@media (prefers-reduced-motion: reduce) { .battle.pulse { animation: none; } .dial .thumb { transition: none; } }
+.team.compact .battle { flex-wrap: nowrap; gap: 4px; }
+.team.compact .battle button { padding: 2px 5px; font-size: 10px; }
+/* aba 🩺 CARRO e ícones de dano (verde/amarelo/laranja/vermelho); o card não muda de tamanho */
+.dmgi { width: 16px; height: 14px; flex: none; display: block; }
+.dmgs { display: inline-flex; gap: 3px; align-items: center; }
+.uc .ucd { cursor: pointer; }
+.carlist { display: grid; gap: 4px; }
+.carlist .crow { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; line-height: 1.25; }
+.carlist .crow .dmgi { margin-top: 1px; }
+.carlist .crow small { display: block; color: var(--muted); font-size: 10.5px; }
+.driver .pane[data-pane="car"] .retirebtn { margin-top: 6px; }
+.battle.idle { background: none; border-color: var(--line); }
+.battle.idle .bt-t { color: var(--muted); }
+.team:not(.compact):not(.names) .driver .pane { height: 119px; overflow-y: auto; }
+.team:not(.compact):not(.names) .driver .calert { height: 44px; box-sizing: border-box; overflow: hidden; }
+.driver .calert .t { min-width: 0; }
+.driver .calert .t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* aba CARRO: a lista rola e o ABANDONAR fica sempre à vista embaixo */
+.team:not(.compact):not(.names) .driver .pane[data-pane="car"]:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
+.driver .pane[data-pane="car"] .carlist { flex: 1; min-height: 0; overflow-y: auto; }
+.driver .pane[data-pane="car"] .retirebtn { flex: none; align-self: flex-start; }
+.dial .opts { cursor: pointer; touch-action: none; }
+.dial .opts:active::before { transform: scale(.97); }
+/* Ultrapassagem compacta: as 5 cargas num arco em volta do botão, o ⚡ embaixo (só no MANUAL) */
+
+.otctl .opts button.otgo { left: 50%; right: auto; top: 45px; width: 14px; height: 14px; margin-left: -7px; padding: 0; font-size: 8px; line-height: 14px; text-align: center; transform: none; z-index: 3; color: #ffd23b; border-radius: 50%; box-shadow: 0 2px 0 #000, 0 0 0 2px #2a2c31; }
+.otctl .opts button.otgo:active { transform: scale(.94); }
+.otctl .opts button.otgo.live:not([disabled]) { color: #ffd23b; box-shadow: 0 2px 0 #000, 0 0 0 2px #ffd23b, 0 0 12px #ffd23b; }
+.otctl .opts button.otgo[disabled] { opacity: .45; }
+.otctl .pips { position: absolute; inset: 0; display: block; pointer-events: none; }
+.otctl .pips i { position: absolute; box-shadow: 0 0 5px #ffd23b88; }
+.otctl .pips i.used { box-shadow: none; }
+.otctl.on .opts::before { box-shadow: 0 2px 0 #000, inset 0 0 0 2px #2a2c31, 0 0 10px #ffd23b55; }
+/* LEDs da ultrapassagem: cápsulas deitadas ao longo do arco, vidro escuro quando gastas, flash ao gastar, pulsam com a carga ligada */
+.otctl .pips i { width: 9px; height: 4px; border-radius: 2px; background: linear-gradient(#fff8cc, #ffd23b 55%, #c48a00); box-shadow: 0 0 0 1px #000, 0 0 6px #ffd23b99; transform: rotate(var(--r)); transition: background .25s, box-shadow .25s; }
+.otctl .pips i.used { background: linear-gradient(#2e2a1d, #15130c); box-shadow: 0 0 0 1px #000, inset 0 1px 1px #000; transform: rotate(var(--r)); }
+.otctl .pips i.just { animation: otspent .6s ease-out; }
+@keyframes otspent { 0% { background: #fff8cc; box-shadow: 0 0 0 1px #000, 0 0 12px #ffd23b; transform: rotate(var(--r)) scale(1.5); } }
+.otctl.on .pips i:not(.used) { animation: otpulse 1.1s ease-in-out infinite; }
+@keyframes otpulse { 50% { box-shadow: 0 0 0 1px #000, 0 0 11px #ffd23b; filter: brightness(1.25); } }
+@media (prefers-reduced-motion: reduce) { .otctl .pips i.just, .otctl.on .pips i:not(.used) { animation: none; } }
+/* ⚡ da ultrapassagem: amarelo só quando dá pra apertar (MANUAL com carga); ligado brilha; no AUTO fica cinza */
+.otctl .opts button.otgo { background: radial-gradient(circle at 40% 30%, #5a5e68, #18191d 70%); box-shadow: 0 1px 1px #000, 0 0 0 1px #000, 0 0 0 2px #4a4e57; }
+.otctl .opts button.otgo:not([disabled]) { background: radial-gradient(circle at 40% 30%, #fff8cc, #ffd23b 50%, #b98000); color: #1a1200; }
+.otctl .opts button.otgo:not([disabled]):hover { filter: brightness(1.12); }
+.otctl .opts button.otgo.live:not([disabled]) { background: radial-gradient(circle at 40% 30%, #fff8cc, #ffd23b 50%, #b98000); color: #1a1200; box-shadow: 0 1px 1px #000, 0 0 0 1px #000, 0 0 10px #ffd23b; }
+/* borda amarela do botão quando a carga está ligada: começa cheia e vai se consumindo até o fim da volta */
+.otctl .otring { position: absolute; z-index: 1; left: 50%; top: 39px; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .25s;
+  background: conic-gradient(#ffd23b calc(var(--otp, 0) * 360deg), #ffd23b22 0);
+  -webkit-mask: radial-gradient(circle, transparent 14.5px, #000 15px, #000 17.5px, transparent 18px); mask: radial-gradient(circle, transparent 14.5px, #000 15px, #000 17.5px, transparent 18px);
+  filter: drop-shadow(0 0 4px #ffd23b); }
+.otctl.on .otring { opacity: 1; }
+/* faixa da briga com os dois lados fixos: ▲ frente + ATACAR, ▼ trás + DEFENDER, ⚡ no fim */
+.battle .bt-s { font-size: 11px; white-space: nowrap; min-width: 56px; }
+.battle .bt-s b { font-variant-numeric: tabular-nums; margin-left: 2px; }
+.battle .bt-s.off { color: var(--muted); opacity: .6; }
+.battle .otb { margin-left: auto; }
+.team.compact .battle .bt-s { font-size: 10px; min-width: 46px; }
+.battle button { white-space: nowrap; }
+/* faixa da briga com largura fixa: nada muda de tamanho quando o texto muda */
+.battle .bt-s { width: 60px; min-width: 0; flex: none; overflow: hidden; text-overflow: ellipsis; }
+.team.compact .battle .bt-s { width: 48px; }
+.battle button { position: relative; flex: none; }
+.battle button[data-l]:not([data-l=""])::after { content: attr(data-l); position: absolute; top: -7px; right: -5px; padding: 0 3px; border-radius: 6px; background: #ffd23b; color: #111; font-size: 8.5px; line-height: 12px; font-weight: 700; }
+.battle .otb { min-width: 36px; }
+/* ícones de linha (src/ui/icons.ts) */
+.ico { width: 1.2em; height: 1.2em; vertical-align: -.25em; flex: none; }
+.driver .ctabs button .ico { margin-right: 4px; }
+.driver .ctabs button { white-space: nowrap; }
+.uc .ico, .chip .ico { width: 14px; height: 14px; color: #ff6b5e; }
+/* aba INFO: rivais, ritmo comparado e chuva */
+.infolist { display: grid; gap: 3px; }
+.irow { display: flex; align-items: center; gap: 6px; min-height: 22px; font-size: 11.5px; white-space: nowrap; }
+.irow .iw { width: 54px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+.irow .it { width: 24px; color: var(--muted); }
+.irow .ig { width: 42px; font-variant-numeric: tabular-nums; }
+.irow b { font-weight: 700; }
+.irow b.good { color: var(--ok); }
+.irow b.bad { color: var(--soft); }
+.irow small { color: var(--muted); font-size: 10.5px; margin-left: auto; }
+.irow.off { color: var(--muted); }
+.irow.rain { color: #9fc4ff; gap: 6px; }
+.irow.rain button { margin-left: auto; padding: 3px 7px; background: #2f8cff; color: #fff; border: 0; font: 700 10px var(--pix, monospace); cursor: pointer; }
+.irow .tyre { transform: scale(.85); }
+/* BOX: janela de parada, onde volta e Plano B */
+.pwin { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.pwin .lbl { display: inline-flex; align-items: center; gap: 3px; width: 58px; }
+.pwbar { position: relative; flex: 1; height: 8px; background: #0b0e14; border: 1px solid var(--line); }
+.pwbar i { position: absolute; top: -1px; bottom: -1px; }
+.pwbar .pw-w { background: #3bd16f99; }
+.pwbar .pw-n { width: 2px; background: #fff; }
+.pwbar .pw-p { width: 3px; background: #ffd23b; }
+.pwbar .pw-p[hidden] { display: none; }
+.pwtxt { width: 50px; text-align: right; font-size: 10.5px; }
+.rejoin { min-height: 16px; margin-top: 3px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rejoin b { color: var(--text, #fff); }
+.planhead .plansum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.planhead .pb { display: flex; gap: 3px; margin: 0 4px; }
+.planhead .btn.small { padding: 2px 6px; }
+.driver .pane[data-pane="box"] .row2, .driver .pane[data-pane="box"] .fuelrow { margin-bottom: 1px; }
+.driver .pane[data-pane="box"] .fuelrow .btn.small, .driver .pane[data-pane="box"] .stepper button { padding-top: 1px; padding-bottom: 1px; }
+/* humor do piloto ao lado do nome */
+.driver .nm .mood .ico { width: 19px; height: 19px; margin-left: 6px; vertical-align: -4px; }
+.md-feliz { color: var(--ok); }
+.md-normal { color: var(--muted); }
+.md-bravo { color: var(--soft); }
+/* COMPLETO: o CHAMAR PRO BOX fica no canto de baixo da coluna do carro, embaixo do tempo */
+.team:not(.compact):not(.names) .driver .statuscol { padding-bottom: 46px; }
+.team:not(.compact):not(.names) .driver > .boxrow { position: absolute; grid-column: auto; grid-row: auto; left: 8px; bottom: 7px; width: 152px; margin: 0; }
+.team:not(.compact):not(.names) .driver > .boxrow .boxbtn { width: 100%; height: 42px; padding: 2px 5px; font-size: 10.5px; line-height: 1.2; overflow: hidden; white-space: normal; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0 4px; text-align: center; }
+.team:not(.compact):not(.names) .driver.panel { box-sizing: border-box; height: 273px; }
+.team:not(.compact):not(.names) .driver.panel { width: 520px; grid-template-columns: 152px minmax(0, 1fr); }
+/* triângulos de dano embaixo do carro: um por problema, até 2 linhas */
+.uc .dmgs.all { flex-wrap: wrap; justify-content: center; max-width: 132px; row-gap: 3px; }
+/* botão do box com ícones (pneu e combustível) */
+.boxbtn .tyre { transform: scale(.8); margin: 0 1px; }
+.boxbtn .ico { width: 13px; height: 13px; margin: 0 1px 0 4px; vertical-align: -2px; }
+/* COMPLETO: as abas viram abas de pasta EM CIMA do card (ganha a linha das abas lá dentro) */
+.team:not(.compact):not(.names) .driver .ctabs { position: absolute; grid-column: auto; grid-row: auto; top: -27px; left: 170px; right: 6px; margin: 0; border: 0; gap: 3px; }
+.team:not(.compact):not(.names) .driver .ctabs button { flex: 1; padding: 5px 0 4px; background: #11151d; border: 2px solid var(--line); border-bottom: 0; border-radius: 7px 7px 0 0; margin: 0; box-shadow: 0 -2px 0 #000; }
+.team:not(.compact):not(.names) .driver .ctabs button.on { background: var(--panel-solid, #141924); color: var(--text, #fff); border-color: var(--accent); border-bottom: 0; box-shadow: 0 -2px 0 #000, inset 0 2px 0 var(--accent); }
+.team:not(.compact):not(.names) .teamwrap .team, .teamwrap .team:not(.compact):not(.names) { margin-top: 28px; }
+/* COMPLETO: coluna do carro mais baixa (pneu e combustível lado a lado, carro um pouco menor) */
+.team:not(.compact):not(.names) .driver .uc { grid-template-columns: 1fr 1fr; }
+.team:not(.compact):not(.names) .driver .uc .ucd { grid-column: 1 / -1; }
+.team:not(.compact):not(.names) .driver .carstatus { width: 66px; }
+/* % dos pneus ao lado de cada roda, maior (vaza pra fora do desenho) */
+.carstatus { overflow: visible; }
+.carstatus .tlabel.side { font-size: 11px; font-weight: 700; }
+.carstatus .tlabel.l { text-anchor: end; }
+.carstatus .tlabel.r { text-anchor: start; }
+/* aba PILOTO: a Equipe fica no pé da aba, centralizada */
+.driver .pane[data-pane="race"]:not([hidden]) { display: flex; flex-direction: column; }
+.driver .pane[data-pane="race"] > .row2 { margin: auto 0 0; justify-content: center; align-items: center; gap: 8px; }
+.driver .pane[data-pane="race"] > .row2 .lbl { width: auto; }
+.driver .pane[data-pane="race"] > .row2 .seg { flex: 0 1 300px; }
+/* COMPLETO: ATACAR/DEFENDER só na aba PILOTO; nas outras abas o espaço da faixa (35 + 5 px) vai pra aba */
+.team:not(.compact):not(.names) .driver.panel:not([data-tab="race"]) > .battle { display: none !important; }
+.team:not(.compact):not(.names) .driver.panel:not([data-tab="race"]) .pane { height: 159px; }
+/* aba ESTRATÉGIA: regras com liga/desliga e número ajustável */
+.stratlist { display: grid; gap: 2px; }
+.srow { display: flex; align-items: center; gap: 7px; min-height: 20px; font-size: 11px; color: var(--muted); }
+.srow.on { color: var(--text, #fff); }
+.srow .sw { position: relative; flex: none; width: 26px; height: 14px; padding: 0; border: 0; border-radius: 7px; background: #2a3242; cursor: pointer; transition: background .15s; }
+.srow .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: #8a93a6; transition: transform .18s cubic-bezier(.23, 1, .32, 1), background .15s; }
+.srow.on .sw { background: #3bd16f; }
+.srow.on .sw::after { transform: translateX(12px); background: #fff; }
+.srow .st { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow .st b { color: #ffd23b; }
+.srow .stp { display: flex; gap: 2px; }
+.srow .stp button { width: 18px; height: 16px; padding: 0; border: 1px solid var(--line); background: #1b2130; color: var(--text, #fff); font-size: 11px; line-height: 14px; cursor: pointer; }
+/* 5 abas em cima do card: largura pelo conteúdo */
+.team:not(.compact):not(.names) .driver .ctabs button { flex: 1 1 auto; padding: 5px 5px 4px; font-size: 10.5px; letter-spacing: .02em; }
+/* "até o fim" do combustível: neutro (não é alerta), contorno amarelo quando é o escolhido */
+.driver [data-fuelauto].primary { background: #1b2130; color: var(--text, #fff); border-color: #ffd23b; box-shadow: inset 0 0 0 1px #ffd23b; }
+.carlist .crow.info { color: var(--muted); }
+.carlist .crow.info .ico { width: 16px; height: 14px; flex: none; margin-top: 1px; }
+/* temperatura do pneu ao lado do % (embaixo do carro e no chip do compacto) */
+.ttemp { display: inline-flex; }
+.ttemp .ico { width: 14px; height: 14px; }
+.ttemp.frio { color: #4aa3ff; }
+.ttemp.ideal { color: var(--ok); }
+.ttemp.quente { color: var(--soft); }
+.chip .ttemp .ico, .uc .ttemp .ico { color: inherit; }
+/* tabela de posições: a linha que desliza/pula na troca de posição não pode criar barra de rolagem
+   (a lista corta o que passa da borda; a tabela só rola de verdade em tela baixa) */
+.board { overflow-x: hidden; }
+.board .rows { overflow: clip; overflow-clip-margin: 2px; }
+/* BOX: pneus como ícone; editor do plano abre POR CIMA das informações da aba (no lugar delas) */
+.driver .seg.next button .tyre, .driver .seg.pet button .tyre { transform: scale(.85); }
+.driver .seg.next button { display: flex; align-items: center; justify-content: center; }
+.driver .pane[data-pane="box"] { position: relative; }
+.driver .pane[data-pane="box"] .planedit { position: absolute; inset: 0; z-index: 5; overflow-y: auto; padding: 3px 2px; background: var(--panel-solid, #141924); }
+.planedit .pehead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; font-size: 11.5px; }
+.planedit .stops { display: grid; gap: 3px; }
+.planedit .stop.pe { display: flex; align-items: center; gap: 5px; padding: 3px 5px; font-size: 11px; white-space: nowrap; }
+.planedit .stop.pe > b { width: 50px; }
+.planedit .stop.pe .stepper { display: inline-flex; align-items: center; gap: 2px; }
+.planedit .stop.pe .stepper b { min-width: 26px; text-align: center; }
+.planedit .stop.pe .stepper button { padding: 0 5px; }
+.planedit .stop.pe .stepper button[disabled] { opacity: .3; }
+.planedit .stop.pe .seg.pet { display: flex; gap: 1px; }
+.planedit .stop.pe .seg.pet button { padding: 1px 2px; display: flex; }
+.planedit .stop.pe .ico { width: 13px; height: 13px; color: #ff6b5e; }
+.planedit .stop.pe [data-act="del"] { margin-left: auto; padding: 1px 6px; }
+.planedit > [data-act="add"] { margin-top: 4px; }
+.planedit > [data-act="add"][disabled] { opacity: .4; }
+/* pneu escolhido no BOX/editor: fundo escuro e uma LINHA na cor do pneu (com fundo da cor do pneu o ícone sumia) */
+.driver .seg.next button.on, .planedit .seg.pet button.on { background: #262d3d; border-color: var(--line); box-shadow: inset 0 -3px 0 var(--tline, #fff); }
+.driver .seg button.tS { --tline: var(--soft); }
+.driver .seg button.tM { --tline: var(--med); }
+.driver .seg button.tH { --tline: var(--hard); }
+.driver .seg button.tI { --tline: var(--inter); }
+.driver .seg button.tW { --tline: var(--wetc); }
+.planedit .stop.pe { gap: 4px; padding: 2px 4px; }
+.planedit .stop.pe > b { width: 18px; }
+.planedit .stop.pe .stepper button { padding: 0 4px; min-width: 0; }
+.planedit .stop.pe .stepper b { min-width: 24px; }
+.planedit .stop.pe .seg.pet button { padding: 1px 1px; }
+.planedit .stop.pe .seg.pet .tyre { transform: scale(.75); }
+.planedit .stop.pe .stepper button { width: 20px; height: 22px; padding: 0; font-size: 12px; }
+.planedit .stop.pe [data-act="del"] { width: 22px; height: 22px; padding: 0; flex: none; }
+.planedit .stop.pe .seg.pet { flex: none; }
+/* editor do plano sem barra de rolagem: até 5 paradas cabem na altura da aba */
+.driver .pane[data-pane="box"] .planedit { overflow: hidden; }
+.planedit .pehead { margin-bottom: 2px; }
+.planedit .pehead span { display: flex; gap: 4px; }
+.planedit .pehead .btn.small { padding: 2px 7px; }
+.planedit .pehead [data-act="add"][disabled] { opacity: .4; }
+.planedit .stops { gap: 2px; }
+.planedit .stop.pe { min-height: 0; padding: 1px 4px; }
+.planedit .stop.pe .stepper button, .planedit .stop.pe [data-act="del"] { height: 20px; }
+.planedit .pehead .btn.small { padding: 1px 6px; font-size: 10px; }
+.planedit .stop.pe { padding: 0 4px; }
+.planedit .stop.pe .seg.pet button { height: 19px; padding: 0 1px; }
+.planedit .stop.pe .stepper button, .planedit .stop.pe [data-act="del"] { height: 19px; }
+.driver .pane[data-pane="box"] .planedit { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+/* ESCALA DA INTERFACE (Configurações > TELA; render/display.ts): a tela da corrida cresce/encolhe com a tela do
+   jogador (referência 1600×900) — cada peça presa na borda escala no próprio canto */
+.board, .topbar, .raceinfo, .feed, .mini.panel, .banner, .racecorner, .helpbtns, .musicplayer, .chat, .toast, .floatgear, .reqbox:not(.incard) { zoom: var(--ui-zoom, 1); }
+.board { max-height: none; overflow: hidden; }
+/* painel dos pilotos centralizado no espaço LIVRE entre a tabela de posições (~342 px) e o minimapa (~254 px), não na
+   tela (o left do próprio painel é multiplicado pelo zoom dele, por isso a divisão) */
+.teamwrap { left: calc(50% + 44px * var(--ui-zoom, 1) / var(--hud-zoom, 1)); }
+@media (max-width: 900px) { .teamwrap { left: 12px; } }
+/* ---- canto direito: CORRIDA e mensagens com resumo de uma linha ---- */
+.raceinfo .head { display: flex; justify-content: space-between; align-items: center; }
+.raceinfo .infomin { background: none; border: 0; color: #fff; font-size: 12px; padding: 0 0 0 8px; cursor: pointer; line-height: 1; }
+.raceinfo.resumo .body { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.raceinfo.resumo .oneline { color: var(--text, #fff) !important; text-align: left !important; }
+.feedmin { position: fixed; top: 236px; right: 276px; z-index: 6; background: var(--panel); border: 1px solid var(--line); color: var(--muted); font-size: 11px; padding: 3px 6px; cursor: pointer; zoom: var(--ui-zoom, 1); }
+.raceinfo.resumo ~ .feed { top: 88px; }
+.raceinfo.resumo ~ .feedmin { top: 88px; }
+.feed.resumo > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---- painel: OCULTO some com os cards (fica só o seletor embaixo) ---- */
+.team.hid { display: none !important; }
+/* ---- COMPACTO com abas: só o ícone, e dentro botões curtos (PILOTO e BOX) ou a lista da aba (CARRO, INFO, ESTRATÉGIA) ---- */
+.cpane, .quick { display: none; }
+.team.compact .driver > *:not(.top):not(.mini-line):not(.boxrow):not(.calert):not(.statuscol):not(.reqbox):not(.battle):not(.leds):not(.ctabs):not(.cpane):not(.pane) { display: none !important; }
+.team.compact .driver > .pane, .team.compact .driver > .cpane { display: none !important; }
+.team.compact .driver.panel[data-tab="race"] > .cpane[data-cpane="race"], .team.compact .driver.panel[data-tab="box"] > .cpane[data-cpane="box"] { display: block !important; }
+.team.compact .driver.panel[data-tab="car"] > .pane[data-pane="car"], .team.compact .driver.panel[data-tab="info"] > .pane[data-pane="info"], .team.compact .driver.panel[data-tab="strat"] > .pane[data-pane="strat"] { display: block !important; height: 58px; overflow-y: auto; scrollbar-width: thin; font-size: 11px; }
+.team.compact .driver .ctabs { display: flex !important; margin: 2px 0 3px; }
+.team.compact .driver .ctabs .tl { display: none; }
+.team.compact .driver .ctabs button { padding: 3px 0; }
+.cpane { height: 58px; }
+.cpane .cq { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; font-size: 11px; white-space: nowrap; }
+.cpane .cl { color: var(--muted); }
+.cpane .cseg { display: inline-flex; gap: 1px; }
+.cpane .cseg button { padding: 2px 6px; font-size: 10.5px; }
+.cpane .cseg.next button { padding: 1px 3px; display: flex; }
+.cpane .cseg.next .tyre { transform: scale(.75); }
+.cpane .stepper { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.cpane .stepper button { width: 18px; height: 20px; padding: 0; }
+.cpane .stepper .ico { width: 13px; height: 13px; color: #ff6b5e; }
+.cpane .plansum { color: var(--muted); }
+.team.compact .driver .pane[data-pane="car"] .retirebtn { display: none; }
+/* ---- MÍNIMO: nome + uma linha de botões rápidos ---- */
+.team.names .driver > *:not(.top):not(.leds):not(.quick):not(.ctabs) { display: none !important; }
+.team.names .driver.panel > .quick.quick { display: flex !important; gap: 4px; margin-top: 5px; }
+.quick button { flex: 1; padding: 4px 0; font-size: 11px; font-weight: 700; background: #1b2130; color: var(--text, #fff); border: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
+.quick button.on { background: #e9edf5; color: #111; }
+.quick button[disabled] { opacity: .4; cursor: default; }
+.quick .otb.live { background: #ffd23b; color: #111; }
+.quick [data-boxq].armed { background: #ffd23b; color: #111; }
+.raceinfo.resumo { width: 260px; }
+/* COMPACTO: as abas também viram abas de pasta em cima do card (sobra espaço lá dentro) */
+.team.compact .driver .ctabs { position: absolute; grid-column: auto; grid-row: auto; top: -25px; left: 44px; right: 6px; margin: 0 !important; border: 0; gap: 3px; }
+.team.compact .driver .ctabs button { flex: 1; padding: 4px 0 3px; background: #11151d; border: 2px solid var(--line); border-bottom: 0; border-radius: 7px 7px 0 0; box-shadow: 0 -2px 0 #000; }
+.team.compact .driver .ctabs button.on { background: var(--panel-solid, #141924); border-color: var(--accent); box-shadow: 0 -2px 0 #000, inset 0 2px 0 var(--accent); }
+.teamwrap .team.compact { margin-top: 26px; }
+/* regra do usuário: os cards NÃO mudam de tamanho com mais avisos/danos — altura fixa em cada nível */
+.team.compact .driver.panel { box-sizing: border-box; height: 197px; overflow: visible; }
+.team.compact .driver .mini-line { flex-wrap: nowrap; overflow: hidden; height: 58px; align-content: flex-start; flex-wrap: wrap; }
+.team.names .driver.panel { box-sizing: border-box; height: 84px; overflow: hidden; }
+/* MÍNIMO: as abas só com ícone em cima do card, como no COMPACTO (clicar abre o COMPACTO naquela aba) */
+.team.names .driver.panel { position: relative; overflow: visible; }
+.team.names .driver .ctabs { display: flex !important; position: absolute; top: -25px; left: 44px; right: 6px; margin: 0 !important; border: 0; gap: 3px; }
+.team.names .driver .ctabs .tl { display: none; }
+.team.names .driver .ctabs button { flex: 1; padding: 4px 0 3px; background: #11151d; border: 2px solid var(--line); border-bottom: 0; border-radius: 7px 7px 0 0; box-shadow: 0 -2px 0 #000; }
+.team.names .driver .ctabs button.on { background: var(--panel-solid, #141924); border-color: var(--accent); box-shadow: 0 -2px 0 #000, inset 0 2px 0 var(--accent); }
+.teamwrap .team.names { margin-top: 26px; }
+/* MÍNIMO: a aba clicada abre num balão EM CIMA das abas (o card não muda de tamanho) */
+.team.names .driver.panel.pop[data-tab="race"] > .cpane[data-cpane="race"], .team.names .driver.panel.pop[data-tab="box"] > .cpane[data-cpane="box"],
+.team.names .driver.panel.pop[data-tab="car"] > .pane[data-pane="car"], .team.names .driver.panel.pop[data-tab="info"] > .pane[data-pane="info"], .team.names .driver.panel.pop[data-tab="strat"] > .pane[data-pane="strat"] {
+  display: block !important; position: absolute; left: 0; right: 0; bottom: calc(100% + 27px); height: auto; max-height: 150px; overflow-y: auto; scrollbar-width: thin; padding: 6px 8px; font-size: 11px;
+  background: var(--panel-solid, #141924); border: 2px solid var(--accent); box-shadow: 0 0 0 2px #000, 0 6px 16px #0008; animation: popin .18s cubic-bezier(.23, 1, .32, 1); }
+.team.names .driver.panel.pop .cpane { height: auto; }
+.team.names .driver.panel:not(.pop) .ctabs button.on { background: #11151d; border-color: var(--line); box-shadow: 0 -2px 0 #000; }
+@keyframes popin { from { opacity: 0; transform: translateY(6px); } }
+.team.names .driver .pane[data-pane="car"] .retirebtn { display: none; }
+/* COMPACTO enxuto: pneu, combustível e triângulos de dano embaixo do carrinho (como no completo), sem a linha de
+   chips; a faixa ATACAR/DEFENDER só na aba PILOTO (nas outras o espaço vai pra aba) */
+.team.compact .driver > .mini-line { display: none !important; }
+.team.compact .driver.panel { width: 350px; grid-template-columns: 58px minmax(0, 1fr); gap: 0 8px; }
+.team.compact .driver .statuscol { display: flex; flex-direction: column; align-items: center; }
+.team.compact .driver .carstatus { width: 40px; margin: 0 auto; }
+.team.compact .driver.tabbox .statuscol .carstatus { display: block !important; }
+.team.compact .driver .uc, .team.compact .driver.tabbox .uc { display: grid !important; grid-template-columns: 1fr; gap: 4px; margin: 6px 0 0; font-size: 10.5px; }
+.team.compact .driver .uc > span { gap: 3px; }
+.team.compact .driver .uc .tyre { transform: scale(.8); }
+.team.compact .driver .uc .ico { width: 12px; height: 12px; }
+.team.compact .driver .uc .dmgs.all { max-width: 58px; gap: 2px; }
+.team.compact .driver .uc .dmgi { width: 13px; height: 11px; }
+.team.compact .driver.panel:not([data-tab="race"]) > .battle { display: none !important; }
+.team.compact .driver.panel:not([data-tab="race"]) > .cpane, .team.compact .driver.panel:not([data-tab="race"]) > .pane { height: 94px !important; }
+.team.compact .driver .cpane[data-cpane="box"] .cq:last-child { white-space: normal; }
+/* COMPACTO: BOX no canto de baixo da coluna do carro (como no completo) e sem os rótulos FRENTE/ATRÁS */
+.team.compact .driver .gapsbox span { display: none; }
+.team.compact .driver .statuscol { padding-bottom: 40px; }
+.team.compact .driver > .boxrow { position: absolute; grid-column: auto; grid-row: auto; left: 6px; bottom: 6px; width: 58px; margin: 0; }
+.team.compact .driver > .boxrow .boxbtn { width: 100%; height: 34px; padding: 1px 2px; margin: 0; font-size: 9.5px; line-height: 1.15; white-space: normal; overflow: hidden; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 2px; text-align: center; }
+.team.compact .driver > .boxrow .boxbtn .tyre { transform: scale(.65); margin: -2px; }
+.team.compact .driver > .boxrow .boxbtn .ico { width: 10px; height: 10px; margin: 0; }
+.team.compact .driver.panel.follow .boxbtn::after { display: none; }
+/* COMPLETO: nas abas de leitura (INFO e ESTRATÉGIA) a coluna do carro encolhe pro formato do compacto (carrinho,
+   pneu, combustível, dano e BOX pequenos) e o texto ganha a largura; a coluna anda com transição */
+.team:not(.compact):not(.names) .driver.panel { transition: grid-template-columns .3s cubic-bezier(.23, 1, .32, 1); }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) { grid-template-columns: 58px minmax(0, 1fr); }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .carstatus { width: 40px; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .carstatus .tlabel { display: none; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .uc { grid-template-columns: 1fr; gap: 4px; font-size: 10.5px; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .uc .ucd { grid-column: auto; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .uc .dmgs.all { max-width: 56px; gap: 2px; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .colstats { display: none; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) > .boxrow { width: 56px; transition: width .3s cubic-bezier(.23, 1, .32, 1); }
+.team:not(.compact):not(.names) .driver > .boxrow { transition: width .3s cubic-bezier(.23, 1, .32, 1); }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) > .boxrow .boxbtn { font-size: 9.5px; padding: 1px 2px; height: 36px; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) > .boxrow .boxbtn .tyre { transform: scale(.65); margin: -2px; }
+.team:not(.compact):not(.names) .driver.panel:is([data-tab="info"], [data-tab="strat"]) .ctabs { left: 76px; }
+.team:not(.compact):not(.names) .driver .ctabs { transition: left .3s cubic-bezier(.23, 1, .32, 1); }
+/* na ESTRATÉGIA, com a largura nova, o texto das regras não precisa mais cortar */
+.team:not(.compact):not(.names) .driver.panel[data-tab="strat"] .srow .st { white-space: normal; }
+/* seletor de modo: a parte acesa é uma "bolinha" que desliza até o modo escolhido */
+.teamtoggle { position: relative; background: #1d2331; }
+.teamtoggle .pill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #e9edf5; pointer-events: none; transition: transform .25s cubic-bezier(0.77, 0, 0.175, 1), width .25s cubic-bezier(0.77, 0, 0.175, 1); }
+.teamtoggle button, .teamtoggle button.on { position: relative; z-index: 1; background: transparent; transition: color .2s ease; }
+.teamtoggle button.on { color: #111; border-color: transparent; }
+.teamtoggle button:first-of-type { margin-left: 0; }
+@media (prefers-reduced-motion: reduce) { .teamtoggle .pill { transition: none; } }
+/* COMPACTO mais largo e INFO/ESTRATÉGIA sem rolagem: textos curtos, regras em 2 colunas, sem a linha "Você" */
+.team.compact .driver.panel { width: 410px; }
+.srow .ss { display: none; }
+.team.compact .driver .ss b, .team.names .driver .ss b { color: #ffd23b; }
+.team.compact .driver .stratlist { grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+.team.compact .driver .srow { font-size: 10px; min-height: 18px; gap: 4px; }
+.team.compact .driver .srow .sw { width: 22px; height: 12px; }
+.team.compact .driver .srow .sw::after { width: 8px; height: 8px; }
+.team.compact .driver .srow.on .sw::after { transform: translateX(10px); }
+.team.compact .driver .srow .stp button { width: 14px; height: 14px; font-size: 10px; line-height: 12px; }
+.team.compact .driver .irow.you { display: none; }
+.team.compact .driver .irow { min-height: 20px; font-size: 10.5px; gap: 5px; }
+.team.compact .driver .irow .it { display: none; }
+.team.compact .driver .irow .iw { width: 44px; }
+.team.compact .driver .irow .ig { width: 34px; }
+.team.compact .driver .pane[data-pane="info"], .team.compact .driver .pane[data-pane="strat"] { overflow: hidden !important; }
+/* MÍNIMO: o balão cresce até caber tudo (sem rolagem); só a ESTRATÉGIA pode rolar se tiver muita regra */
+.team.names .driver.panel.pop > .cpane, .team.names .driver.panel.pop > .pane { max-height: none !important; overflow: visible !important; }
+.team.names .driver.panel.pop[data-tab="strat"] > .pane[data-pane="strat"] { max-height: 150px !important; overflow-y: auto !important; }
+.team.names .driver .stratlist { grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+.team.names .driver .srow { font-size: 10.5px; }
+.team.names .driver .pane[data-pane="car"] .carlist { overflow: visible; }
+/* ESTRATÉGIA linha a linha (compacto e mínimo), rolando só na vertical */
+.team.compact .driver .stratlist, .team.names .driver .stratlist { grid-template-columns: 1fr; gap: 2px; }
+.team.compact .driver .pane[data-pane="strat"] { overflow-x: hidden !important; overflow-y: auto !important; scrollbar-width: thin; }
+.team.names .driver.panel.pop[data-tab="strat"] > .pane[data-pane="strat"] { overflow-x: hidden !important; }
+/* COMPACTO, aba CARRO: uma linha por item (sem a explicação embaixo) e uma rolagem só, a da aba */
+.team.compact .driver .carlist { overflow: visible !important; flex: none; }
+.team.compact .driver .carlist .crow small { display: none; }
+.team.compact .driver .carlist .crow { font-size: 11px; }
+.team.compact .driver .pane[data-pane="car"] { overflow-x: hidden !important; overflow-y: auto !important; scrollbar-width: thin; }
+/* ESTRATÉGIA com o texto completo também no COMPACTO e no MÍNIMO: card do compacto mais largo e balão do mínimo
+   mais largo que o card (preso no lado de fora de cada card) */
+.team.compact .driver.panel { width: 470px; }
+.team.compact .driver .srow .st, .team.names .driver .srow .st { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team.names .driver.panel.pop[data-tab="strat"] > .pane[data-pane="strat"] { width: 440px; right: auto; }
+.team.names .driver.panel.pop:last-child[data-tab="strat"] > .pane[data-pane="strat"] { left: auto; right: 0; }
+/* MÍNIMO: o aviso do card vira a cor da borda (amarelo atenção, vermelho grave, azul informação); texto no mouse */
+.team.names .driver.panel[data-alert="warn"] { box-shadow: 0 0 0 2px #000, inset 0 0 0 2px var(--warn), 0 0 14px #ffb02e55; }
+.team.names .driver.panel[data-alert="bad"] { box-shadow: 0 0 0 2px #000, inset 0 0 0 2px var(--soft), 0 0 14px #ff3b3b66; animation: alertpulse 1.4s ease-in-out infinite; }
+.team.names .driver.panel[data-alert="info"] { box-shadow: 0 0 0 2px #000, inset 0 0 0 2px #6ea8ff, 0 0 12px #6ea8ff44; }
+@keyframes alertpulse { 50% { box-shadow: 0 0 0 2px #000, inset 0 0 0 2px var(--soft), 0 0 22px #ff3b3baa; } }
+@media (prefers-reduced-motion: reduce) { .team.names .driver.panel[data-alert="bad"] { animation: none; } }

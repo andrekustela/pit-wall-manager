@@ -68,7 +68,14 @@ const http = createServer((req, res) => {
     res.end("Servidor do Pit Wall Manager no ar. (rode `npm run build` pra servir o jogo por aqui)");
     return;
   }
-  const url = decodeURIComponent((req.url ?? "/").split("?")[0]);
+  // (endereço malformado, tipo "/%": decodeURIComponent joga erro e derrubava o servidor)
+  let url: string;
+  try {
+    url = decodeURIComponent((req.url ?? "/").split("?")[0]);
+  } catch {
+    res.writeHead(400).end();
+    return;
+  }
   let file = normalize(join(DIST, url));
   if (!file.startsWith(DIST)) {
     res.writeHead(403).end();
@@ -76,8 +83,15 @@ const http = createServer((req, res) => {
   }
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(DIST, "index.html");
   res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
-  createReadStream(file).pipe(res);
+  createReadStream(file)
+    .on("error", () => res.destroy())
+    .pipe(res);
 });
+
+// rede de segurança: um erro que escapar (de uma sala, de um arquivo) fica no log e o servidor continua de pé
+// pras outras salas
+process.on("uncaughtException", (e) => console.error("erro não tratado:", e));
+process.on("unhandledRejection", (e) => console.error("promessa rejeitada:", e));
 
 // ---------- WebSocket ----------
 
